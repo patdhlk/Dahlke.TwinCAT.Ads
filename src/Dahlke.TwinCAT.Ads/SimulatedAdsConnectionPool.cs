@@ -22,7 +22,7 @@ public sealed class SimulatedAdsConnectionPool : IHostedService, IAdsConnectionP
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Simulierter ADS-Verbindungspool startet ({Count} SPS-Ziel(e))", _targets.Count);
+        _logger.LogInformation("Simulated ADS connection pool starting ({Count} PLC target(s))", _targets.Count);
 
         foreach (var (plcId, options) in _targets)
         {
@@ -35,7 +35,7 @@ public sealed class SimulatedAdsConnectionPool : IHostedService, IAdsConnectionP
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Simulierter ADS-Verbindungspool wird gestoppt");
+        _logger.LogInformation("Simulated ADS connection pool stopping");
         foreach (var (_, conn) in _connections)
             conn.Dispose();
         _connections.Clear();
@@ -55,7 +55,7 @@ public sealed class SimulatedAdsConnectionPool : IHostedService, IAdsConnectionP
 
     public void ForceReconnect(string plcId)
     {
-        _logger.LogInformation("Simulation: ForceReconnect für {PlcId} ignoriert (immer verbunden)", plcId);
+        _logger.LogInformation("Simulation: ForceReconnect for {PlcId} ignored (always connected)", plcId);
     }
 
     public void Dispose()
