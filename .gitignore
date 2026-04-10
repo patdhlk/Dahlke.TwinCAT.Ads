@@ -1,5 +1,49 @@
-bin/
-obj/
-*.user
-*.suo
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]uild/
+bld/
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+msbuild.log
+msbuild.err
+msbuild.wrn
+
+## NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+
+## Visual Studio
 .vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+[Tt]est[Rr]esult*/
+[Dd]ebug[Pp]ublic/
+[Rr]elease[Pp]ublic/
+
+## Rider / JetBrains
+.idea/
+*.sln.iml
+
+## User-specific files
+*.userprefs
+*.DotSettings.user
+
+## OS files
+.DS_Store
+Thumbs.db
+
+## Superpowers
+docs/superpowers/
