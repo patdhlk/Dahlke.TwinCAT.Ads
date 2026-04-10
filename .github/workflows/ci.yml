@@ -29,3 +29,15 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
+
+  all_good:
+    if: always()
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all jobs passed
+        run: |
+          if [[ "${{ needs.build-and-test.result }}" != "success" ]]; then
+            echo "build-and-test failed"
+            exit 1
+          fi
