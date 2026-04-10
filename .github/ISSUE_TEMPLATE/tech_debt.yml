@@ -1,0 +1,43 @@
+name: Technical Debt
+description: Flag code that needs refactoring, cleanup, or improvement
+labels: [tech-debt]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to track technical debt — code that works but should be improved.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What needs improvement
+      description: Describe the code or pattern that should be refactored.
+    validations:
+      required: true
+
+  - type: textarea
+    id: location
+    attributes:
+      label: Location
+      description: Which files, classes, or methods are affected?
+      placeholder: e.g. src/Dahlke.TwinCAT.Ads/AdsConnectionPool.cs — StartConnectionLoop method
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Why does this matter? What problems does it cause or risk?
+      placeholder: e.g. Makes testing difficult, increases coupling, hurts readability
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-fix
+    attributes:
+      label: Proposed fix
+      description: How should this be addressed? Include a rough approach if you have one.
+    validations:
+      required: false
