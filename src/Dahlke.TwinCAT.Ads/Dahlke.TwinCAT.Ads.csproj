@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
 
     <!-- NuGet Package Metadata -->
     <PackageId>Dahlke.TwinCAT.Ads</PackageId>
@@ -11,14 +12,22 @@
     <Authors>Patrick Dahlke</Authors>
     <Description>Reusable TwinCAT ADS connection pool with health checks, reconnection, simulation mode, and ASP.NET Core integration.</Description>
     <PackageTags>TwinCAT;ADS;Beckhoff;PLC;Automation;IPC</PackageTags>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/patdhlk/Dahlke.TwinCAT.Ads</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/patdhlk/Dahlke.TwinCAT.Ads.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="7.0.172" />
-    <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="7.0.172" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.3" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.3" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="6.*" />
+    <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="6.*" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.*" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.*" />
   </ItemGroup>
 
 </Project>
