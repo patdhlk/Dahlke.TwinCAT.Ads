@@ -29,12 +29,12 @@ public sealed class AdsRouterService : BackgroundService
 
         if (string.IsNullOrEmpty(netId))
         {
-            _logger.LogInformation("Eingebetteter ADS-Router deaktiviert — verwende System-Router");
+            _logger.LogInformation("Embedded ADS router disabled — using system router");
             _readySignal.SetReady();
             return;
         }
 
-        _logger.LogInformation("Starte eingebetteten ADS-Router mit NetId {NetId}", netId);
+        _logger.LogInformation("Starting embedded ADS router with NetId {NetId}", netId);
 
         try
         {
@@ -49,11 +49,11 @@ public sealed class AdsRouterService : BackgroundService
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            _logger.LogInformation("Eingebetteter ADS-Router gestoppt");
+            _logger.LogInformation("Embedded ADS router stopped");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Eingebetteter ADS-Router fehlgeschlagen");
+            _logger.LogError(ex, "Embedded ADS router failed");
             _readySignal.SetFailed();
         }
     }

@@ -6,9 +6,9 @@ namespace Dahlke.TwinCAT.Ads;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registriert den eingebetteten ADS-Router und den Verbindungspool mit Health-Checks
-    /// und automatischer Reconnection.
-    /// <para>Erwartet die Konfigurationssektionen "AmsRouter" und "PlcTargets" in appsettings.json.</para>
+    /// Registers the embedded ADS router and connection pool with health checks
+    /// and automatic reconnection.
+    /// <para>Expects the "AmsRouter" and "PlcTargets" configuration sections in appsettings.json.</para>
     /// </summary>
     public static IServiceCollection AddTwinCatAds(this IServiceCollection services, IConfiguration configuration)
     {
@@ -26,9 +26,9 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registriert eine simulierte PLC-Verbindung für Offline-Entwicklung.
-    /// Kein ADS-Router oder TwinCAT erforderlich.
-    /// <para>Erwartet die Konfigurationssektion "PlcTargets" in appsettings.json.</para>
+    /// Registers a simulated PLC connection for offline development.
+    /// No ADS router or TwinCAT required.
+    /// <para>Expects the "PlcTargets" configuration section in appsettings.json.</para>
     /// </summary>
     public static IServiceCollection AddTwinCatAdsSimulation(this IServiceCollection services, IConfiguration configuration)
     {

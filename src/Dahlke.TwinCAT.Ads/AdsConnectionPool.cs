@@ -38,17 +38,17 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
     {
         _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        _logger.LogInformation("ADS-Verbindungspool startet, warte auf Router...");
+        _logger.LogInformation("ADS connection pool starting, waiting for router...");
         try
         {
             await _readySignal.WaitAsync(_stoppingCts.Token).ConfigureAwait(false);
         }
         catch (TaskCanceledException)
         {
-            _logger.LogWarning("ADS-Router nicht verfügbar — Verbindungspool läuft ohne Verbindungen");
+            _logger.LogWarning("ADS router not available — connection pool running without connections");
             return;
         }
-        _logger.LogInformation("ADS-Router bereit, verbinde mit {Count} SPS-Ziel(en)", _targets.Count);
+        _logger.LogInformation("ADS router ready, connecting to {Count} PLC target(s)", _targets.Count);
 
         foreach (var (plcId, options) in _targets)
         {
@@ -58,18 +58,18 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("ADS-Verbindungspool wird gestoppt...");
+        _logger.LogInformation("ADS connection pool stopping...");
 
-        // Hintergrundschleifen abbrechen
+        // Cancel background loops
         foreach (var (_, cts) in _reconnectCts)
             cts.Cancel();
 
-        // Auf Beendigung der Hintergrundschleifen warten
+        // Wait for background loops to finish
         var loopTasks = _loopTasks.Values.ToArray();
         if (loopTasks.Length > 0)
         {
             try { await Task.WhenAll(loopTasks).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken); }
-            catch { /* Timeout oder Abbruch — trotzdem aufräumen */ }
+            catch { /* Timeout or cancellation — clean up anyway */ }
         }
 
         foreach (var (_, cts) in _reconnectCts)
@@ -82,7 +82,7 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
             if (connection is AdsConnection ads)
             {
                 try { ads.Disconnect(); }
-                catch (Exception ex) { _logger.LogWarning(ex, "Fehler beim Trennen von SPS {PlcId}", plcId); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Error disconnecting from PLC {PlcId}", plcId); }
             }
             if (connection is IDisposable d) d.Dispose();
         }
@@ -108,20 +108,20 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
     {
         if (!_targets.TryGetValue(plcId, out var options))
         {
-            _logger.LogWarning("ForceReconnect: SPS {PlcId} nicht konfiguriert", plcId);
+            _logger.LogWarning("ForceReconnect: PLC {PlcId} not configured", plcId);
             return;
         }
 
-        _logger.LogInformation("ForceReconnect: Erzwinge Neuverbindung zu SPS {PlcId}", plcId);
+        _logger.LogInformation("ForceReconnect: forcing reconnection to PLC {PlcId}", plcId);
 
-        // Alte Schleife abbrechen
+        // Cancel old loop
         if (_reconnectCts.TryRemove(plcId, out var oldCts))
         {
             oldCts.Cancel();
             oldCts.Dispose();
         }
 
-        // Neue Schleife starten
+        // Start new loop
         StartConnectionLoop(plcId, options);
     }
 
@@ -141,8 +141,8 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
     }
 
     /// <summary>
-    /// Verbindungsschleife: verbindet, prueft regelmaessig die Gesundheit,
-    /// und baut bei Fehler eine neue Verbindung auf.
+    /// Connection loop: connects, periodically checks health,
+    /// and rebuilds connection on failure.
     /// </summary>
     private void StartConnectionLoop(string plcId, PlcTargetOptions options)
     {
@@ -158,28 +158,28 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
                 AdsConnection? ads = null;
                 try
                 {
-                    // Neue Verbindung erstellen
+                    // Create new connection
                     ads = (AdsConnection)_connectionFactory.Create(plcId, options);
-                    _logger.LogInformation("Verbinde mit SPS {PlcId}...", plcId);
+                    _logger.LogInformation("Connecting to PLC {PlcId}...", plcId);
                     ads.Connect();
                     _connections[plcId] = ads;
                     delay = MinReconnectDelay;
 
-                    _logger.LogInformation("SPS {PlcId} verbunden, starte Health-Check", plcId);
+                    _logger.LogInformation("PLC {PlcId} connected, starting health check", plcId);
 
-                    // Symbolbaum loggen wenn in appsettings aktiviert
+                    // Log symbol tree if enabled in appsettings
                     if (_configuration.GetValue("AdsSymbolTreeDump", false))
                         ads.LogSymbolTree();
 
-                    // Health-Check Schleife: prueft ob Verbindung noch lebt
+                    // Health check loop: checks if connection is still alive
                     while (!cts.Token.IsCancellationRequested)
                     {
                         await Task.Delay(HealthCheckInterval, cts.Token).ConfigureAwait(false);
 
                         if (!await ads.IsAliveAsync(cts.Token).ConfigureAwait(false))
                         {
-                            _logger.LogWarning("SPS {PlcId}: Health-Check fehlgeschlagen, verbinde neu...", plcId);
-                            break; // Innere Schleife verlassen -> neu verbinden
+                            _logger.LogWarning("PLC {PlcId}: health check failed, reconnecting...", plcId);
+                            break; // Exit inner loop -> reconnect
                         }
                     }
                 }
@@ -190,19 +190,19 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
                 catch (Exception ex)
                 {
                     if (cts.Token.IsCancellationRequested) break;
-                    _logger.LogWarning("SPS {PlcId}: Verbindungsfehler: {Message}, erneuter Versuch in {Delay}s",
+                    _logger.LogWarning("PLC {PlcId}: connection error: {Message}, retrying in {Delay}s",
                         plcId, ex.Message, delay.TotalSeconds);
                 }
 
-                // Alte Verbindung aufraeumen: Compare-and-swap entfernt nur die
-                // tatsächlich tote Verbindung, nicht eine bereits ersetzte neue
+                // Clean up old connection: compare-and-swap removes only the
+                // actually dead connection, not an already replaced new one
                 if (ads is not null)
                 {
                     _connections.TryRemove(new KeyValuePair<string, IAdsConnection>(plcId, ads));
 
-                    // Karenzzeit: laufende Operationen auf der alten Verbindung abschliessen lassen
+                    // Grace period: let in-flight operations on old connection finish
                     try { await Task.Delay(DisposeGracePeriod, cts.Token).ConfigureAwait(false); }
-                    catch { /* Bei Abbruch trotzdem aufräumen */ }
+                    catch { /* Clean up anyway on cancellation */ }
 
                     ads.ForceDisconnect();
                     ads.Dispose();
@@ -210,7 +210,7 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
 
                 if (cts.Token.IsCancellationRequested) break;
 
-                // Warten vor erneutem Verbindungsversuch
+                // Wait before next connection attempt
                 try { await Task.Delay(delay, cts.Token).ConfigureAwait(false); }
                 catch { break; }
 

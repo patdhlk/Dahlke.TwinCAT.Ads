@@ -30,7 +30,7 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
     {
         var amsNetId = AmsNetId.Parse(_options.AmsNetId);
         _client.Connect(amsNetId, _options.Port);
-        _logger.LogInformation("Verbunden mit SPS {PlcId} an {AmsNetId}:{Port}", PlcId, _options.AmsNetId, _options.Port);
+        _logger.LogInformation("Connected to PLC {PlcId} at {AmsNetId}:{Port}", PlcId, _options.AmsNetId, _options.Port);
     }
 
     public void Disconnect()
@@ -39,7 +39,7 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
         if (_client.IsConnected)
         {
             _client.Disconnect();
-            _logger.LogInformation("Getrennt von SPS {PlcId}", PlcId);
+            _logger.LogInformation("Disconnected from PLC {PlcId}", PlcId);
         }
     }
 
@@ -60,7 +60,7 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
             return Task.FromResult<object?>(value);
         }
 
-        throw new AdsErrorException($"Symbol '{symbolPath}' nicht gefunden.", AdsErrorCode.DeviceSymbolNotFound);
+        throw new AdsErrorException($"Symbol '{symbolPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
     }
 
     public async Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
@@ -112,8 +112,8 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
     }
 
     /// <summary>
-    /// Prüft ob die Verbindung tatsächlich funktioniert (nicht nur IsConnected).
-    /// Gibt false zurück wenn ReadState fehlschlägt.
+    /// Checks whether the connection is actually functional (not just IsConnected).
+    /// Returns false if ReadState fails.
     /// </summary>
     public async Task<bool> IsAliveAsync(CancellationToken ct)
     {
@@ -151,7 +151,7 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Notification-Fehler für {Symbol}", symbolPath);
+                _logger.LogWarning(ex, "Notification error for {Symbol}", symbolPath);
             }
         });
 
@@ -161,12 +161,12 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
         {
             _client.AdsNotification -= handler;
             try { _client.DeleteDeviceNotification(notificationHandle.Handle); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Fehler beim Löschen der Notification für {Symbol}", symbolPath); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Error deleting notification for {Symbol}", symbolPath); }
         });
     }
 
     /// <summary>
-    /// Loggt alle PLC-Symbole (flach, rekursiv) für Diagnose nach PLC-Programmupdate.
+    /// Logs all PLC symbols (flat, recursive) for diagnostics after PLC program update.
     /// </summary>
     public void LogSymbolTree()
     {
@@ -175,14 +175,14 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
             var settings = new SymbolLoaderSettings(SymbolsLoadMode.DynamicTree);
             var loader = SymbolLoaderFactory.Create(_client, settings);
 
-            // SymbolIterator mit rekursiver Suche — wie in Beckhoff-Docs empfohlen
+            // SymbolIterator with recursive search — as recommended in Beckhoff docs
             var iterator = new SymbolIterator(loader.Symbols, recurse: true);
 
-            _logger.LogInformation("=== PLC-Symbolbaum ({Count} Top-Level) ===", loader.Symbols.Count);
+            _logger.LogInformation("=== PLC symbol tree ({Count} top-level) ===", loader.Symbols.Count);
             foreach (var sym in iterator)
             {
                 var depth = sym.InstancePath.Count(c => c == '.');
-                // GVL_Visu und PRGMain bis Tiefe 3 loggen (Struct-Member sichtbar)
+                // Log GVL_Visu and PRGMain up to depth 3 (struct members visible)
                 var isRelevant = sym.InstancePath.StartsWith("GVL_Visu") ||
                                  sym.InstancePath.StartsWith("PRGMain");
                 var maxDepth = isRelevant ? 3 : 1;
@@ -192,11 +192,11 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
                         sym.InstancePath, sym.TypeName, sym.ByteSize);
                 }
             }
-            _logger.LogInformation("=== Ende Symbolbaum ===");
+            _logger.LogInformation("=== End symbol tree ===");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Fehler beim Lesen des Symbolbaums");
+            _logger.LogWarning(ex, "Error reading symbol tree");
         }
     }
 

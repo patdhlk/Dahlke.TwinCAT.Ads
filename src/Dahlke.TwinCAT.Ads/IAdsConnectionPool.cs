@@ -6,8 +6,8 @@ public interface IAdsConnectionPool
     IReadOnlyDictionary<string, IAdsConnection> GetAllConnections();
 
     /// <summary>
-    /// Erzwingt einen Neuaufbau der Verbindung zur SPS.
-    /// Beendet die aktuelle Verbindungsschleife und startet eine neue.
+    /// Forces a reconnection to the PLC.
+    /// Terminates the current connection loop and starts a new one.
     /// </summary>
     void ForceReconnect(string plcId);
 }

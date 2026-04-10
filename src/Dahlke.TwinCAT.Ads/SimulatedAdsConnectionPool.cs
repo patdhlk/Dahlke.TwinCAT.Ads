@@ -1,8 +1,8 @@
 namespace Dahlke.TwinCAT.Ads;
 
 /// <summary>
-/// Simulierter Verbindungspool für Offline-Entwicklung.
-/// Erstellt eine einzige SimulatedAdsConnection pro PLC-Ziel.
+/// Simulated connection pool for offline development.
+/// Creates a single SimulatedAdsConnection per PLC target.
 /// </summary>
 public sealed class SimulatedAdsConnectionPool : IHostedService, IAdsConnectionPool, IDisposable
 {
