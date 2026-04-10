@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- NuGet Package Metadata -->
+    <PackageId>Dahlke.TwinCAT.Ads</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Patrick Dahlke</Authors>
+    <Description>Reusable TwinCAT ADS connection pool with health checks, reconnection, simulation mode, and ASP.NET Core integration.</Description>
+    <PackageTags>TwinCAT;ADS;Beckhoff;PLC;Automation;IPC</PackageTags>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="7.0.172" />
+    <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="7.0.172" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.3" />
+  </ItemGroup>
+
+</Project>
