@@ -58,6 +58,19 @@ internal sealed class FakeManagedConnection : IManagedConnection
     public int DisposeCount;
     public int IsAliveCount;
 
+    /// <summary>Number of times <see cref="LogSymbolTree"/> was called.</summary>
+    public int LogSymbolTreeCount;
+
+    private SymbolDumpOptions? _lastLogSymbolTreeOptions;
+
+    /// <summary>
+    /// The <see cref="SymbolDumpOptions"/> passed to the most recent
+    /// <see cref="LogSymbolTree"/> call, or <see langword="null"/> if it
+    /// has not been called yet. Written on the pool's loop thread,
+    /// read on the test thread — hence the volatile access.
+    /// </summary>
+    public SymbolDumpOptions? LastLogSymbolTreeOptions => Volatile.Read(ref _lastLogSymbolTreeOptions);
+
     public bool IsConnected { get; private set; }
 
     // ---- Synchronisation hooks ------------------------------------------
@@ -129,8 +142,10 @@ internal sealed class FakeManagedConnection : IManagedConnection
         return Task.FromResult(result);
     }
 
-    public void LogSymbolTree()
+    public void LogSymbolTree(SymbolDumpOptions options)
     {
+        Interlocked.Increment(ref LogSymbolTreeCount);
+        Volatile.Write(ref _lastLogSymbolTreeOptions, options);
     }
 
     public void Dispose()

@@ -166,27 +166,27 @@ public sealed class AdsConnection : IManagedConnection
     }
 
     /// <summary>
-    /// Logs all PLC symbols (flat, recursive) for diagnostics after PLC program update.
+    /// Logs the PLC symbol tree for diagnostics.
+    /// Symbols are included when their depth (dot-count in <see cref="ISymbol.InstancePath"/>)
+    /// is at most <see cref="SymbolDumpOptions.MaxDepth"/> and, when
+    /// <see cref="SymbolDumpOptions.Prefixes"/> is non-empty, the path starts with
+    /// at least one configured prefix (case-insensitive).
+    /// Filter logic is delegated to <see cref="SymbolDumpFilter.ShouldInclude"/>.
     /// </summary>
-    public void LogSymbolTree()
+    public void LogSymbolTree(SymbolDumpOptions options)
     {
         try
         {
             var settings = new SymbolLoaderSettings(SymbolsLoadMode.DynamicTree);
             var loader = SymbolLoaderFactory.Create(_client, settings);
 
-            // SymbolIterator with recursive search — as recommended in Beckhoff docs
+            // SymbolIterator with recursive search — as recommended in Beckhoff docs.
             var iterator = new SymbolIterator(loader.Symbols, recurse: true);
 
             _logger.LogInformation("=== PLC symbol tree ({Count} top-level) ===", loader.Symbols.Count);
             foreach (var sym in iterator)
             {
-                var depth = sym.InstancePath.Count(c => c == '.');
-                // Log GVL_Visu and PRGMain up to depth 3 (struct members visible)
-                var isRelevant = sym.InstancePath.StartsWith("GVL_Visu") ||
-                                 sym.InstancePath.StartsWith("PRGMain");
-                var maxDepth = isRelevant ? 3 : 1;
-                if (depth <= maxDepth)
+                if (SymbolDumpFilter.ShouldInclude(sym.InstancePath, options))
                 {
                     _logger.LogInformation("  {Path} [{Type}, {Size}B]",
                         sym.InstancePath, sym.TypeName, sym.ByteSize);

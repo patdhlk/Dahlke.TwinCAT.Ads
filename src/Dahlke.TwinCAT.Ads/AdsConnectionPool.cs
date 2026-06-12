@@ -6,10 +6,10 @@ namespace Dahlke.TwinCAT.Ads;
 internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDisposable
 {
     private readonly Dictionary<string, PlcTargetOptions> _targets;
+    private readonly SymbolDumpOptions _symbolDump;
     private readonly IAdsConnectionFactory _connectionFactory;
     private readonly AdsRouterReadySignal _readySignal;
     private readonly ILogger<AdsConnectionPool> _logger;
-    private readonly IConfiguration _configuration;
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<string, IManagedConnection> _connections = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _reconnectCts = new();
@@ -22,18 +22,18 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     private static readonly TimeSpan DisposeGracePeriod = TimeSpan.FromSeconds(2);
 
     public AdsConnectionPool(
-        IOptions<Dictionary<string, PlcTargetOptions>> targets,
+        IOptions<TwinCatAdsOptions> options,
         IAdsConnectionFactory connectionFactory,
         AdsRouterReadySignal readySignal,
         ILogger<AdsConnectionPool> logger,
-        IConfiguration configuration,
         TimeProvider timeProvider)
     {
-        _targets = targets.Value;
+        var value = options.Value;
+        _targets = value.Targets;
+        _symbolDump = value.Diagnostics.SymbolDump;
         _connectionFactory = connectionFactory;
         _readySignal = readySignal;
         _logger = logger;
-        _configuration = configuration;
         _timeProvider = timeProvider;
     }
 
@@ -164,9 +164,9 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
                     _logger.LogInformation("PLC {PlcId} connected, starting health check", plcId);
 
-                    // Log symbol tree if enabled in appsettings
-                    if (_configuration.GetValue("AdsSymbolTreeDump", false))
-                        ads.LogSymbolTree();
+                    // Log symbol tree if enabled in options
+                    if (_symbolDump.Enabled)
+                        ads.LogSymbolTree(_symbolDump);
 
                     // Health check loop: checks if connection is still alive
                     while (!cts.Token.IsCancellationRequested)

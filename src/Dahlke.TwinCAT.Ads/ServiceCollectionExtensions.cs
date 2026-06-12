@@ -13,9 +13,6 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddTwinCatAds(this IServiceCollection services, IConfiguration configuration)
     {
-        services.Configure<Dictionary<string, PlcTargetOptions>>(
-            configuration.GetSection("PlcTargets"));
-
         ConfigureTwinCatAdsOptions(services, configuration);
 
         services.TryAddSingleton(TimeProvider.System);
@@ -36,9 +33,6 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddTwinCatAdsSimulation(this IServiceCollection services, IConfiguration configuration)
     {
-        services.Configure<Dictionary<string, PlcTargetOptions>>(
-            configuration.GetSection("PlcTargets"));
-
         ConfigureTwinCatAdsOptions(services, configuration);
 
         services.TryAddSingleton(TimeProvider.System);
@@ -53,10 +47,6 @@ public static class ServiceCollectionExtensions
     /// Registers <see cref="TwinCatAdsOptions"/> and populates it from the
     /// existing configuration layout.  Called by both
     /// <see cref="AddTwinCatAds"/> and <see cref="AddTwinCatAdsSimulation"/>.
-    /// Nothing consumes these options yet — they are introduced here so that
-    /// callers can already inject <see cref="Microsoft.Extensions.Options.IOptions{TOptions}"/>
-    /// for <see cref="TwinCatAdsOptions"/> before the internal services migrate
-    /// to it.
     /// </summary>
     private static void ConfigureTwinCatAdsOptions(
         IServiceCollection services,

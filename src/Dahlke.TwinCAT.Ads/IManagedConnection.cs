@@ -10,5 +10,10 @@ internal interface IManagedConnection : IAdsConnection, IDisposable
     void Disconnect();
     Task<bool> IsAliveAsync(CancellationToken ct);
     void ForceDisconnect();
-    void LogSymbolTree();
+
+    /// <summary>
+    /// Logs the PLC symbol tree for diagnostics.
+    /// Only symbols whose depth and prefix match <paramref name="options"/> are emitted.
+    /// </summary>
+    void LogSymbolTree(SymbolDumpOptions options);
 }

@@ -1,5 +1,4 @@
 using Dahlke.TwinCAT.Ads.Tests.Fakes;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -35,23 +34,30 @@ public class AdsConnectionPoolTests
 
     private static (AdsConnectionPool pool, FakeConnectionFactory factory, FakeTimeProvider time, AdsRouterReadySignal signal)
         CreatePool(params string[] plcIds)
+        => CreatePool(symbolDump: null, plcIds);
+
+    private static (AdsConnectionPool pool, FakeConnectionFactory factory, FakeTimeProvider time, AdsRouterReadySignal signal)
+        CreatePool(SymbolDumpOptions? symbolDump, params string[] plcIds)
     {
         if (plcIds.Length == 0) plcIds = ["plc1"];
 
-        var targets = new Dictionary<string, PlcTargetOptions>();
+        var targets = new Dictionary<string, PlcTargetOptions>(StringComparer.OrdinalIgnoreCase);
         foreach (var id in plcIds)
             targets[id] = new PlcTargetOptions { DisplayName = id, AmsNetId = "1.2.3.4.5.6" };
+
+        var adsOptions = new TwinCatAdsOptions { Targets = targets };
+        if (symbolDump is not null)
+            adsOptions.Diagnostics.SymbolDump = symbolDump;
 
         var factory = new FakeConnectionFactory();
         var time = new FakeTimeProvider();
         var signal = new AdsRouterReadySignal();
 
         var pool = new AdsConnectionPool(
-            Options.Create(targets),
+            Options.Create(adsOptions),
             factory,
             signal,
             NullLogger<AdsConnectionPool>.Instance,
-            new ConfigurationBuilder().Build(),
             time);
 
         return (pool, factory, time, signal);

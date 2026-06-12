@@ -71,7 +71,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     void IManagedConnection.Disconnect() { }
     Task<bool> IManagedConnection.IsAliveAsync(CancellationToken ct) => Task.FromResult(true);
     void IManagedConnection.ForceDisconnect() { }
-    void IManagedConnection.LogSymbolTree() { }
+    void IManagedConnection.LogSymbolTree(SymbolDumpOptions options) { }
 
     public void Dispose() { }
 

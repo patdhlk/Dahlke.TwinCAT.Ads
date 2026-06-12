@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+
 namespace Dahlke.TwinCAT.Ads;
 
 /// <summary>
@@ -12,10 +14,10 @@ public sealed class SimulatedAdsConnectionPool : IHostedService, IAdsConnectionP
     private readonly Dictionary<string, SimulatedAdsConnection> _connections = new(StringComparer.OrdinalIgnoreCase);
 
     public SimulatedAdsConnectionPool(
-        Microsoft.Extensions.Options.IOptions<Dictionary<string, PlcTargetOptions>> targets,
+        IOptions<TwinCatAdsOptions> options,
         ILoggerFactory loggerFactory)
     {
-        _targets = targets.Value;
+        _targets = options.Value.Targets;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<SimulatedAdsConnectionPool>();
     }
