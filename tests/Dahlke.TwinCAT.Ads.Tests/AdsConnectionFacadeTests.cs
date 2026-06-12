@@ -318,12 +318,16 @@ public class AdsConnectionFacadeTests
     }
 
     [Fact]
-    public async Task GetConnection_ReturnsFacade_BeforeConnect_AndNullForUnconfigured()
+    public async Task GetConnection_ReturnsFacade_BeforeAndAfterConnect_ThrowsForUnconfigured()
     {
         var (pool, factory, _, signal) = CreatePool("plc1");
 
-        // Before StartAsync there are no facades yet.
-        Assert.Null(pool.GetConnection("plc1"));
+        // C13: facades are created eagerly in the constructor — GetConnection is total
+        // from construction, even BEFORE StartAsync is called.
+        var facadePreStart = pool.GetConnection("plc1");
+        Assert.NotNull(facadePreStart);
+        Assert.IsType<AdsConnectionFacade>(facadePreStart);
+        Assert.False(facadePreStart.IsConnected); // no loop started yet
 
         // Connect throws persistently, so the loop never publishes a live
         // connection — the facade stays in its "before first connect" outage
@@ -333,15 +337,17 @@ public class AdsConnectionFacadeTests
         signal.SetReady();
         await pool.StartAsync(CancellationToken.None);
 
-        // Facade exists immediately, before any successful connect.
+        // Same facade instance returned post-start (identity is stable).
         var facade = pool.GetConnection("plc1");
-        Assert.NotNull(facade);
+        Assert.Same(facadePreStart, facade);
         Assert.IsType<AdsConnectionFacade>(facade);
         await fail.ConnectCalled.WaitAsync(RealTimeout);
-        Assert.False(facade!.IsConnected); // connect failed -> not connected
+        Assert.False(facade.IsConnected); // connect failed -> not connected
 
-        // Unconfigured id -> null (unchanged this commit).
-        Assert.Null(pool.GetConnection("never-configured"));
+        // C13: unconfigured id throws UnknownPlcTargetException (no longer null).
+        var ex = Assert.Throws<UnknownPlcTargetException>(() => pool.GetConnection("never-configured"));
+        Assert.Equal("never-configured", ex.PlcId);
+        Assert.Contains("plc1", ex.Message);
 
         await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);
     }

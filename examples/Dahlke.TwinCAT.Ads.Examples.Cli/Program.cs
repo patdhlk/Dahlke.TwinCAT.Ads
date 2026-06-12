@@ -35,8 +35,11 @@ Console.WriteLine();
 foreach (var (plcId, conn) in pool.GetAllConnections())
     Console.WriteLine($"  {plcId} ({conn.DisplayName}) connected: {conn.IsConnected}");
 
+// GetConnection throws UnknownPlcTargetException for an unconfigured id;
+// for a configured target it always returns the stable facade (never null).
+// Check IsConnected to detect an outage before performing operations.
 var connection = pool.GetConnection("plc1");
-if (connection is null || !connection.IsConnected)
+if (!connection.IsConnected)
 {
     Console.WriteLine("plc1 is not connected — check appsettings.json and PLC reachability.");
     await host.StopAsync();

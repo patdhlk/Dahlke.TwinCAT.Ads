@@ -27,10 +27,11 @@ app.MapGet("/plcs", (IAdsConnectionPool pool) =>
     }));
 
 // GET /plcs/plc1/state — current ADS state (Run, Stop, Config, ...).
+// GetConnection throws UnknownPlcTargetException for an unconfigured plcId;
+// use TryGetConnection for the non-throwing lookup.
 app.MapGet("/plcs/{plcId}/state", async (string plcId, IAdsConnectionPool pool, CancellationToken ct) =>
 {
-    var connection = pool.GetConnection(plcId);
-    if (connection is null)
+    if (!pool.TryGetConnection(plcId, out var connection))
         return Results.NotFound($"Unknown PLC '{plcId}'.");
     if (!connection.IsConnected)
         return Results.Problem($"PLC '{plcId}' is not connected.", statusCode: StatusCodes.Status503ServiceUnavailable);
@@ -42,8 +43,7 @@ app.MapGet("/plcs/{plcId}/state", async (string plcId, IAdsConnectionPool pool, 
 // GET /plcs/plc1/symbols/GVL.Counter — read a symbol value.
 app.MapGet("/plcs/{plcId}/symbols/{symbolPath}", async (string plcId, string symbolPath, IAdsConnectionPool pool, CancellationToken ct) =>
 {
-    var connection = pool.GetConnection(plcId);
-    if (connection is null)
+    if (!pool.TryGetConnection(plcId, out var connection))
         return Results.NotFound($"Unknown PLC '{plcId}'.");
     if (!connection.IsConnected)
         return Results.Problem($"PLC '{plcId}' is not connected.", statusCode: StatusCodes.Status503ServiceUnavailable);
@@ -55,8 +55,7 @@ app.MapGet("/plcs/{plcId}/symbols/{symbolPath}", async (string plcId, string sym
 // PUT /plcs/plc1/symbols/GVL.Counter with body {"value": 42} — write a symbol value.
 app.MapPut("/plcs/{plcId}/symbols/{symbolPath}", async (string plcId, string symbolPath, WriteRequest request, IAdsConnectionPool pool, CancellationToken ct) =>
 {
-    var connection = pool.GetConnection(plcId);
-    if (connection is null)
+    if (!pool.TryGetConnection(plcId, out var connection))
         return Results.NotFound($"Unknown PLC '{plcId}'.");
     if (!connection.IsConnected)
         return Results.Problem($"PLC '{plcId}' is not connected.", statusCode: StatusCodes.Status503ServiceUnavailable);
@@ -72,7 +71,7 @@ app.MapPut("/plcs/{plcId}/symbols/{symbolPath}", async (string plcId, string sym
 // POST /plcs/plc1/reconnect — force a reconnect of the connection loop.
 app.MapPost("/plcs/{plcId}/reconnect", (string plcId, IAdsConnectionPool pool) =>
 {
-    if (pool.GetConnection(plcId) is null)
+    if (!pool.TryGetConnection(plcId, out _))
         return Results.NotFound($"Unknown PLC '{plcId}'.");
 
     pool.ForceReconnect(plcId);

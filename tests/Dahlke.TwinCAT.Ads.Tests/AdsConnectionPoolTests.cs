@@ -122,7 +122,7 @@ public class AdsConnectionPoolTests
     /// during an outage). The facade itself is what <c>GetConnection</c> returns.
     /// </summary>
     private static IManagedConnection? CurrentOf(AdsConnectionPool pool, string plcId)
-        => ((AdsConnectionFacade)pool.GetConnection(plcId)!).CurrentForTesting;
+        => ((AdsConnectionFacade)pool.GetConnection(plcId)).CurrentForTesting;
 
     // =====================================================================
 

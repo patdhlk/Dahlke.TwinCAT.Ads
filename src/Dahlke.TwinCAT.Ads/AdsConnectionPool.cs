@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Options;
 
 namespace Dahlke.TwinCAT.Ads;
@@ -13,11 +14,15 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<string, IManagedConnection> _connections = new(StringComparer.OrdinalIgnoreCase);
 
-    // Stable per-target facades. Created eagerly in StartAsync — one per
+    // Stable per-target facades. Created EAGERLY IN THE CONSTRUCTOR — one per
     // CONFIGURED target, independent of whether (or when) that target's loop ever
-    // connects. A facade's identity never changes for the pool's lifetime; the
-    // loop pushes the live underlying connection into it via SetCurrent and clears
-    // it via ClearCurrent at exactly the points it updates _connections.
+    // connects. Creating them in the ctor (rather than StartAsync) makes
+    // GetConnection total from the moment of construction: it can return a non-null
+    // facade and never throws UnknownPlcTargetException for any configured id,
+    // even before StartAsync is called. A facade's identity never changes for the
+    // pool's lifetime; the loop pushes the live underlying connection into it via
+    // SetCurrent and clears it via ClearCurrent at exactly the points it updates
+    // _connections.
     private readonly ConcurrentDictionary<string, AdsConnectionFacade> _facades = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _reconnectCts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Task> _loopTasks = new(StringComparer.OrdinalIgnoreCase);
@@ -64,19 +69,20 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         _readySignal = readySignal;
         _logger = logger;
         _timeProvider = timeProvider;
+
+        // Eagerly create one stable facade per CONFIGURED target in the constructor
+        // so GetConnection is total from construction (before StartAsync). The
+        // facade is pure state with no I/O — creating it here is side-effect-free.
+        foreach (var (plcId, targetOptions) in _targets)
+            _facades[plcId] = new AdsConnectionFacade(plcId, targetOptions, _timeProvider);
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        // Eagerly create one stable facade per CONFIGURED target — including real
-        // targets whose loops may be skipped on router failure, and before any
-        // loop has connected. GetConnection therefore returns a non-changing
-        // facade from this point on; operations on it throw
-        // AdsConnectionUnavailableException until a connection is published.
-        foreach (var (plcId, options) in _targets)
-            _facades[plcId] = new AdsConnectionFacade(plcId, options, _timeProvider);
+        // Facades are already created in the constructor; StartAsync only starts
+        // the connection loops that push live connections into those facades.
 
         var hasRealTargets = _targets.Values.Any(t => t.Mode == ConnectionMode.Real);
 
@@ -193,14 +199,34 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         _stoppingCts = null;
     }
 
-    public IAdsConnection? GetConnection(string plcId)
+    /// <inheritdoc/>
+    public IAdsConnection GetConnection(string plcId)
     {
-        // Returns the stable per-target facade. Null only for an UNCONFIGURED id
-        // (no facade was created for it). For a configured target the facade is
-        // returned even before its loop connects or during an outage — operations
-        // on it then throw AdsConnectionUnavailableException.
-        _facades.TryGetValue(plcId, out var facade);
-        return facade;
+        // Facades are created eagerly in the constructor — one per configured target.
+        // For a configured id this is always non-null and never throws, regardless
+        // of connection state or whether StartAsync has been called.
+        if (_facades.TryGetValue(plcId, out var facade))
+            return facade;
+
+        // Unknown id: throw with the full set of configured ids so the caller can
+        // immediately see whether the problem is a typo. Keys are sorted for a
+        // stable, predictable message across runs.
+        throw new UnknownPlcTargetException(
+            plcId,
+            _targets.Keys.OrderBy(id => id, StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <inheritdoc/>
+    public bool TryGetConnection(string plcId, [NotNullWhen(true)] out IAdsConnection? connection)
+    {
+        if (_facades.TryGetValue(plcId, out var facade))
+        {
+            connection = facade;
+            return true;
+        }
+
+        connection = null;
+        return false;
     }
 
     public IReadOnlyDictionary<string, IAdsConnection> GetAllConnections()
