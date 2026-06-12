@@ -16,6 +16,8 @@ public static class ServiceCollectionExtensions
         services.Configure<Dictionary<string, PlcTargetOptions>>(
             configuration.GetSection("PlcTargets"));
 
+        ConfigureTwinCatAdsOptions(services, configuration);
+
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<AdsRouterReadySignal>();
         services.AddHostedService<AdsRouterService>();
@@ -37,11 +39,47 @@ public static class ServiceCollectionExtensions
         services.Configure<Dictionary<string, PlcTargetOptions>>(
             configuration.GetSection("PlcTargets"));
 
+        ConfigureTwinCatAdsOptions(services, configuration);
+
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<SimulatedAdsConnectionPool>();
         services.AddSingleton<IAdsConnectionPool>(sp => sp.GetRequiredService<SimulatedAdsConnectionPool>());
         services.AddHostedService(sp => sp.GetRequiredService<SimulatedAdsConnectionPool>());
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers <see cref="TwinCatAdsOptions"/> and populates it from the
+    /// existing configuration layout.  Called by both
+    /// <see cref="AddTwinCatAds"/> and <see cref="AddTwinCatAdsSimulation"/>.
+    /// Nothing consumes these options yet — they are introduced here so that
+    /// callers can already inject <see cref="Microsoft.Extensions.Options.IOptions{TOptions}"/>
+    /// for <see cref="TwinCatAdsOptions"/> before the internal services migrate
+    /// to it.
+    /// </summary>
+    private static void ConfigureTwinCatAdsOptions(
+        IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.AddOptions<TwinCatAdsOptions>()
+            .Configure(o =>
+            {
+                // Targets ← PlcTargets section (existing layout, unchanged).
+                configuration.GetSection("PlcTargets").Bind(o.Targets);
+
+                // Router.NetId ← AmsRouter:NetId (existing layout).
+                o.Router.NetId = configuration.GetSection("AmsRouter").GetValue<string>("NetId");
+
+                // SymbolDump: bind legacy key first (lower precedence), then
+                // new section over it (higher precedence wins).
+                var legacyEnabled = configuration.GetValue<bool?>("AdsSymbolTreeDump");
+                if (legacyEnabled is true)
+                    o.Diagnostics.SymbolDump.Enabled = true;
+
+                var symbolDumpSection = configuration.GetSection("AdsSymbolDump");
+                if (symbolDumpSection.Exists())
+                    symbolDumpSection.Bind(o.Diagnostics.SymbolDump);
+            });
     }
 }
