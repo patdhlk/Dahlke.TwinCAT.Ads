@@ -71,7 +71,10 @@ internal sealed class FakeManagedConnection : IManagedConnection
     /// </summary>
     public SymbolDumpOptions? LastLogSymbolTreeOptions => Volatile.Read(ref _lastLogSymbolTreeOptions);
 
-    public bool IsConnected { get; private set; }
+    // Settable so unit tests that drive the facade directly (via SetCurrent,
+    // bypassing Connect) can present a connected connection. Connect/Disconnect
+    // also write it for the pool-loop tests.
+    public bool IsConnected { get; set; }
 
     // Not exercised by the pool; no-op implementations to satisfy IAdsConnection.
     public ConnectionState State => ConnectionState.Disconnected;
@@ -177,6 +180,96 @@ internal sealed class FakeManagedConnection : IManagedConnection
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
         => throw new NotSupportedException();
 
-    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
-        => throw new NotSupportedException();
+    // ---- Subscription support (durable-subscription tests) ---------------
+
+    /// <summary>
+    /// One recorded call to <see cref="SubscribeAsync"/>: the arguments the
+    /// facade re-registered with, plus the recording disposable handed back so a
+    /// test can assert whether the underlying registration was disposed.
+    /// </summary>
+    public sealed class SubscriptionRecord(string path, int cycleTimeMs, Action<string, object?> callback)
+    {
+        public string Path { get; } = path;
+        public int CycleTimeMs { get; } = cycleTimeMs;
+        public Action<string, object?> Callback { get; } = callback;
+
+        private int _disposed;
+
+        /// <summary>True once the underlying registration disposable was disposed.</summary>
+        public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
+        /// <summary>
+        /// The disposable returned to the facade. Idempotent; flips
+        /// <see cref="IsDisposed"/> on first call.
+        /// </summary>
+        public IDisposable Disposable => new RecordingDisposable(this);
+
+        internal void MarkDisposed() => Interlocked.Exchange(ref _disposed, 1);
+
+        /// <summary>Simulate a PLC notification firing for this subscription.</summary>
+        public void FireNotification(object? value) => Callback(Path, value);
+
+        private sealed class RecordingDisposable(SubscriptionRecord owner) : IDisposable
+        {
+            private Action? _dispose = owner.MarkDisposed;
+            public void Dispose() => Interlocked.Exchange(ref _dispose, null)?.Invoke();
+        }
+    }
+
+    private readonly ConcurrentQueue<SubscriptionRecord> _subscriptions = new();
+
+    /// <summary>All subscriptions registered against this connection, in order.</summary>
+    public IReadOnlyCollection<SubscriptionRecord> Subscriptions => _subscriptions;
+
+    /// <summary>
+    /// When set, the NEXT <see cref="SubscribeAsync"/> call throws this exception
+    /// once and then clears itself — used to script a one-shot re-registration
+    /// failure that the facade must log and retry on the next reconnect.
+    /// </summary>
+    public Exception? SubscribeThrowsOnce { get; set; }
+
+    /// <summary>
+    /// When set, <see cref="SubscribeAsync"/> awaits this task before recording
+    /// and returning — lets a test hold a re-registration in flight while it
+    /// disposes the handle, to exercise the dispose-vs-inflight race.
+    /// </summary>
+    public Task? SubscribeGate { get; set; }
+
+    private TaskCompletionSource _subscribeCalled = NewTcsT();
+
+    private static TaskCompletionSource NewTcsT()
+        => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Completes when <see cref="SubscribeAsync"/> is entered. Re-arm with <see cref="RearmSubscribeCalled"/>.</summary>
+    public Task SubscribeCalled
+    {
+        get { lock (_gate) { return _subscribeCalled.Task; } }
+    }
+
+    public void RearmSubscribeCalled()
+    {
+        lock (_gate) { _subscribeCalled = NewTcsT(); }
+    }
+
+    public async Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
+    {
+        TaskCompletionSource toSignal;
+        lock (_gate) { toSignal = _subscribeCalled; }
+        toSignal.TrySetResult();
+
+        var oneShot = SubscribeThrowsOnce;
+        if (oneShot is not null)
+        {
+            SubscribeThrowsOnce = null;
+            throw oneShot;
+        }
+
+        var gate = SubscribeGate;
+        if (gate is not null)
+            await gate.ConfigureAwait(false);
+
+        var record = new SubscriptionRecord(symbolPath, cycleTimeMs, callback);
+        _subscriptions.Enqueue(record);
+        return record.Disposable;
+    }
 }
