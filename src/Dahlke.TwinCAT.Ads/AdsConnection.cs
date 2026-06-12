@@ -18,6 +18,30 @@ public sealed class AdsConnection : IManagedConnection
     public string DisplayName => _options.DisplayName;
     public bool IsConnected => _client.IsConnected;
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Derived from <see cref="IsConnected"/>: returns
+    /// <see cref="ConnectionState.Connected"/> when the underlying ADS client is
+    /// connected, and <see cref="ConnectionState.Disconnected"/> otherwise.
+    /// Pool-driven lifecycle transitions (including
+    /// <see cref="ConnectionState.Connecting"/>) are surfaced on the
+    /// <see cref="AdsConnectionFacade"/> that wraps this instance; consumers do
+    /// not hold <see cref="AdsConnection"/> directly.
+    /// </remarks>
+    public ConnectionState State => _client.IsConnected
+        ? ConnectionState.Connected
+        : ConnectionState.Disconnected;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Pool-driven transitions are surfaced on the wrapping
+    /// <see cref="AdsConnectionFacade"/>; this event is never raised on the raw
+    /// <see cref="AdsConnection"/> instance.
+    /// </remarks>
+#pragma warning disable CS0067 // The event is never used — by design; see remarks.
+    public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
+#pragma warning restore CS0067
+
     public AdsConnection(string plcId, PlcTargetOptions options, ILoggerFactory loggerFactory)
     {
         PlcId = plcId;

@@ -61,6 +61,7 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     private readonly string _plcId;
     private readonly PlcTargetOptions _options;
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger _logger;
 
     // Read/written across the pool's loop thread and caller threads. All access
     // goes through Volatile/Interlocked so updates are visible without locking;
@@ -79,11 +80,17 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     // Set once, by MarkStopped, on pool stop/dispose. A stopped facade fails fast.
     private volatile bool _stopped;
 
-    public AdsConnectionFacade(string plcId, PlcTargetOptions options, TimeProvider timeProvider)
+    // Current state, written only by OnStateChanged (called from the pool's loop
+    // thread via SetState). Volatile so reads from any thread observe the latest
+    // value without a lock.
+    private volatile ConnectionState _state = ConnectionState.Disconnected;
+
+    public AdsConnectionFacade(string plcId, PlcTargetOptions options, TimeProvider timeProvider, ILogger logger)
     {
         _plcId = plcId;
         _options = options;
         _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -100,12 +107,64 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     /// </remarks>
     public bool IsConnected => Volatile.Read(ref _current) is { IsConnected: true };
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Observational snapshot: reflects the state most recently forwarded by the
+    /// pool's <c>SetState</c> helper. Safe to read from any thread; the field is
+    /// <c>volatile</c> so no lock is needed.
+    /// </remarks>
+    public ConnectionState State => _state;
+
+    /// <inheritdoc />
+    public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
+
     /// <summary>
     /// The current underlying connection the facade routes to, exposed for tests
     /// to assert routing/identity behaviour. <see langword="null"/> when the
     /// target has no live connection.
     /// </summary>
     internal IManagedConnection? CurrentForTesting => Volatile.Read(ref _current);
+
+    /// <summary>
+    /// Called by <see cref="AdsConnectionPool"/>'s <c>SetState</c> helper immediately
+    /// after it records the new state and raises its own internal event. Stores the
+    /// new state and raises this facade's public <see cref="ConnectionStateChanged"/>
+    /// event, catching and logging any exception thrown by a handler so a faulty
+    /// subscriber can never tear down the pool loop.
+    /// </summary>
+    /// <remarks>
+    /// The pool calls this only when the state has actually changed (same
+    /// change-guard as its own event), so this method can assume
+    /// <paramref name="args"/>.State != <paramref name="args"/>.PreviousState.
+    /// </remarks>
+    internal void OnStateChanged(ConnectionStateChangedEventArgs args)
+    {
+        // Store BEFORE raising — a handler that reads State sees the new value.
+        _state = args.State;
+
+        var handlers = ConnectionStateChanged;
+        if (handlers is null)
+            return;
+
+        // Invoke each handler individually so one throwing handler does not skip
+        // the rest. The standard multicast delegate would abort the chain on the
+        // first exception; we replicate its invocation list instead.
+        foreach (var handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((EventHandler<ConnectionStateChangedEventArgs>)handler)(this, args);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "ConnectionStateChanged handler threw while reporting {PlcId} -> {State}",
+                    _plcId,
+                    args.State);
+            }
+        }
+    }
 
     /// <summary>
     /// Publishes <paramref name="connection"/> as the facade's current underlying
@@ -168,6 +227,9 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     internal void MarkStopped()
     {
         _stopped = true;
+        // A stopped facade is by definition disconnected — don't leave a stale
+        // Connected reading in the window before the pool's final SetState sweep.
+        _state = ConnectionState.Disconnected;
         // Drop the current pointer: a stopped facade must never report connected
         // nor route to a connection the pool is about to dispose.
         Volatile.Write(ref _current, null);

@@ -16,6 +16,27 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     public string DisplayName { get; }
     public bool IsConnected => true;
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// A simulated connection is permanently connected; this property always
+    /// returns <see cref="ConnectionState.Connected"/>.
+    /// </remarks>
+    public ConnectionState State => ConnectionState.Connected;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A simulated connection has no lifecycle transitions — it is always
+    /// <see cref="ConnectionState.Connected"/> — so this event is never raised.
+    /// Subscribing is harmless. When consumers hold the facade returned by
+    /// <see cref="IAdsConnectionPool.GetConnection"/> (the normal case) the
+    /// facade's own <c>ConnectionStateChanged</c> reports pool-driven transitions
+    /// instead; the direct-<c>SimulatedAdsConnection</c> case is mainly for
+    /// unit tests and the C26 adapter.
+    /// </remarks>
+#pragma warning disable CS0067 // The event is never used — by design; see remarks.
+    public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
+#pragma warning restore CS0067
+
     public SimulatedAdsConnection(string plcId, string displayName, ILoggerFactory loggerFactory)
     {
         PlcId = plcId;

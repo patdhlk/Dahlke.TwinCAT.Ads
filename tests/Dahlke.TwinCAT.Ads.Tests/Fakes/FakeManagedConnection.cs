@@ -73,6 +73,12 @@ internal sealed class FakeManagedConnection : IManagedConnection
 
     public bool IsConnected { get; private set; }
 
+    // Not exercised by the pool; no-op implementations to satisfy IAdsConnection.
+    public ConnectionState State => ConnectionState.Disconnected;
+#pragma warning disable CS0067
+    public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
+#pragma warning restore CS0067
+
     // ---- Synchronisation hooks ------------------------------------------
 
     /// <summary>Completes when <see cref="Connect"/> is called. Re-arm with <see cref="RearmConnectCalled"/>.</summary>

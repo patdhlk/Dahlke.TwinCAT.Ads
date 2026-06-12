@@ -73,8 +73,10 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         // Eagerly create one stable facade per CONFIGURED target in the constructor
         // so GetConnection is total from construction (before StartAsync). The
         // facade is pure state with no I/O — creating it here is side-effect-free.
+        // Pass the pool's logger so the facade can log Warning when a
+        // ConnectionStateChanged handler throws.
         foreach (var (plcId, targetOptions) in _targets)
-            _facades[plcId] = new AdsConnectionFacade(plcId, targetOptions, _timeProvider);
+            _facades[plcId] = new AdsConnectionFacade(plcId, targetOptions, _timeProvider, _logger);
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -272,22 +274,36 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         if (previous == next)
             return;
 
-        var handlers = ConnectionStateChanged;
-        if (handlers is null)
-            return;
+        var args = new ConnectionStateChangedEventArgs(plcId, next, previous);
 
-        try
+        // Forward to the facade FIRST so a pool-event handler that cross-reads
+        // facade.State observes the new value, never a stale one. The facade
+        // handles per-handler exception isolation internally and never
+        // propagates exceptions back here.
+        if (_facades.TryGetValue(plcId, out var facade))
+            facade.OnStateChanged(args);
+
+        var handlers = ConnectionStateChanged;
+        if (handlers is not null)
         {
-            handlers(this, new ConnectionStateChangedEventArgs(plcId, next, previous));
-        }
-        catch (Exception ex)
-        {
-            // A subscriber's exception must never propagate into the loop.
-            _logger.LogWarning(
-                ex,
-                "ConnectionStateChanged handler threw while reporting {PlcId} -> {State}",
-                plcId,
-                next);
+            // Invoke per-handler so one throwing subscriber does not skip the
+            // rest (same isolation guarantee as the facade's public event).
+            foreach (var handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    ((EventHandler<ConnectionStateChangedEventArgs>)handler)(this, args);
+                }
+                catch (Exception ex)
+                {
+                    // A subscriber's exception must never propagate into the loop.
+                    _logger.LogWarning(
+                        ex,
+                        "ConnectionStateChanged handler threw while reporting {PlcId} -> {State}",
+                        plcId,
+                        next);
+                }
+            }
         }
     }
 

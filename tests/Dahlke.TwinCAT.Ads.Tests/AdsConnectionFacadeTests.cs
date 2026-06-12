@@ -30,7 +30,7 @@ public class AdsConnectionFacadeTests
         // operation waits the full TimeoutMs (of FAKE time) and then throws.
         var time = new FakeTimeProvider();
         var facade = new AdsConnectionFacade(
-            "plc1", new PlcTargetOptions { DisplayName = "PLC One", TimeoutMs = 1000 }, time);
+            "plc1", new PlcTargetOptions { DisplayName = "PLC One", TimeoutMs = 1000 }, time, NullLogger.Instance);
 
         Assert.Equal("plc1", facade.PlcId);
         Assert.Equal("PLC One", facade.DisplayName);
@@ -62,7 +62,7 @@ public class AdsConnectionFacadeTests
     public async Task Operations_WithCurrentConnection_DelegateToIt_AndPropagateResult()
     {
         var facade = new AdsConnectionFacade(
-            "plc1", new PlcTargetOptions { DisplayName = "PLC One" }, new FakeTimeProvider());
+            "plc1", new PlcTargetOptions { DisplayName = "PLC One" }, new FakeTimeProvider(), NullLogger.Instance);
         var underlying = new RecordingConnection("plc1");
         underlying.IsConnected = true;
         underlying.ReadResult = 42;
@@ -83,7 +83,7 @@ public class AdsConnectionFacadeTests
     [Fact]
     public void ClearCurrent_OnlyClearsMatchingInstance()
     {
-        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions(), new FakeTimeProvider());
+        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions(), new FakeTimeProvider(), NullLogger.Instance);
         var first = new RecordingConnection("plc1") { IsConnected = true };
         var second = new RecordingConnection("plc1") { IsConnected = true };
 
@@ -104,7 +104,7 @@ public class AdsConnectionFacadeTests
     [Fact]
     public void IsConnected_ReflectsUnderlyingIsConnected()
     {
-        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions(), new FakeTimeProvider());
+        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions(), new FakeTimeProvider(), NullLogger.Instance);
         var underlying = new RecordingConnection("plc1") { IsConnected = false };
 
         facade.SetCurrent(underlying);
@@ -128,7 +128,7 @@ public class AdsConnectionFacadeTests
         // timer/wait at all, the op would park forever and the await below would
         // hang past the real-time guard.
         var time = new FakeTimeProvider();
-        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions(), time);
+        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions(), time, NullLogger.Instance);
         var underlying = new RecordingConnection("plc1") { IsConnected = true, ReadResult = 7 };
         facade.SetCurrent(underlying);
 
@@ -144,7 +144,7 @@ public class AdsConnectionFacadeTests
         // No time advance is needed: publication completes the waiter's TCS.
         var time = new FakeTimeProvider();
         var facade = new AdsConnectionFacade(
-            "plc1", new PlcTargetOptions { TimeoutMs = 5000 }, time);
+            "plc1", new PlcTargetOptions { TimeoutMs = 5000 }, time, NullLogger.Instance);
         var arriving = new RecordingConnection("plc1") { IsConnected = true, ReadResult = 99 };
 
         // Start the op while disconnected; it parks waiting for a connection.
@@ -165,7 +165,7 @@ public class AdsConnectionFacadeTests
         // TimeoutMs=3000: at 2999ms still pending; crossing 3000ms faults.
         var time = new FakeTimeProvider();
         var facade = new AdsConnectionFacade(
-            "plc1", new PlcTargetOptions { TimeoutMs = 3000 }, time);
+            "plc1", new PlcTargetOptions { TimeoutMs = 3000 }, time, NullLogger.Instance);
 
         var readTask = facade.ReadValueAsync("X", CancellationToken.None);
         Assert.False(readTask.IsCompleted);
@@ -184,7 +184,7 @@ public class AdsConnectionFacadeTests
     {
         var time = new FakeTimeProvider();
         var facade = new AdsConnectionFacade(
-            "plc1", new PlcTargetOptions { TimeoutMs = 5000 }, time);
+            "plc1", new PlcTargetOptions { TimeoutMs = 5000 }, time, NullLogger.Instance);
         using var cts = new CancellationTokenSource();
 
         var readTask = facade.ReadValueAsync("X", cts.Token);
@@ -201,7 +201,7 @@ public class AdsConnectionFacadeTests
         // Never advanced: a stopped facade must NOT wait out TimeoutMs.
         var time = new FakeTimeProvider();
         var facade = new AdsConnectionFacade(
-            "plc1", new PlcTargetOptions { TimeoutMs = 60_000 }, time);
+            "plc1", new PlcTargetOptions { TimeoutMs = 60_000 }, time, NullLogger.Instance);
 
         facade.MarkStopped();
 
@@ -216,7 +216,7 @@ public class AdsConnectionFacadeTests
     {
         var time = new FakeTimeProvider();
         var facade = new AdsConnectionFacade(
-            "plc1", new PlcTargetOptions { TimeoutMs = 60_000 }, time);
+            "plc1", new PlcTargetOptions { TimeoutMs = 60_000 }, time, NullLogger.Instance);
 
         var readTask = facade.ReadValueAsync("X", CancellationToken.None);
         Assert.False(readTask.IsCompleted);
@@ -233,7 +233,7 @@ public class AdsConnectionFacadeTests
     {
         var time = new FakeTimeProvider();
         var facade = new AdsConnectionFacade(
-            "plc1", new PlcTargetOptions { TimeoutMs = 5000 }, time);
+            "plc1", new PlcTargetOptions { TimeoutMs = 5000 }, time, NullLogger.Instance);
         var arriving = new RecordingConnection("plc1") { IsConnected = true, ReadResult = 5 };
 
         var a = facade.ReadValueAsync("A", CancellationToken.None);
@@ -574,6 +574,12 @@ public class AdsConnectionFacadeTests
         public string PlcId { get; }
         public string DisplayName => PlcId;
         public bool IsConnected { get; set; }
+
+        // No-op implementations to satisfy IAdsConnection after C14.
+        public ConnectionState State => ConnectionState.Disconnected;
+#pragma warning disable CS0067
+        public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
+#pragma warning restore CS0067
 
         public object? ReadResult { get; set; }
         public string? LastReadPath { get; private set; }
