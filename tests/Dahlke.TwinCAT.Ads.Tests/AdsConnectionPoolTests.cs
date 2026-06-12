@@ -355,8 +355,12 @@ public class AdsConnectionPoolTests
         // it would never return because nobody advances fake time here.
         await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);
 
-        Assert.Equal(1, conn.DisconnectCount);
-        Assert.Equal(1, conn.DisposeCount);
+        // On cancellation the loop now owns teardown: it removes the connection,
+        // emits Disconnected, then ForceDisconnect + Dispose. StopAsync therefore
+        // no longer finds it in _connections and does not call Disconnect.
+        Assert.Equal(0, conn.DisconnectCount);      // loop cleanup uses ForceDisconnect, not Disconnect
+        Assert.Equal(1, conn.ForceDisconnectCount); // loop cleanup called ForceDisconnect
+        Assert.Equal(1, conn.DisposeCount);         // loop cleanup disposed it
         Assert.Null(pool.GetConnection("plc1"));
     }
 
