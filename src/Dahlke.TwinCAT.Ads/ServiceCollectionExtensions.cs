@@ -27,6 +27,15 @@ namespace Dahlke.TwinCAT.Ads;
 ///   properties (e.g. <c>Prefixes.Add</c>) survive and are not cleared by a
 ///   subsequent <c>Bind</c> call.</item>
 /// </list>
+/// <para>
+/// <c>AddTwinCatAdsSimulation</c> is sugar over <c>AddTwinCatAds</c>: it
+/// registers the identical core services (router service, factory, pool) and
+/// appends a <see cref="IServiceCollection.PostConfigure{TOptions}"/> delegate
+/// that forces every target into <see cref="ConnectionMode.Simulated"/> after all
+/// other <c>Configure</c> delegates have run.  The router service and pool detect
+/// the all-simulated configuration and skip the router wait entirely, so no
+/// TwinCAT installation is required.
+/// </para>
 /// </remarks>
 public static class ServiceCollectionExtensions
 {
@@ -113,10 +122,17 @@ public static class ServiceCollectionExtensions
     // =========================================================================
 
     /// <summary>
-    /// Registers a simulated PLC connection pool for offline development.
-    /// No ADS router or TwinCAT installation required.
-    /// <para>Reads options from the supplied <paramref name="configuration"/>
-    /// (expects the <c>PlcTargets</c> section).</para>
+    /// Sugar over <see cref="AddTwinCatAds(IServiceCollection,IConfiguration)"/>
+    /// that forces every target into simulation mode for offline development.
+    /// No ADS router or TwinCAT installation is required.
+    /// <para>
+    /// Reads options from the supplied <paramref name="configuration"/>
+    /// (expects the <c>PlcTargets</c> section), then applies a
+    /// <see cref="IServiceCollection"/> PostConfigure delegate that sets every
+    /// target's <see cref="PlcTargetOptions.Mode"/> to
+    /// <see cref="ConnectionMode.Simulated"/> after all other Configure delegates
+    /// have run.
+    /// </para>
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
     /// <param name="configuration">The application configuration root.</param>
@@ -126,14 +142,22 @@ public static class ServiceCollectionExtensions
         IConfiguration configuration)
     {
         BindTwinCatAdsOptions(services, configuration);
-        RegisterSimulationServices(services);
+        RegisterCoreServices(services);
+        RegisterSimulationPostConfigure(services);
         return services;
     }
 
     /// <summary>
-    /// Registers a simulated PLC connection pool for offline development, using
-    /// a code-first options delegate.
-    /// <para>No <see cref="IConfiguration"/> is required.</para>
+    /// Sugar over <see cref="AddTwinCatAds(IServiceCollection,Action{TwinCatAdsOptions})"/>
+    /// that forces every target into simulation mode for offline development.
+    /// No <see cref="IConfiguration"/> or TwinCAT installation is required.
+    /// <para>
+    /// Registers the same core services as <c>AddTwinCatAds</c> and appends a
+    /// PostConfigure delegate that sets every target's
+    /// <see cref="PlcTargetOptions.Mode"/> to
+    /// <see cref="ConnectionMode.Simulated"/> after all other Configure delegates
+    /// have run.
+    /// </para>
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
     /// <param name="configure">
@@ -145,17 +169,19 @@ public static class ServiceCollectionExtensions
         Action<TwinCatAdsOptions> configure)
     {
         RegisterCodeFirstOptions(services, configure);
-        RegisterSimulationServices(services);
+        RegisterCoreServices(services);
+        RegisterSimulationPostConfigure(services);
         return services;
     }
 
     /// <summary>
-    /// Registers a simulated PLC connection pool for offline development,
-    /// combining configuration binding with a code-first options delegate.
+    /// Sugar over
+    /// <see cref="AddTwinCatAds(IServiceCollection,IConfiguration,Action{TwinCatAdsOptions})"/>
+    /// that forces every target into simulation mode for offline development.
     /// <para>
-    /// The ordering guarantee is identical to the
-    /// <see cref="AddTwinCatAds(IServiceCollection, IConfiguration, Action{TwinCatAdsOptions})"/>
-    /// combo overload: binding runs first, the lambda runs after.
+    /// The ordering guarantee is identical to the real combo overload: binding
+    /// runs first, the lambda runs after, and the PostConfigure mode-flip runs
+    /// last (after all Configure delegates).
     /// </para>
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
@@ -171,7 +197,8 @@ public static class ServiceCollectionExtensions
     {
         BindTwinCatAdsOptions(services, configuration);
         services.AddOptions<TwinCatAdsOptions>().Configure(configure);
-        RegisterSimulationServices(services);
+        RegisterCoreServices(services);
+        RegisterSimulationPostConfigure(services);
         return services;
     }
 
@@ -259,20 +286,29 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the simulation services shared by all
-    /// <c>AddTwinCatAdsSimulation</c> overloads: <see cref="TimeProvider"/> and
-    /// the simulated connection pool.
+    /// Registers the PostConfigure delegate used by all
+    /// <c>AddTwinCatAdsSimulation</c> overloads.
+    /// <para>
+    /// The delegate flips every target's <see cref="PlcTargetOptions.Mode"/> to
+    /// <see cref="ConnectionMode.Simulated"/> after all other Configure delegates
+    /// have run, ensuring that config-bound or lambda-added targets are all in
+    /// simulation mode regardless of how they were originally declared.
+    /// </para>
+    /// <para>
+    /// This method is intentionally NOT guarded by an idempotency check — the
+    /// PostConfigure must always be registered, even when
+    /// <see cref="RegisterCoreServices"/> was already called by a preceding
+    /// <c>AddTwinCatAds</c> call (the core guard only skips service registrations,
+    /// not option delegates).  Registering PostConfigure twice is harmless: the
+    /// second application is idempotent (it re-sets Mode to Simulated).
+    /// </para>
     /// </summary>
-    private static void RegisterSimulationServices(IServiceCollection services)
+    private static void RegisterSimulationPostConfigure(IServiceCollection services)
     {
-        // Idempotency guard: a second AddTwinCatAdsSimulation call must not
-        // duplicate the simulated pool hosted service.
-        if (services.Any(d => d.ServiceType == typeof(SimulatedAdsConnectionPool)))
-            return;
-
-        services.TryAddSingleton(TimeProvider.System);
-        services.AddSingleton<SimulatedAdsConnectionPool>();
-        services.AddSingleton<IAdsConnectionPool>(sp => sp.GetRequiredService<SimulatedAdsConnectionPool>());
-        services.AddHostedService(sp => sp.GetRequiredService<SimulatedAdsConnectionPool>());
+        services.PostConfigure<TwinCatAdsOptions>(o =>
+        {
+            foreach (var target in o.Targets.Values)
+                target.Mode = ConnectionMode.Simulated;
+        });
     }
 }

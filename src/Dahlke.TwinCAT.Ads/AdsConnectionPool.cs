@@ -41,6 +41,21 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     {
         _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+        var hasRealTargets = _targets.Values.Any(t => t.Mode == ConnectionMode.Real);
+
+        if (!hasRealTargets)
+        {
+            // All targets are simulated — no router is needed; start loops immediately.
+            _logger.LogInformation(
+                "ADS connection pool starting — all {Count} target(s) are simulated, skipping router wait",
+                _targets.Count);
+
+            foreach (var (plcId, options) in _targets)
+                StartConnectionLoop(plcId, options);
+
+            return;
+        }
+
         _logger.LogInformation("ADS connection pool starting, waiting for router...");
         try
         {
@@ -48,9 +63,39 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         }
         catch (TaskCanceledException)
         {
-            _logger.LogWarning("ADS router not available — connection pool running without connections");
+            // Router failed or was cancelled: start loops only for simulated targets;
+            // real targets are skipped (they require a working router).
+            var simTargets = _targets
+                .Where(kvp => kvp.Value.Mode == ConnectionMode.Simulated)
+                .ToList();
+            var realTargets = _targets
+                .Where(kvp => kvp.Value.Mode == ConnectionMode.Real)
+                .ToList();
+
+            if (simTargets.Count > 0)
+            {
+                _logger.LogWarning(
+                    "ADS router not available — starting {SimCount} simulated target(s); " +
+                    "skipping {RealCount} real target(s): {RealIds}",
+                    simTargets.Count,
+                    realTargets.Count,
+                    string.Join(", ", realTargets.Select(kvp => kvp.Key)));
+
+                foreach (var (plcId, options) in simTargets)
+                    StartConnectionLoop(plcId, options);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "ADS router not available — connection pool running without connections " +
+                    "({RealCount} real target(s) skipped: {RealIds})",
+                    realTargets.Count,
+                    string.Join(", ", realTargets.Select(kvp => kvp.Key)));
+            }
+
             return;
         }
+
         _logger.LogInformation("ADS router ready, connecting to {Count} PLC target(s)", _targets.Count);
 
         foreach (var (plcId, options) in _targets)

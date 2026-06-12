@@ -67,6 +67,7 @@ public sealed class AdsRouterService : BackgroundService
     private readonly ILogger<AdsRouterService> _logger;
     private readonly AdsRouterReadySignal _readySignal;
     private readonly string? _netId;
+    private readonly bool _hasRealTargets;
 
     // IConfiguration is optional — null when the application does not register
     // it (pure code-first scenario).  When present the full application config is
@@ -93,7 +94,9 @@ public sealed class AdsRouterService : BackgroundService
         ILoggerFactory loggerFactory,
         AdsRouterReadySignal readySignal)
     {
-        _netId = options.Value.Router.NetId;
+        var value = options.Value;
+        _netId = value.Router.NetId;
+        _hasRealTargets = value.Targets.Values.Any(t => t.Mode == ConnectionMode.Real);
         _configuration = configuration;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<AdsRouterService>();
@@ -132,6 +135,17 @@ public sealed class AdsRouterService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await Task.Delay(1, stoppingToken);
+
+        if (!_hasRealTargets)
+        {
+            // No real PLC targets configured — the embedded router is not needed
+            // (simulated targets talk to an in-memory store, not AMS/ADS).
+            // Signal ready immediately so the pool can proceed without delay.
+            _logger.LogInformation(
+                "No real PLC targets configured — embedded router not started");
+            _readySignal.SetReady();
+            return;
+        }
 
         if (string.IsNullOrEmpty(_netId))
         {
