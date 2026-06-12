@@ -24,35 +24,45 @@ public class AdsConnectionFacadeTests
     // =====================================================================
 
     [Fact]
-    public async Task Operations_WithNoCurrentConnection_Throw_WithPlcIdInMessage()
+    public async Task Operations_WithNoCurrentConnection_WaitThenThrow_WithPlcIdInMessage()
     {
-        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions { DisplayName = "PLC One" });
+        // TimeoutMs is the wait bound. With no connection ever published, each
+        // operation waits the full TimeoutMs (of FAKE time) and then throws.
+        var time = new FakeTimeProvider();
+        var facade = new AdsConnectionFacade(
+            "plc1", new PlcTargetOptions { DisplayName = "PLC One", TimeoutMs = 1000 }, time);
 
         Assert.Equal("plc1", facade.PlcId);
         Assert.Equal("PLC One", facade.DisplayName);
         Assert.False(facade.IsConnected);
 
-        var read = await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
-            () => facade.ReadValueAsync("X", CancellationToken.None));
+        // Start the op without awaiting; it parks waiting for a connection.
+        var readTask = facade.ReadValueAsync("X", CancellationToken.None);
+        Assert.False(readTask.IsCompleted);
+        // Crossing TimeoutMs of fake time releases the wait with the unavailable throw.
+        time.Advance(TimeSpan.FromMilliseconds(1000));
+        var read = await Assert.ThrowsAsync<AdsConnectionUnavailableException>(() => readTask);
         Assert.Contains("plc1", read.Message);
         Assert.Equal("plc1", read.PlcId);
 
-        await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
-            () => facade.WriteValueAsync("X", 1, CancellationToken.None));
-        await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
-            () => facade.ReadValuesAsync(["X"], CancellationToken.None));
-        await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
-            () => facade.WriteValuesAsync(new() { ["X"] = 1 }, CancellationToken.None));
-        await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
-            () => facade.GetAdsStateAsync(CancellationToken.None));
-        await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
-            () => facade.SubscribeAsync("X", 100, (_, _) => { }, CancellationToken.None));
+        await AssertWaitsThenThrows(facade.WriteValueAsync("X", 1, CancellationToken.None), time);
+        await AssertWaitsThenThrows(facade.ReadValuesAsync(["X"], CancellationToken.None), time);
+        await AssertWaitsThenThrows(facade.WriteValuesAsync(new() { ["X"] = 1 }, CancellationToken.None), time);
+        await AssertWaitsThenThrows(facade.GetAdsStateAsync(CancellationToken.None), time);
+        await AssertWaitsThenThrows(facade.SubscribeAsync("X", 100, (_, _) => { }, CancellationToken.None), time);
+
+        static async Task AssertWaitsThenThrows(Task op, FakeTimeProvider time)
+        {
+            time.Advance(TimeSpan.FromMilliseconds(1000));
+            await Assert.ThrowsAsync<AdsConnectionUnavailableException>(() => op);
+        }
     }
 
     [Fact]
     public async Task Operations_WithCurrentConnection_DelegateToIt_AndPropagateResult()
     {
-        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions { DisplayName = "PLC One" });
+        var facade = new AdsConnectionFacade(
+            "plc1", new PlcTargetOptions { DisplayName = "PLC One" }, new FakeTimeProvider());
         var underlying = new RecordingConnection("plc1");
         underlying.IsConnected = true;
         underlying.ReadResult = 42;
@@ -73,7 +83,7 @@ public class AdsConnectionFacadeTests
     [Fact]
     public void ClearCurrent_OnlyClearsMatchingInstance()
     {
-        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions());
+        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions(), new FakeTimeProvider());
         var first = new RecordingConnection("plc1") { IsConnected = true };
         var second = new RecordingConnection("plc1") { IsConnected = true };
 
@@ -94,7 +104,7 @@ public class AdsConnectionFacadeTests
     [Fact]
     public void IsConnected_ReflectsUnderlyingIsConnected()
     {
-        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions());
+        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions(), new FakeTimeProvider());
         var underlying = new RecordingConnection("plc1") { IsConnected = false };
 
         facade.SetCurrent(underlying);
@@ -108,17 +118,152 @@ public class AdsConnectionFacadeTests
     }
 
     // =====================================================================
+    // Wait-then-throw mechanism — facade driven directly with FakeTimeProvider.
+    // =====================================================================
+
+    [Fact]
+    public async Task FastPath_Connected_CompletesWithoutConsultingTheTimer()
+    {
+        // A FakeTimeProvider that is NEVER advanced: if the fast path touched the
+        // timer/wait at all, the op would park forever and the await below would
+        // hang past the real-time guard.
+        var time = new FakeTimeProvider();
+        var facade = new AdsConnectionFacade("plc1", new PlcTargetOptions(), time);
+        var underlying = new RecordingConnection("plc1") { IsConnected = true, ReadResult = 7 };
+        facade.SetCurrent(underlying);
+
+        var value = await facade.ReadValueAsync("MAIN.x", CancellationToken.None).WaitAsync(RealTimeout);
+
+        Assert.Equal(7, value);
+        Assert.Equal("MAIN.x", underlying.LastReadPath);
+    }
+
+    [Fact]
+    public async Task WaitThenSucceed_ConnectionPublishedMidWait_OperationProceeds()
+    {
+        // No time advance is needed: publication completes the waiter's TCS.
+        var time = new FakeTimeProvider();
+        var facade = new AdsConnectionFacade(
+            "plc1", new PlcTargetOptions { TimeoutMs = 5000 }, time);
+        var arriving = new RecordingConnection("plc1") { IsConnected = true, ReadResult = 99 };
+
+        // Start the op while disconnected; it parks waiting for a connection.
+        var readTask = facade.ReadValueAsync("MAIN.n", CancellationToken.None);
+        Assert.False(readTask.IsCompleted);
+
+        // Publish mid-wait -> the parked op resumes against the new connection.
+        facade.SetCurrent(arriving);
+
+        var value = await readTask.WaitAsync(RealTimeout);
+        Assert.Equal(99, value);
+        Assert.Equal("MAIN.n", arriving.LastReadPath); // the new connection served the read
+    }
+
+    [Fact]
+    public async Task WaitThenTimeout_HonorsConfiguredTimeoutMs()
+    {
+        // TimeoutMs=3000: at 2999ms still pending; crossing 3000ms faults.
+        var time = new FakeTimeProvider();
+        var facade = new AdsConnectionFacade(
+            "plc1", new PlcTargetOptions { TimeoutMs = 3000 }, time);
+
+        var readTask = facade.ReadValueAsync("X", CancellationToken.None);
+        Assert.False(readTask.IsCompleted);
+
+        time.Advance(TimeSpan.FromMilliseconds(2999));
+        await Task.Yield();
+        Assert.False(readTask.IsCompleted); // wait honors the CONFIGURED bound
+
+        time.Advance(TimeSpan.FromMilliseconds(1)); // cross 3000ms
+        var ex = await Assert.ThrowsAsync<AdsConnectionUnavailableException>(() => readTask);
+        Assert.Equal("plc1", ex.PlcId);
+    }
+
+    [Fact]
+    public async Task CancellationMidWait_ThrowsOperationCanceled_NotUnavailable()
+    {
+        var time = new FakeTimeProvider();
+        var facade = new AdsConnectionFacade(
+            "plc1", new PlcTargetOptions { TimeoutMs = 5000 }, time);
+        using var cts = new CancellationTokenSource();
+
+        var readTask = facade.ReadValueAsync("X", cts.Token);
+        Assert.False(readTask.IsCompleted);
+
+        cts.Cancel(); // caller cancels mid-wait, well before TimeoutMs elapses
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => readTask);
+    }
+
+    [Fact]
+    public async Task MarkStopped_FailsFast_NoWait_MessageMentionsStopped()
+    {
+        // Never advanced: a stopped facade must NOT wait out TimeoutMs.
+        var time = new FakeTimeProvider();
+        var facade = new AdsConnectionFacade(
+            "plc1", new PlcTargetOptions { TimeoutMs = 60_000 }, time);
+
+        facade.MarkStopped();
+
+        var ex = await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
+            () => facade.ReadValueAsync("X", CancellationToken.None).WaitAsync(RealTimeout));
+        Assert.Equal("plc1", ex.PlcId);
+        Assert.Contains("stopped", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MarkStopped_MidWait_WakesParkedWaiters_FailFast()
+    {
+        var time = new FakeTimeProvider();
+        var facade = new AdsConnectionFacade(
+            "plc1", new PlcTargetOptions { TimeoutMs = 60_000 }, time);
+
+        var readTask = facade.ReadValueAsync("X", CancellationToken.None);
+        Assert.False(readTask.IsCompleted);
+
+        facade.MarkStopped(); // no time advance: the waiter is woken immediately
+
+        var ex = await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
+            () => readTask.WaitAsync(RealTimeout));
+        Assert.Contains("stopped", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ConcurrentWaiters_SinglePublish_BothComplete()
+    {
+        var time = new FakeTimeProvider();
+        var facade = new AdsConnectionFacade(
+            "plc1", new PlcTargetOptions { TimeoutMs = 5000 }, time);
+        var arriving = new RecordingConnection("plc1") { IsConnected = true, ReadResult = 5 };
+
+        var a = facade.ReadValueAsync("A", CancellationToken.None);
+        var b = facade.ReadValueAsync("B", CancellationToken.None);
+        Assert.False(a.IsCompleted);
+        Assert.False(b.IsCompleted);
+
+        facade.SetCurrent(arriving); // one publish releases BOTH waiters
+
+        await Task.WhenAll(a, b).WaitAsync(RealTimeout);
+        Assert.Equal(5, await a);
+        Assert.Equal(5, await b);
+    }
+
+    // =====================================================================
     // Pool-integration tests — facade wired through AdsConnectionPool.
     // =====================================================================
 
     private static (AdsConnectionPool pool, FakeConnectionFactory factory, FakeTimeProvider time, AdsRouterReadySignal signal)
         CreatePool(params string[] plcIds)
+        => CreatePool(timeoutMs: 5000, plcIds);
+
+    private static (AdsConnectionPool pool, FakeConnectionFactory factory, FakeTimeProvider time, AdsRouterReadySignal signal)
+        CreatePool(int timeoutMs, params string[] plcIds)
     {
         if (plcIds.Length == 0) plcIds = ["plc1"];
 
         var targets = new Dictionary<string, PlcTargetOptions>(StringComparer.OrdinalIgnoreCase);
         foreach (var id in plcIds)
-            targets[id] = new PlcTargetOptions { DisplayName = id, AmsNetId = "1.2.3.4.5.6" };
+            targets[id] = new PlcTargetOptions { DisplayName = id, AmsNetId = "1.2.3.4.5.6", TimeoutMs = timeoutMs };
 
         var adsOptions = new TwinCatAdsOptions { Targets = targets };
         var factory = new FakeConnectionFactory();
@@ -252,9 +397,12 @@ public class AdsConnectionFacadeTests
     }
 
     [Fact]
-    public async Task Operations_DuringOutage_ThrowUnavailable_ThenSucceedAfterReconnect()
+    public async Task Operations_DuringOutage_WaitThenThrowUnavailable_ThenSucceedAfterReconnect()
     {
-        var (pool, factory, time, signal) = CreatePool("plc1");
+        // Tiny per-target TimeoutMs (50ms) so the wait-then-throw window is far
+        // shorter than the loop's MinReconnectDelay (2s): advancing 50ms releases
+        // the wait WITHOUT also driving a reconnect, keeping the outage observable.
+        var (pool, factory, time, signal) = CreatePool(timeoutMs: 50, "plc1");
 
         // First connect fails persistently for a while, then a healthy one.
         var fail = factory.Enqueue(new FakeManagedConnection("plc1") { ConnectShouldThrow = true });
@@ -266,16 +414,82 @@ public class AdsConnectionFacadeTests
 
         var facade = FacadeOf(pool, "plc1");
 
-        // Before any successful connect -> outage -> operations throw.
+        // Before any successful connect -> outage. The op now WAITS up to TimeoutMs
+        // for a connection; start it, advance past TimeoutMs, then it throws.
         await fail.ConnectCalled.WaitAsync(RealTimeout);
-        var ex = await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
-            () => facade.ReadValueAsync("X", CancellationToken.None));
+        var readTask = facade.ReadValueAsync("X", CancellationToken.None);
+        time.Advance(TimeSpan.FromMilliseconds(50));
+        var ex = await Assert.ThrowsAsync<AdsConnectionUnavailableException>(() => readTask);
         Assert.Contains("plc1", ex.Message);
         Assert.False(facade.IsConnected);
 
         // Drive time forward until the healthy connection is published.
         await AdvanceUntil(time, () => ReferenceEquals(facade.CurrentForTesting, healthy), Health);
         Assert.True(facade.IsConnected);
+
+        await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);
+    }
+
+    [Fact]
+    public async Task ReconnectCycle_OperationIssuedDuringOutage_CompletesAgainstNewConnection()
+    {
+        // The marquee behavior of the redesign: a caller issues an operation while
+        // the target is mid-outage; the pool's reconnect loop lands a NEW
+        // connection during the wait window, and the in-flight op proceeds against
+        // it — no throw, no torn snapshot. Generous TimeoutMs so the reconnect
+        // (grace + backoff) completes well inside the wait window.
+
+        // First connection connects, then fails its health check -> teardown.
+        var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(false); // health check fails -> rebuild
+        // Second connection is a RecordingConnection so we can assert the read hit it.
+        var second = new RecordingConnection("plc1") { IsConnected = true, ReadResult = 314 };
+        var factory = new SequencedFactory(first, second);
+
+        var adsOptions = new TwinCatAdsOptions
+        {
+            Targets = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plc1"] = new PlcTargetOptions { DisplayName = "plc1", AmsNetId = "1.2.3.4.5.6", TimeoutMs = 60_000 },
+            },
+        };
+        var time = new FakeTimeProvider();
+        var signal = new AdsRouterReadySignal();
+        var pool = new AdsConnectionPool(
+            Options.Create(adsOptions),
+            factory,
+            signal,
+            NullLogger<AdsConnectionPool>.Instance,
+            time);
+
+        signal.SetReady();
+        await pool.StartAsync(CancellationToken.None);
+
+        var facade = FacadeOf(pool, "plc1");
+        await WaitForCurrent(facade, first);
+        Assert.True(facade.IsConnected);
+
+        // Trigger the health-check failure: drive one health interval so the loop
+        // observes IsAlive==false and tears the first connection down.
+        time.Advance(Health);
+        // The first connection is now being cleared; wait for the outage.
+        await WaitUntil(() => facade.CurrentForTesting is null);
+
+        // Issue the operation DURING the outage — it parks waiting for reconnection.
+        var readTask = facade.ReadValueAsync("MAIN.v", CancellationToken.None);
+        Assert.False(readTask.IsCompleted);
+
+        // Drive the reconnect loop forward (grace period + backoff delay) until the
+        // second connection is published into the facade.
+        await AdvanceUntil(
+            time,
+            () => ReferenceEquals(facade.CurrentForTesting, second),
+            TimeSpan.FromSeconds(1));
+
+        // The parked op resumed against the NEW connection and completed.
+        var value = await readTask.WaitAsync(RealTimeout);
+        Assert.Equal(314, value);
+        Assert.Equal("MAIN.v", second.LastReadPath);
 
         await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);
     }
@@ -393,6 +607,22 @@ public class AdsConnectionFacadeTests
         private sealed class DummyDisposable : IDisposable
         {
             public void Dispose() { }
+        }
+    }
+
+    /// <summary>
+    /// Factory that hands out a fixed sequence of preset connections, then
+    /// manufactures defaults once the script is drained. Used to script a
+    /// reconnect (first -> second) across distinct connection instances.
+    /// </summary>
+    private sealed class SequencedFactory(params IManagedConnection[] connections) : IAdsConnectionFactory
+    {
+        private int _index;
+
+        public IManagedConnection Create(string plcId, PlcTargetOptions options)
+        {
+            var i = Interlocked.Increment(ref _index) - 1;
+            return i < connections.Length ? connections[i] : new FakeManagedConnection(plcId, options.DisplayName);
         }
     }
 

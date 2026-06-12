@@ -1,9 +1,10 @@
 namespace Dahlke.TwinCAT.Ads;
 
 /// <summary>
-/// Thrown when an operation is requested on a PLC target that currently has no
-/// live underlying connection — the target has either never connected, is mid
-/// outage awaiting reconnection, or the connection pool has been stopped.
+/// Thrown when an operation on a PLC target cannot be served because the target
+/// has no live underlying connection and none became available within the wait
+/// window — the target has either never connected, is mid-outage awaiting
+/// reconnection, or the connection pool has been stopped.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -11,13 +12,19 @@ namespace Dahlke.TwinCAT.Ads;
 /// is a stable facade: its identity never changes for the pool's lifetime, even
 /// as the underlying managed connection is rebuilt on every recovery. When a
 /// caller invokes an operation while the facade has no live connection to route
-/// to, the operation fails fast with this exception rather than blocking or
-/// silently returning a default.
+/// to, the operation does not fail immediately: it waits up to the target's
+/// <see cref="PlcTargetOptions.TimeoutMs"/> for a reconnection to be published.
+/// This exception is thrown only after that wait window elapses without a
+/// connection arriving (or immediately if the pool has been stopped). A reconnect
+/// landing inside the window lets the call proceed instead of throwing.
 /// </para>
 /// <para>
 /// This is an observational, transient failure: the same facade may succeed on a
 /// later call once the pool reconnects. Callers that wish to distinguish a
 /// disconnected target from other ADS errors can catch this type specifically.
+/// A caller-supplied <see cref="System.Threading.CancellationToken"/> that fires
+/// during the wait surfaces as an <see cref="OperationCanceledException"/>, not
+/// this exception.
 /// </para>
 /// </remarks>
 public sealed class AdsConnectionUnavailableException : Exception

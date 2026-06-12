@@ -76,7 +76,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         // facade from this point on; operations on it throw
         // AdsConnectionUnavailableException until a connection is published.
         foreach (var (plcId, options) in _targets)
-            _facades[plcId] = new AdsConnectionFacade(plcId, options);
+            _facades[plcId] = new AdsConnectionFacade(plcId, options, _timeProvider);
 
         var hasRealTargets = _targets.Values.Any(t => t.Mode == ConnectionMode.Real);
 
@@ -162,13 +162,16 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         _reconnectCts.Clear();
         _loopTasks.Clear();
 
-        // Clear every facade's current pointer first so that, once the pool is
-        // stopping, all operations throw AdsConnectionUnavailableException rather
-        // than routing to a connection we are about to dispose. Facades hold no
-        // resources, so they are cleared — not disposed — and the (now inert)
-        // instances are retained.
+        // Mark every facade stopped first so that, once the pool is stopping, all
+        // operations fail FAST with AdsConnectionUnavailableException — both new
+        // calls and any already parked waiting for a reconnection that will never
+        // come — rather than waiting out TimeoutMs or routing to a connection we
+        // are about to dispose. MarkStopped also clears the current pointer's
+        // effect (a stopped facade never serves a connection). Facades hold no
+        // resources, so they are not disposed — the (now inert) instances are
+        // retained so GetConnection keeps returning a stable identity.
         foreach (var (_, facade) in _facades)
-            facade.Clear();
+            facade.MarkStopped();
 
         foreach (var (plcId, connection) in _connections)
         {
@@ -313,10 +316,11 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             try { cts.Cancel(); } catch { }
             cts.Dispose();
         }
-        // Clear facade pointers before disposing the underlying connections so
-        // no facade routes to a disposed instance (mirrors StopAsync).
+        // Mark facades stopped before disposing the underlying connections so no
+        // facade routes to a disposed instance and any parked waiters fail fast
+        // (mirrors StopAsync).
         foreach (var (_, facade) in _facades)
-            facade.Clear();
+            facade.MarkStopped();
         foreach (var (_, connection) in _connections)
             connection.Dispose();
         _stoppingCts?.Dispose();

@@ -194,14 +194,18 @@ public class C9_ConditionalRouterAndUnifiedSimulationTests
         // Real target: configured but its loop was skipped (router failed). Since
         // C11 a facade is created EAGERLY for every configured target, so
         // GetConnection returns the (stable) facade — not null. The facade has no
-        // live connection: it reads as disconnected and any operation on it throws
-        // AdsConnectionUnavailableException.
+        // live connection. Since C12 an operation WAITS up to the target's
+        // TimeoutMs (default 5000ms) for a connection that will never arrive (the
+        // loop is skipped), then throws AdsConnectionUnavailableException. The
+        // facade shares this test's FakeTimeProvider, so advancing past TimeoutMs
+        // releases the wait deterministically — no real 5s hang.
         var realFacade = pool.GetConnection("real1");
         Assert.NotNull(realFacade);
         Assert.IsType<AdsConnectionFacade>(realFacade);
         Assert.False(realFacade!.IsConnected);
-        await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
-            () => realFacade.ReadValueAsync("X", CancellationToken.None));
+        var readTask = realFacade.ReadValueAsync("X", CancellationToken.None);
+        time.Advance(TimeSpan.FromMilliseconds(5000)); // cross the default TimeoutMs
+        await Assert.ThrowsAsync<AdsConnectionUnavailableException>(() => readTask);
 
         // Fake real factory was NOT called (real target was skipped)
         Assert.Equal(0, factory.CreateCount);
