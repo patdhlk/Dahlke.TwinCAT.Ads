@@ -15,7 +15,17 @@ if (builder.Configuration.GetValue<bool>("UseSimulation"))
 else
     builder.Services.AddTwinCatAds(builder.Configuration);
 
+// Register the TwinCAT ADS health check.
+// GET /health — returns Healthy / Degraded / Unhealthy based on target states.
+builder.Services.AddHealthChecks()
+    .AddTwinCatAdsHealthCheck();
+
 var app = builder.Build();
+
+// GET /health — TwinCAT ADS health endpoint.
+// Returns 200 Healthy, 200 Degraded (some targets disconnected), or
+// 503 Unhealthy (all real targets down / router never became ready).
+app.MapHealthChecks("/health");
 
 // GET /plcs — list all configured PLC connections and their status.
 app.MapGet("/plcs", (IAdsConnectionPool pool) =>

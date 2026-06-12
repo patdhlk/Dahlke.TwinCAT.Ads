@@ -306,6 +306,32 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         => _states.TryGetValue(plcId, out var state) ? state : ConnectionState.Disconnected;
 
     /// <summary>
+    /// Returns a snapshot of per-target connection state for health reporting.
+    /// Each tuple contains the target identifier, its configured
+    /// <see cref="ConnectionMode"/>, and the current <see cref="ConnectionState"/>
+    /// as observed by the connection loop at the moment of the call.
+    /// </summary>
+    /// <remarks>
+    /// The list is ordered by target identifier (ordinal, case-insensitive) for a
+    /// stable, predictable representation in dashboards and health-check responses.
+    /// This is a lightweight read of in-memory state and does not block.
+    /// </remarks>
+    /// <returns>
+    /// A read-only list of <c>(PlcId, Mode, State)</c> tuples, ordered by target
+    /// identifier, representing a point-in-time snapshot of each target's state.
+    /// </returns>
+    internal IReadOnlyList<(string PlcId, ConnectionMode Mode, ConnectionState State)> GetTargetStates()
+    {
+        return _targets
+            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kvp => (
+                kvp.Key,
+                kvp.Value.Mode,
+                _states.TryGetValue(kvp.Key, out var s) ? s : ConnectionState.Disconnected))
+            .ToList();
+    }
+
+    /// <summary>
     /// Swaps the tracked state for <paramref name="plcId"/> to
     /// <paramref name="next"/> and raises <see cref="ConnectionStateChanged"/>
     /// only when the state actually changes.
