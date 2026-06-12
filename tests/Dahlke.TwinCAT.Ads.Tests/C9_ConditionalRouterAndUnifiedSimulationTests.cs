@@ -20,13 +20,16 @@ public class C9_ConditionalRouterAndUnifiedSimulationTests
     // Helper: poll until connection appears
     // -------------------------------------------------------------------------
 
+    // Since the C11 facade redesign, GetConnection returns the stable facade
+    // eagerly (before the underlying connects). Wait until it reports IsConnected
+    // so the subsequent reads route to a live connection.
     private static async Task WaitForConnection(AdsConnectionPool pool, string plcId)
     {
         var deadline = DateTime.UtcNow + RealTimeout;
-        while (pool.GetConnection(plcId) is null)
+        while (pool.GetConnection(plcId) is not { IsConnected: true })
         {
             if (DateTime.UtcNow > deadline)
-                throw new TimeoutException($"GetConnection('{plcId}') never published a connection.");
+                throw new TimeoutException($"Facade for '{plcId}' never became connected.");
             await Task.Delay(TimeSpan.FromMilliseconds(5));
         }
     }
@@ -188,8 +191,17 @@ public class C9_ConditionalRouterAndUnifiedSimulationTests
         var xVal = await simConn.ReadValueAsync("X", CancellationToken.None);
         Assert.Equal(42, xVal);
 
-        // Real target: no loop started → GetConnection returns null
-        Assert.Null(pool.GetConnection("real1"));
+        // Real target: configured but its loop was skipped (router failed). Since
+        // C11 a facade is created EAGERLY for every configured target, so
+        // GetConnection returns the (stable) facade — not null. The facade has no
+        // live connection: it reads as disconnected and any operation on it throws
+        // AdsConnectionUnavailableException.
+        var realFacade = pool.GetConnection("real1");
+        Assert.NotNull(realFacade);
+        Assert.IsType<AdsConnectionFacade>(realFacade);
+        Assert.False(realFacade!.IsConnected);
+        await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
+            () => realFacade.ReadValueAsync("X", CancellationToken.None));
 
         // Fake real factory was NOT called (real target was skipped)
         Assert.Equal(0, factory.CreateCount);

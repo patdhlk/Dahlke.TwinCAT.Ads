@@ -91,23 +91,38 @@ public class AdsConnectionPoolTests
     private static Task Await(Task hook) => hook.WaitAsync(RealTimeout);
 
     /// <summary>
-    /// The pool stores the live connection (line: _connections[plcId] = ads)
-    /// AFTER ads.Connect() returns — and our Connect hook fires from INSIDE
-    /// Connect(). So between the hook firing and the dict write there is a
-    /// window. This polls GetConnection (real-time guard only) until the
-    /// expected instance is published, removing that window from assertions.
+    /// The pool publishes the live connection into the stable facade (line:
+    /// facade.SetCurrent(ads)) AFTER ads.Connect() returns — and our Connect hook
+    /// fires from INSIDE Connect(). So between the hook firing and the publish
+    /// there is a window. This polls the facade's current underlying connection
+    /// (real-time guard only) until the expected managed instance is published,
+    /// removing that window from assertions.
     /// </summary>
+    /// <remarks>
+    /// Since the C11 facade redesign, <c>GetConnection</c> returns a STABLE
+    /// per-target facade whose identity never changes — it is not the underlying
+    /// managed connection. To pin "the facade routes to THIS managed connection"
+    /// we assert on the facade's <c>CurrentForTesting</c> instead of on
+    /// <c>GetConnection</c> identity.
+    /// </remarks>
     private static async Task WaitForConnection(AdsConnectionPool pool, string plcId, object expected)
     {
         var deadline = DateTime.UtcNow + RealTimeout;
-        while (!ReferenceEquals(pool.GetConnection(plcId), expected))
+        while (!ReferenceEquals(CurrentOf(pool, plcId), expected))
         {
             if (DateTime.UtcNow > deadline)
                 throw new TimeoutException(
-                    $"GetConnection('{plcId}') never became the expected instance.");
+                    $"Facade for '{plcId}' never routed to the expected managed instance.");
             await Task.Delay(TimeSpan.FromMilliseconds(5));
         }
     }
+
+    /// <summary>
+    /// The managed connection the stable facade currently routes to (or null
+    /// during an outage). The facade itself is what <c>GetConnection</c> returns.
+    /// </summary>
+    private static IManagedConnection? CurrentOf(AdsConnectionPool pool, string plcId)
+        => ((AdsConnectionFacade)pool.GetConnection(plcId)!).CurrentForTesting;
 
     // =====================================================================
 
@@ -125,7 +140,8 @@ public class AdsConnectionPoolTests
 
         Assert.Equal(1, conn.ConnectCount);
         Assert.Same(conn, factory.Created[0]);
-        Assert.Same(conn, pool.GetConnection("plc1"));
+        // GetConnection returns the stable facade; it routes to the managed conn.
+        Assert.Same(conn, CurrentOf(pool, "plc1"));
 
         await pool.StopAsync(CancellationToken.None);
     }
@@ -276,7 +292,7 @@ public class AdsConnectionPoolTests
         await AdvanceUntilCreateCount(time, factory, 3);
         await Await(healthy.ConnectCalled);
         await WaitForConnection(pool, "plc1", healthy);
-        Assert.Same(healthy, pool.GetConnection("plc1"));
+        Assert.Same(healthy, CurrentOf(pool, "plc1"));
 
         // Healthy connect resets backoff to 2s. Inner health loop: Task.Delay(5s)
         // then IsAliveAsync returns false -> break -> grace(2s) -> backoff(2s) -> attempt 4.
@@ -309,13 +325,13 @@ public class AdsConnectionPoolTests
 
         await Await(first.ConnectCalled);
         await WaitForConnection(pool, "plc1", first);
-        Assert.Same(first, pool.GetConnection("plc1"));
+        Assert.Same(first, CurrentOf(pool, "plc1"));
 
         // 1st health check (passes). Advance 5s until IsAliveAsync fires.
         first.RearmIsAliveCalled();
         await AdvanceUntil(time, first.IsAliveCalled, Health);
         Assert.Equal(1, first.IsAliveCount);
-        Assert.Same(first, pool.GetConnection("plc1")); // still alive
+        Assert.Same(first, CurrentOf(pool, "plc1")); // still alive
 
         // 2nd health check (fails) -> inner loop breaks -> cleanup.
         first.RearmIsAliveCalled();
@@ -329,7 +345,7 @@ public class AdsConnectionPoolTests
 
         Assert.Equal(1, first.ForceDisconnectCount);
         Assert.Equal(1, first.DisposeCount);
-        Assert.Same(second, pool.GetConnection("plc1"));
+        Assert.Same(second, CurrentOf(pool, "plc1"));
 
         await pool.StopAsync(CancellationToken.None);
     }
@@ -347,7 +363,7 @@ public class AdsConnectionPoolTests
 
         await Await(conn.ConnectCalled);
         await WaitForConnection(pool, "plc1", conn);
-        Assert.Same(conn, pool.GetConnection("plc1"));
+        Assert.Same(conn, CurrentOf(pool, "plc1"));
 
         // Stop must complete promptly via cancellation, NOT by waiting on the
         // 10s WaitAsync timeout — the loop exits on its cancellation token.
@@ -361,7 +377,12 @@ public class AdsConnectionPoolTests
         Assert.Equal(0, conn.DisconnectCount);      // loop cleanup uses ForceDisconnect, not Disconnect
         Assert.Equal(1, conn.ForceDisconnectCount); // loop cleanup called ForceDisconnect
         Assert.Equal(1, conn.DisposeCount);         // loop cleanup disposed it
-        Assert.Null(pool.GetConnection("plc1"));
+        // The stable facade is still returned after stop, but it no longer routes
+        // to any connection: its current pointer is cleared and it reads as
+        // disconnected.
+        var facade = Assert.IsType<AdsConnectionFacade>(pool.GetConnection("plc1"));
+        Assert.Null(facade.CurrentForTesting);
+        Assert.False(facade.IsConnected);
     }
 
     [Fact]
@@ -379,7 +400,8 @@ public class AdsConnectionPoolTests
 
         await Await(first.ConnectCalled);
         await WaitForConnection(pool, "plc1", first);
-        Assert.Same(first, pool.GetConnection("plc1"));
+        var facade = pool.GetConnection("plc1");
+        Assert.Same(first, CurrentOf(pool, "plc1"));
 
         // ForceReconnect cancels the old loop and starts a new one. The new
         // loop calls Create + Connect immediately (no pre-delay).
@@ -387,7 +409,10 @@ public class AdsConnectionPoolTests
 
         await Await(second.ConnectCalled);
         await WaitForConnection(pool, "plc1", second);
-        Assert.Same(second, pool.GetConnection("plc1"));
+        Assert.Same(second, CurrentOf(pool, "plc1"));
+        // The facade instance itself is unchanged across the reconnect; only the
+        // underlying connection it routes to changed.
+        Assert.Same(facade, pool.GetConnection("plc1"));
         Assert.Equal(2, factory.CreateCount);
 
         await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);

@@ -22,13 +22,17 @@ public class AdsConnectionPoolSimulatedTests
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan Health = TimeSpan.FromSeconds(5);
 
+    // Since the C11 facade redesign, GetConnection returns the stable facade
+    // eagerly (before the underlying connects), so waiting for non-null no longer
+    // means "connected". Wait until the facade reports IsConnected — i.e. the
+    // underlying connection has been published into it.
     private static async Task WaitForConnection(AdsConnectionPool pool, string plcId)
     {
         var deadline = DateTime.UtcNow + RealTimeout;
-        while (pool.GetConnection(plcId) is null)
+        while (pool.GetConnection(plcId) is not { IsConnected: true })
         {
             if (DateTime.UtcNow > deadline)
-                throw new TimeoutException($"GetConnection('{plcId}') never published a connection.");
+                throw new TimeoutException($"Facade for '{plcId}' never became connected.");
             await Task.Delay(TimeSpan.FromMilliseconds(5));
         }
     }

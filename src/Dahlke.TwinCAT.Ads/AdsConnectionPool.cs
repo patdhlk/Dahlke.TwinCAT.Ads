@@ -12,6 +12,13 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     private readonly ILogger<AdsConnectionPool> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<string, IManagedConnection> _connections = new(StringComparer.OrdinalIgnoreCase);
+
+    // Stable per-target facades. Created eagerly in StartAsync — one per
+    // CONFIGURED target, independent of whether (or when) that target's loop ever
+    // connects. A facade's identity never changes for the pool's lifetime; the
+    // loop pushes the live underlying connection into it via SetCurrent and clears
+    // it via ClearCurrent at exactly the points it updates _connections.
+    private readonly ConcurrentDictionary<string, AdsConnectionFacade> _facades = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _reconnectCts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Task> _loopTasks = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConnectionState> _states = new(StringComparer.OrdinalIgnoreCase);
@@ -28,9 +35,12 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     /// <para>
     /// When a handler observes the transition into
     /// <see cref="ConnectionState.Disconnected"/> for a target, the dead
-    /// connection has already been removed from the pool, so
-    /// <see cref="GetConnection"/> returns <see langword="null"/> for that target
-    /// — a handler will never be handed an about-to-be-disposed connection.
+    /// underlying connection has already been removed from the pool and cleared
+    /// from that target's facade. <see cref="GetConnection"/> still returns the
+    /// stable facade (its identity never changes), but the facade then reports
+    /// <see cref="IAdsConnection.IsConnected"/> as <see langword="false"/> and any
+    /// operation on it throws <see cref="AdsConnectionUnavailableException"/> — a
+    /// handler is never routed to an about-to-be-disposed connection.
     /// </para>
     /// </remarks>
     internal event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
@@ -59,6 +69,14 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        // Eagerly create one stable facade per CONFIGURED target — including real
+        // targets whose loops may be skipped on router failure, and before any
+        // loop has connected. GetConnection therefore returns a non-changing
+        // facade from this point on; operations on it throw
+        // AdsConnectionUnavailableException until a connection is published.
+        foreach (var (plcId, options) in _targets)
+            _facades[plcId] = new AdsConnectionFacade(plcId, options);
 
         var hasRealTargets = _targets.Values.Any(t => t.Mode == ConnectionMode.Real);
 
@@ -144,6 +162,14 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         _reconnectCts.Clear();
         _loopTasks.Clear();
 
+        // Clear every facade's current pointer first so that, once the pool is
+        // stopping, all operations throw AdsConnectionUnavailableException rather
+        // than routing to a connection we are about to dispose. Facades hold no
+        // resources, so they are cleared — not disposed — and the (now inert)
+        // instances are retained.
+        foreach (var (_, facade) in _facades)
+            facade.Clear();
+
         foreach (var (plcId, connection) in _connections)
         {
             try { connection.Disconnect(); }
@@ -166,13 +192,17 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
     public IAdsConnection? GetConnection(string plcId)
     {
-        _connections.TryGetValue(plcId, out var connection);
-        return connection;
+        // Returns the stable per-target facade. Null only for an UNCONFIGURED id
+        // (no facade was created for it). For a configured target the facade is
+        // returned even before its loop connects or during an outage — operations
+        // on it then throw AdsConnectionUnavailableException.
+        _facades.TryGetValue(plcId, out var facade);
+        return facade;
     }
 
     public IReadOnlyDictionary<string, IAdsConnection> GetAllConnections()
     {
-        return _connections.ToDictionary(kvp => kvp.Key, kvp => (IAdsConnection)kvp.Value);
+        return _facades.ToDictionary(kvp => kvp.Key, kvp => (IAdsConnection)kvp.Value);
     }
 
     /// <summary>
@@ -283,6 +313,10 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             try { cts.Cancel(); } catch { }
             cts.Dispose();
         }
+        // Clear facade pointers before disposing the underlying connections so
+        // no facade routes to a disposed instance (mirrors StopAsync).
+        foreach (var (_, facade) in _facades)
+            facade.Clear();
         foreach (var (_, connection) in _connections)
             connection.Dispose();
         _stoppingCts?.Dispose();
@@ -333,7 +367,19 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                     _logger.LogInformation("Connecting to PLC {PlcId}...", plcId);
                     SetState(plcId, ConnectionState.Connecting);
                     ads.Connect();
+                    // Re-check after the synchronous Connect(): if StopAsync
+                    // cancelled while Connect() was blocking (possibly past the
+                    // 10s teardown timeout), publishing now would resurrect a
+                    // stopped pool's facade pointer. Throwing routes through the
+                    // cancellation catch into the cleanup block, which tears the
+                    // connection down without ever publishing it.
+                    cts.Token.ThrowIfCancellationRequested();
                     _connections[plcId] = ads;
+                    // Publish the live connection into the stable facade so
+                    // GetConnection's facade now routes here. Piggybacks the
+                    // _connections write — same point, same instance.
+                    if (_facades.TryGetValue(plcId, out var facadeToSet))
+                        facadeToSet.SetCurrent(ads);
                     published = true;
                     SetState(plcId, ConnectionState.Connected);
                     delay = MinReconnectDelay;
@@ -383,6 +429,15 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                     // about-to-be-disposed instance.
                     var wasCurrent = _connections.TryRemove(
                         new KeyValuePair<string, IManagedConnection>(plcId, ads));
+
+                    // Clear the facade's current pointer, but only if it still
+                    // points at THIS connection. Compare-and-clear mirrors the
+                    // _connections compare-and-remove above: a newer connection
+                    // (e.g. from ForceReconnect) that has already replaced ours
+                    // is left intact, so a stale teardown never blanks a live
+                    // facade.
+                    if (_facades.TryGetValue(plcId, out var facadeToClear))
+                        facadeToClear.ClearCurrent(ads);
 
                     // Announce Disconnected only when this loop owns the current
                     // state — either it still held the live connection (wasCurrent),

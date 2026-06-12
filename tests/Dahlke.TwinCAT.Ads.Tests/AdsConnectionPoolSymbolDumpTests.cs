@@ -45,17 +45,23 @@ public class AdsConnectionPoolSymbolDumpTests
         return (pool, conn, signal);
     }
 
+    // Since the C11 facade redesign, GetConnection returns the stable facade, not
+    // the underlying managed connection. Wait on the facade's current routing
+    // target instead of on GetConnection identity.
     private static async Task WaitForConnection(AdsConnectionPool pool, string plcId, object expected)
     {
         var deadline = DateTime.UtcNow + RealTimeout;
-        while (!ReferenceEquals(pool.GetConnection(plcId), expected))
+        while (!ReferenceEquals(CurrentOf(pool, plcId), expected))
         {
             if (DateTime.UtcNow > deadline)
                 throw new TimeoutException(
-                    $"GetConnection('{plcId}') never became the expected instance.");
+                    $"Facade for '{plcId}' never routed to the expected managed instance.");
             await Task.Delay(TimeSpan.FromMilliseconds(5));
         }
     }
+
+    private static IManagedConnection? CurrentOf(AdsConnectionPool pool, string plcId)
+        => ((AdsConnectionFacade)pool.GetConnection(plcId)!).CurrentForTesting;
 
     /// <summary>
     /// When <see cref="SymbolDumpOptions.Enabled"/> is <see langword="true"/>,
