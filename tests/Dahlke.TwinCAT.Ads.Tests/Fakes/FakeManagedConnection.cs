@@ -96,11 +96,27 @@ internal sealed class FakeManagedConnection : IManagedConnection
         get { lock (_gate) { return _isAliveCalled.Task; } }
     }
 
+    /// <remarks>
+    /// <b>Invariant.</b> Re-arming is only safe AFTER awaiting the prior
+    /// <see cref="ConnectCalled"/> hook — i.e. once the loop has parked past the
+    /// <see cref="Connect"/> it last signalled. Re-arming while the loop is still inside
+    /// (or about to enter) <see cref="Connect"/> races the loop's <c>TrySetResult</c>
+    /// against the swap, so the just-installed TCS may be the one completed (losing the
+    /// next signal) or the about-to-be-replaced one may be (losing the current signal).
+    /// Await the prior hook first, then re-arm.
+    /// </remarks>
     public void RearmConnectCalled()
     {
         lock (_gate) { _connectCalled = NewTcs(); }
     }
 
+    /// <remarks>
+    /// <b>Invariant.</b> Re-arming is only safe AFTER awaiting the prior
+    /// <see cref="IsAliveCalled"/> hook — i.e. once the loop has parked past the
+    /// <see cref="IsAliveAsync"/> it last signalled. Re-arming mid-call races the loop's
+    /// <c>TrySetResult</c> against the swap and can drop a signal either way; await the
+    /// prior hook first, then re-arm.
+    /// </remarks>
     public void RearmIsAliveCalled()
     {
         lock (_gate) { _isAliveCalled = NewTcs(); }

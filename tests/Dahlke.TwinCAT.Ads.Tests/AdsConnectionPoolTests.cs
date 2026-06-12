@@ -72,6 +72,14 @@ public class AdsConnectionPoolTests
     /// not the primary synchronisation mechanism — the hook (a TCS completed
     /// from inside the loop) is.
     /// </summary>
+    /// <remarks>
+    /// <b>Guarantee.</b> This returns once the supplied <paramref name="hook"/> has
+    /// FIRED — it does NOT guarantee that exactly one timer elapsed, nor how many
+    /// <paramref name="step"/> advances it took to get there. The retry loop advances
+    /// repeatedly until the hook completes, so an arbitrary number of intervening
+    /// timers may have elapsed. Assert on the hook firing (or on a re-armed hook for
+    /// the NEXT occurrence), never on the count of advances.
+    /// </remarks>
     private static async Task AdvanceUntil(FakeTimeProvider time, Task hook, TimeSpan step)
     {
         var deadline = DateTime.UtcNow + RealTimeout;
