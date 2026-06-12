@@ -190,12 +190,12 @@ public class SimulatedAdsConnectionSubscriptionTests
         }, CancellationToken.None);
 
         // First batch: both paths change.
-        await conn.WriteValuesAsync(new Dictionary<string, object> { ["A.x"] = 1, ["B.y"] = 2 }, CancellationToken.None);
+        await conn.WriteValuesAsync(new Dictionary<string, object?> { ["A.x"] = 1, ["B.y"] = 2 }, CancellationToken.None);
         Assert.Equal([1], receivedByPath["A.x"].Cast<int>().ToArray());
         Assert.Equal([2], receivedByPath["B.y"].Cast<int>().ToArray());
 
         // Second batch: only A.x changes (B.y same value → no callback).
-        await conn.WriteValuesAsync(new Dictionary<string, object> { ["A.x"] = 3, ["B.y"] = 2 }, CancellationToken.None);
+        await conn.WriteValuesAsync(new Dictionary<string, object?> { ["A.x"] = 3, ["B.y"] = 2 }, CancellationToken.None);
         Assert.Equal([1, 3], receivedByPath["A.x"].Cast<int>().ToArray());
         Assert.Equal([2], receivedByPath["B.y"].Cast<int>().ToArray()); // still just the one
     }

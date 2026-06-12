@@ -75,4 +75,26 @@ public class C19_AdsValueConverterTests
         var ok = AdsValueConverter.TryConvertForNotification<int>(Guid.NewGuid(), "A.x", null, out _);
         Assert.False(ok);
     }
+
+    // ---- Read-path message wording: "Symbol", not "Simulated symbol" ----
+    // ConvertForRead is now called on real connections too, so its actionable
+    // InvalidCastException messages must not claim the symbol is simulated.
+
+    [Fact]
+    public void ConvertForRead_NullValueType_MessageSaysSymbol_NotSimulated()
+    {
+        var ex = Assert.Throws<InvalidCastException>(
+            () => AdsValueConverter.ConvertForRead<int>(null, "X.y"));
+        Assert.Contains("Symbol 'X.y'", ex.Message);
+        Assert.DoesNotContain("Simulated symbol", ex.Message);
+    }
+
+    [Fact]
+    public void ConvertForRead_IncompatibleType_MessageSaysSymbol_NotSimulated()
+    {
+        var ex = Assert.Throws<InvalidCastException>(
+            () => AdsValueConverter.ConvertForRead<int>(Guid.NewGuid(), "X.y"));
+        Assert.Contains("Symbol 'X.y'", ex.Message);
+        Assert.DoesNotContain("Simulated symbol", ex.Message);
+    }
 }

@@ -406,17 +406,28 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     }
 
     /// <inheritdoc />
-    public async Task<Dictionary<string, object?>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+    /// <remarks>
+    /// <b>Snapshot-once.</b> The whole batch runs against ONE connection captured by a single
+    /// <c>SnapshotAsync</c> at the start. If a reconnect happens mid-batch, the batch still
+    /// completes against the originally captured connection. During an outage this waits up to
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> then throws
+    /// <see cref="AdsConnectionUnavailableException"/> for the whole batch.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
     {
         var conn = await SnapshotAsync(ct).ConfigureAwait(false);
         return await conn.ReadValuesAsync(symbolPaths, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct)
+    /// <remarks>
+    /// Snapshot-once: see <see cref="ReadValuesAsync"/>. The whole batch runs against one
+    /// captured connection.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
     {
         var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        await conn.WriteValuesAsync(values, ct).ConfigureAwait(false);
+        return await conn.WriteValuesAsync(values, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

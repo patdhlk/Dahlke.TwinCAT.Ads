@@ -177,10 +177,10 @@ internal sealed class FakeManagedConnection : IManagedConnection
     public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
         => throw new NotSupportedException();
 
-    public Task<Dictionary<string, object?>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+    public Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
         => throw new NotSupportedException();
 
-    public Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct)
+    public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
         => throw new NotSupportedException();
 
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)

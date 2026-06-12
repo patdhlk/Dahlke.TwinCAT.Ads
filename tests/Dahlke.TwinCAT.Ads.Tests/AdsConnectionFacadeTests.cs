@@ -47,7 +47,7 @@ public class AdsConnectionFacadeTests
 
         await AssertWaitsThenThrows(facade.WriteValueAsync("X", 1, CancellationToken.None), time);
         await AssertWaitsThenThrows(facade.ReadValuesAsync(["X"], CancellationToken.None), time);
-        await AssertWaitsThenThrows(facade.WriteValuesAsync(new() { ["X"] = 1 }, CancellationToken.None), time);
+        await AssertWaitsThenThrows(facade.WriteValuesAsync(new Dictionary<string, object?> { ["X"] = 1 }, CancellationToken.None), time);
         await AssertWaitsThenThrows(facade.GetAdsStateAsync(CancellationToken.None), time);
         await AssertWaitsThenThrows(facade.SubscribeAsync("X", 100, (_, _) => { }, CancellationToken.None), time);
 
@@ -609,11 +609,11 @@ public class AdsConnectionFacadeTests
             return Task.CompletedTask;
         }
 
-        public Task<Dictionary<string, object?>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
-            => Task.FromResult(new Dictionary<string, object?>());
+        public Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+            => Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(new Dictionary<string, AdsValueResult>());
 
-        public Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct)
-            => Task.CompletedTask;
+        public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
+            => Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(new Dictionary<string, AdsValueResult>());
 
         public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
             => Task.FromResult(default(AdsState));

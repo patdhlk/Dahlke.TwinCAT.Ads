@@ -459,11 +459,11 @@ public class C18_GenericReadWriteTests
             return Task.CompletedTask;
         }
 
-        public Task<Dictionary<string, object?>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
-            => Task.FromResult(new Dictionary<string, object?>());
+        public Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+            => Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(new Dictionary<string, AdsValueResult>());
 
-        public Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct)
-            => Task.CompletedTask;
+        public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
+            => Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(new Dictionary<string, AdsValueResult>());
 
         public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
             => Task.FromResult(default(AdsState));

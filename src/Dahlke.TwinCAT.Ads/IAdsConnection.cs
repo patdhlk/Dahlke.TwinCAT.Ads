@@ -173,8 +173,67 @@ public interface IAdsConnection
     /// <see cref="WriteValueAsync{T}(string, T, CancellationToken)"/>.
     /// </remarks>
     Task WriteValueAsync(string symbolPath, object value, CancellationToken ct);
-    Task<Dictionary<string, object?>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct);
-    Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct);
+    /// <summary>
+    /// Reads several PLC symbols in one call, returning a per-symbol outcome for each.
+    /// </summary>
+    /// <param name="symbolPaths">
+    /// The symbol paths to read. Duplicate paths are de-duplicated — the returned dictionary
+    /// has exactly one entry per distinct path.
+    /// </param>
+    /// <param name="ct">Cancels the whole batch (see remarks).</param>
+    /// <returns>
+    /// A dictionary keyed by symbol path with one <see cref="AdsValueResult"/> per requested
+    /// (distinct) symbol. A readable symbol yields <see cref="AdsValueResult.Success"/> carrying
+    /// its value; an unreadable symbol yields <see cref="AdsValueResult.Failure"/> carrying the
+    /// originating exception.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="ct"/> is cancelled. Cancellation aborts the ENTIRE batch — it
+    /// is NOT recorded as a per-symbol failure. When this is thrown the returned dictionary is
+    /// never produced.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Per-symbol granularity.</b> One bad symbol does not kill the batch: every other symbol
+    /// still gets its own result. Inspect each entry's <see cref="AdsValueResult.Succeeded"/>.
+    /// </para>
+    /// <para>
+    /// <b>Interim semantics (revisited in a later commit).</b> The current implementations read
+    /// each symbol with its own single-read call, so each symbol gets its own
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> window. A future optimisation will issue sum
+    /// commands; the per-symbol result contract is designed to survive that change.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct);
+
+    /// <summary>
+    /// Writes several PLC symbols in one call, returning a per-symbol outcome for each.
+    /// </summary>
+    /// <param name="values">
+    /// The symbol-path → value pairs to write. Because the input is a dictionary, duplicate paths
+    /// are impossible — last writer wins is already resolved by the caller's dictionary.
+    /// </param>
+    /// <param name="ct">Cancels the whole batch (see remarks).</param>
+    /// <returns>
+    /// A dictionary keyed by symbol path with one <see cref="AdsValueResult"/> per requested
+    /// symbol. A successful write yields <see cref="AdsValueResult.Success"/> with a
+    /// <see langword="null"/> value; a failed write yields <see cref="AdsValueResult.Failure"/>
+    /// carrying the originating exception.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="ct"/> is cancelled. Cancellation aborts the ENTIRE batch — it
+    /// is NOT recorded as a per-symbol failure. When this is thrown the returned dictionary is
+    /// never produced.
+    /// </exception>
+    /// <remarks>
+    /// Per-symbol granularity and interim per-symbol timeout semantics match
+    /// <see cref="ReadValuesAsync"/>; see its remarks. The write lock is acquired once for the
+    /// whole batch, but each individual write still gets its own
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> window; a timeout on an individual write is
+    /// recorded as a per-symbol <see cref="AdsValueResult.Failure"/> and does NOT abort the batch,
+    /// while caller cancellation aborts the whole batch.
+    /// </remarks>
+    Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct);
 
     Task<AdsState> GetAdsStateAsync(CancellationToken ct);
 

@@ -44,7 +44,7 @@ internal static class AdsValueConverter
             // For non-nullable value types null is illegal: there's nothing to return.
             if (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) is null)
                 throw new InvalidCastException(
-                    $"Simulated symbol '{symbolPath}' has a null stored value; " +
+                    $"Symbol '{symbolPath}' has a null stored value; " +
                     $"cannot convert null to non-nullable value type '{targetType.Name}'.");
 
             // Reference type or Nullable<T>: null is a valid result.
@@ -67,7 +67,7 @@ internal static class AdsValueConverter
             catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
             {
                 throw new InvalidCastException(
-                    $"Simulated symbol '{symbolPath}': cannot convert stored value " +
+                    $"Symbol '{symbolPath}': cannot convert stored value " +
                     $"'{value}' (type: {value.GetType().Name}) to '{typeof(T).Name}'. {ex.Message}",
                     ex);
             }
@@ -75,7 +75,7 @@ internal static class AdsValueConverter
 
         // Non-IConvertible, not assignable: fail with an actionable message.
         throw new InvalidCastException(
-            $"Simulated symbol '{symbolPath}': stored value has type '{value.GetType().Name}' " +
+            $"Symbol '{symbolPath}': stored value has type '{value.GetType().Name}' " +
             $"which cannot be converted to requested type '{typeof(T).Name}'.");
     }
 

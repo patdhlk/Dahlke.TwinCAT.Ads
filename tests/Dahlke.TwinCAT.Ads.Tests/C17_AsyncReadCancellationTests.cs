@@ -117,7 +117,7 @@ public class C17_AsyncReadCancellationTests
         cts.Cancel();
 
         await Assert.ThrowsAsync<OperationCanceledException>(
-            () => conn.WriteValuesAsync(new Dictionary<string, object> { ["A"] = 1 }, cts.Token));
+            () => conn.WriteValuesAsync(new Dictionary<string, object?> { ["A"] = 1 }, cts.Token));
     }
 
     // =========================================================================

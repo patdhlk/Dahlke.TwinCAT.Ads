@@ -52,7 +52,7 @@ var counter = await connection.ReadValueAsync("GVL.Counter", ct);
 Console.WriteLine($"GVL.Counter = {counter}");
 
 // Batch write and batch read.
-await connection.WriteValuesAsync(new Dictionary<string, object>
+await connection.WriteValuesAsync(new Dictionary<string, object?>
 {
     ["GVL.SetpointTemperature"] = 21.5f,
     ["GVL.PumpRunning"] = true,
@@ -60,8 +60,9 @@ await connection.WriteValuesAsync(new Dictionary<string, object>
 
 var values = await connection.ReadValuesAsync(
     ["GVL.SetpointTemperature", "GVL.PumpRunning"], ct);
-foreach (var (symbol, value) in values)
-    Console.WriteLine($"{symbol} = {value}");
+// Each entry carries a per-symbol AdsValueResult: Succeeded plus Value (or Error).
+foreach (var (symbol, result) in values)
+    Console.WriteLine($"{symbol} = {(result.Succeeded ? result.Value : $"ERROR: {result.Error?.Message}")}");
 
 // Query the PLC run state.
 var state = await connection.GetAdsStateAsync(ct);

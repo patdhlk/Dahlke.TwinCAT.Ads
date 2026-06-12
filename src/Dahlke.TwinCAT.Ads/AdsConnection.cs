@@ -147,31 +147,111 @@ public sealed class AdsConnection : IManagedConnection
         }
     }
 
-    public async Task<Dictionary<string, object?>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+    /// <inheritdoc />
+    /// <remarks>
+    /// Interim implementation: iterates and issues one single read per distinct symbol, so each
+    /// symbol burns its own <see cref="PlcTargetOptions.TimeoutMs"/> window. A later commit adds
+    /// sum commands. A per-symbol failure is captured as <see cref="AdsValueResult.Failure"/>;
+    /// cancellation rethrows and aborts the whole batch.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
     {
-        var results = new Dictionary<string, object?>();
+        var results = new Dictionary<string, AdsValueResult>();
         foreach (var path in symbolPaths)
         {
-            results[path] = await ReadValueAsync(path, ct).ConfigureAwait(false);
+            // De-dup: a repeated path is read once.
+            if (results.ContainsKey(path))
+                continue;
+
+            try
+            {
+                var value = await ReadValueAsync(path, ct).ConfigureAwait(false);
+                results[path] = AdsValueResult.Success(value, path);
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancellation aborts the WHOLE batch, not just this symbol.
+                throw;
+            }
+            catch (Exception ex)
+            {
+                results[path] = AdsValueResult.Failure(ex, path);
+            }
         }
         return results;
     }
 
-    public async Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct)
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Interim implementation: iterates and issues one single write per symbol. A future commit
+    /// adds sum commands; the per-symbol result contract is designed to survive that change.
+    /// </para>
+    /// <para>
+    /// <b>Locking.</b> The write lock is acquired ONCE for the whole batch (matching batch write
+    /// semantics) using <paramref name="ct"/> only — the lock wait is a contention wait, not a
+    /// hardware operation, so it is not subject to a per-symbol timeout. If the lock wait is
+    /// cancelled the whole batch is aborted via <see cref="OperationCanceledException"/>.
+    /// </para>
+    /// <para>
+    /// <b>Per-symbol timeout windows.</b> Each individual <c>WriteSymbolAsync</c> call burns its
+    /// own <see cref="PlcTargetOptions.TimeoutMs"/> window. A timeout on an individual write is
+    /// recorded as a per-symbol <see cref="AdsValueResult.Failure"/> (carrying a
+    /// <see cref="TimeoutException"/>) and does NOT abort the batch; only caller cancellation
+    /// (via <paramref name="ct"/>) aborts the whole batch.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
     {
-        using var cts = CreateTimeoutCts(ct);
-        await _writeLock.WaitAsync(cts.Token).ConfigureAwait(false);
+        var results = new Dictionary<string, AdsValueResult>();
+
+        // Acquire the write lock ONCE for the whole batch. The wait uses ct only: it is a
+        // contention wait, not a hardware op, so no per-symbol timeout applies. A cancelled
+        // wait aborts the whole batch (OCE propagates).
+        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             foreach (var (path, value) in values)
             {
-                await _client.WriteSymbolAsync(path, value, cts.Token).ConfigureAwait(false);
+                // A real PLC write needs an actual value; a null is a per-symbol programming
+                // error, captured as a failure rather than aborting the batch.
+                if (value is null)
+                {
+                    results[path] = AdsValueResult.Failure(
+                        new ArgumentNullException(
+                            $"values[\"{path}\"]", $"Cannot write a null value to symbol '{path}'."),
+                        path);
+                    continue;
+                }
+
+                try
+                {
+                    // Per-symbol timeout window applies only to the write itself.
+                    using var cts = CreateTimeoutCts(ct);
+                    await _client.WriteSymbolAsync(path, value, cts.Token).ConfigureAwait(false);
+                    results[path] = AdsValueResult.Success(null, path);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Disambiguate: caller cancellation aborts the batch; a per-symbol timeout
+                    // is recorded as a failure and the loop continues.
+                    var ex = CancellationDisambiguator.CreateException(ct, path, PlcId, _options.TimeoutMs);
+                    if (ex is OperationCanceledException oce)
+                        throw oce;
+                    results[path] = AdsValueResult.Failure(ex, path);
+                }
+                catch (Exception ex)
+                {
+                    results[path] = AdsValueResult.Failure(ex, path);
+                }
             }
         }
         finally
         {
             _writeLock.Release();
         }
+
+        return results;
     }
 
     public async Task<AdsState> GetAdsStateAsync(CancellationToken ct)

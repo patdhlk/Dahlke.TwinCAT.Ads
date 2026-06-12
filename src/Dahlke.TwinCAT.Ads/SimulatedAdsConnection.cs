@@ -207,30 +207,83 @@ public sealed class SimulatedAdsConnection : IManagedConnection
         return Task.CompletedTask;
     }
 
-    public async Task<Dictionary<string, object?>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+    /// <inheritdoc />
+    /// <remarks>
+    /// Per-symbol results. A missing symbol in simulation yields
+    /// <see cref="AdsValueResult.Success"/> with a <see langword="null"/> value — mirroring the
+    /// untyped single-read (<see cref="ReadValueAsync(string, CancellationToken)"/>), which
+    /// returns <see langword="null"/> for an unwritten path while a real connection throws
+    /// <see cref="AdsErrorException"/>. This simulated/real divergence already exists on the
+    /// untyped single-read path; it is kept consistent here and flagged for the contract-test
+    /// commit (C26). Cancellation aborts the whole batch before any result is produced.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
     {
-        var results = new Dictionary<string, object?>();
+        ct.ThrowIfCancellationRequested();
+        var results = new Dictionary<string, AdsValueResult>();
         foreach (var path in symbolPaths)
-            results[path] = (await ReadValueAsync(path, ct).ConfigureAwait(false));
+        {
+            if (results.ContainsKey(path))
+                continue;
+
+            try
+            {
+                var value = await ReadValueAsync(path, ct).ConfigureAwait(false);
+                results[path] = AdsValueResult.Success(value, path);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                results[path] = AdsValueResult.Failure(ex, path);
+            }
+        }
         return results;
     }
 
     /// <summary>
     /// Writes a batch of values and fires registered callbacks per changed symbol
-    /// (on-change semantics, same rules as <see cref="WriteValueAsync"/>).
+    /// (on-change semantics, same rules as <see cref="WriteValueAsync"/>), returning a per-symbol
+    /// result.
     /// </summary>
-    public Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct)
+    /// <remarks>
+    /// A non-null simulated write cannot fail, so each such symbol is wrapped in
+    /// <see cref="AdsValueResult.Success"/> (with a <see langword="null"/> value) to keep the
+    /// batch contract uniform across simulated and real connections. A null value is rejected
+    /// per-symbol with an <see cref="ArgumentNullException"/> wrapped in
+    /// <see cref="AdsValueResult.Failure"/> — matching the real connection, which cannot write a
+    /// null — and is NOT stored. Cancellation aborts the whole batch before any value is stored.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        var results = new Dictionary<string, AdsValueResult>();
         foreach (var (path, value) in values)
         {
+            // A null is a per-symbol programming error (the real path cannot write null);
+            // record it as a failure without touching the symbol store.
+            if (value is null)
+            {
+                results[path] = AdsValueResult.Failure(
+                    new ArgumentNullException(
+                        $"values[\"{path}\"]", $"Cannot write a null value to symbol '{path}'."),
+                    path);
+                continue;
+            }
+
             var hadOldValue = _symbols.TryGetValue(path, out var existing);
             _symbols[path] = value;
 
+            // FireCallbacks never rethrows (per-callback exceptions are caught and logged
+            // inside the subscriber list), so no try/catch is needed around the loop body.
             if (!hadOldValue || !Equals(existing, value))
                 FireCallbacks(path, value);
+
+            results[path] = AdsValueResult.Success(null, path);
         }
-        return Task.CompletedTask;
+        return Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(results);
     }
 
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
