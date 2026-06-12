@@ -93,10 +93,14 @@ public class TwinCatAdsOptionsBindingTests
     }
 
     [Fact]
-    public void Targets_Empty_WhenNoPlcTargetsSection()
+    public void Targets_Empty_WhenNoPlcTargetsSection_ThrowsValidationException()
     {
-        var opts = Resolve(new());
-        Assert.Empty(opts.Targets);
+        // C6 / TwinCatAdsOptionsValidator: an empty Targets collection is now
+        // rejected at startup.  Resolving .Value throws instead of returning
+        // an unusable options object — this is the intended new behavior.
+        using var sp = BuildProvider(new());
+        var opts = sp.GetRequiredService<IOptions<TwinCatAdsOptions>>();
+        Assert.Throws<OptionsValidationException>(() => _ = opts.Value);
     }
 
     // ------------------------------------------------------------------
@@ -106,9 +110,12 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void Router_NetId_BindsFromAmsRouterSection()
     {
+        // C6: a minimal valid target is required to pass validation; the test's
+        // purpose is Router binding, so the target entry is incidental scaffolding.
         var opts = Resolve(new()
         {
-            ["AmsRouter:NetId"] = "192.168.0.1.1.1",
+            ["PlcTargets:plc1:AmsNetId"]  = "1.2.3.4.5.6",
+            ["AmsRouter:NetId"]           = "192.168.0.1.1.1",
         });
 
         Assert.Equal("192.168.0.1.1.1", opts.Router.NetId);
@@ -117,7 +124,13 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void Router_NetId_IsNull_WhenAbsent()
     {
-        var opts = Resolve(new());
+        // C6: a minimal valid target is required to pass validation; the test's
+        // purpose is that an absent AmsRouter section → null NetId, which remains
+        // valid (null NetId = use the system router).
+        var opts = Resolve(new()
+        {
+            ["PlcTargets:plc1:AmsNetId"] = "1.2.3.4.5.6",
+        });
         Assert.Null(opts.Router.NetId);
     }
 
@@ -128,7 +141,12 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void SymbolDump_Defaults_WhenNoConfiguration()
     {
-        var opts = Resolve(new());
+        // C6: a minimal valid target is required to pass validation; the test's
+        // purpose is SymbolDump default values, so the target entry is incidental scaffolding.
+        var opts = Resolve(new()
+        {
+            ["PlcTargets:plc1:AmsNetId"] = "1.2.3.4.5.6",
+        });
 
         Assert.False(opts.Diagnostics.SymbolDump.Enabled);
         Assert.Equal(1, opts.Diagnostics.SymbolDump.MaxDepth);
@@ -142,8 +160,11 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void SymbolDump_BindsFromAdsSymbolDumpSection()
     {
+        // C6: a minimal valid target is required to pass validation; the test's
+        // purpose is AdsSymbolDump section binding, so the target entry is incidental scaffolding.
         var opts = Resolve(new()
         {
+            ["PlcTargets:plc1:AmsNetId"]   = "1.2.3.4.5.6",
             ["AdsSymbolDump:Enabled"]      = "true",
             ["AdsSymbolDump:MaxDepth"]     = "5",
             ["AdsSymbolDump:Prefixes:0"]   = "MAIN",
@@ -162,9 +183,12 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void SymbolDump_LegacyKeyTrue_SetsEnabled()
     {
+        // C6: a minimal valid target is required to pass validation; the test's
+        // purpose is the legacy AdsSymbolTreeDump key behavior.
         var opts = Resolve(new()
         {
-            ["AdsSymbolTreeDump"] = "true",
+            ["PlcTargets:plc1:AmsNetId"] = "1.2.3.4.5.6",
+            ["AdsSymbolTreeDump"]        = "true",
         });
 
         Assert.True(opts.Diagnostics.SymbolDump.Enabled);
@@ -176,9 +200,12 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void SymbolDump_LegacyKeyFalse_DoesNotSetEnabled()
     {
+        // C6: a minimal valid target is required to pass validation; the test's
+        // purpose is that the legacy key=false leaves Enabled=false.
         var opts = Resolve(new()
         {
-            ["AdsSymbolTreeDump"] = "false",
+            ["PlcTargets:plc1:AmsNetId"] = "1.2.3.4.5.6",
+            ["AdsSymbolTreeDump"]        = "false",
         });
 
         Assert.False(opts.Diagnostics.SymbolDump.Enabled);
@@ -189,11 +216,13 @@ public class TwinCatAdsOptionsBindingTests
     {
         // Legacy says enabled=true, new section says enabled=false.
         // New section wins.
+        // C6: a minimal valid target is required to pass validation.
         var opts = Resolve(new()
         {
-            ["AdsSymbolTreeDump"]      = "true",
-            ["AdsSymbolDump:Enabled"]  = "false",
-            ["AdsSymbolDump:MaxDepth"] = "3",
+            ["PlcTargets:plc1:AmsNetId"] = "1.2.3.4.5.6",
+            ["AdsSymbolTreeDump"]        = "true",
+            ["AdsSymbolDump:Enabled"]    = "false",
+            ["AdsSymbolDump:MaxDepth"]   = "3",
         });
 
         Assert.False(opts.Diagnostics.SymbolDump.Enabled);

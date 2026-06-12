@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace Dahlke.TwinCAT.Ads;
 
@@ -52,6 +53,8 @@ public static class ServiceCollectionExtensions
         IServiceCollection services,
         IConfiguration configuration)
     {
+        services.TryAddSingleton<IValidateOptions<TwinCatAdsOptions>, TwinCatAdsOptionsValidator>();
+
         services.AddOptions<TwinCatAdsOptions>()
             .Configure(o =>
             {
@@ -70,6 +73,7 @@ public static class ServiceCollectionExtensions
                 var symbolDumpSection = configuration.GetSection("AdsSymbolDump");
                 if (symbolDumpSection.Exists())
                     symbolDumpSection.Bind(o.Diagnostics.SymbolDump);
-            });
+            })
+            .ValidateOnStart();
     }
 }
