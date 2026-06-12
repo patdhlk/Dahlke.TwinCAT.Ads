@@ -585,10 +585,22 @@ public class AdsConnectionFacadeTests
         public string? LastReadPath { get; private set; }
         public (string Path, object Value)? LastWrite { get; private set; }
 
+        public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+        {
+            LastReadPath = symbolPath;
+            return Task.FromResult((T)ReadResult!);
+        }
+
         public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
         {
             LastReadPath = symbolPath;
             return Task.FromResult(ReadResult);
+        }
+
+        public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
+        {
+            LastWrite = (symbolPath, value!);
+            return Task.CompletedTask;
         }
 
         public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)

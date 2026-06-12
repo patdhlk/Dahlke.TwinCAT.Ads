@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using TwinCAT.Ads;
 
 namespace Dahlke.TwinCAT.Ads;
@@ -96,12 +97,125 @@ public sealed class SimulatedAdsConnection : IManagedConnection
         // No callbacks fired — seeding does not notify subscribers.
     }
 
+    /// <summary>
+    /// Reads the stored value and converts it to <typeparamref name="T"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Conversion rules (in priority order):</b>
+    /// <list type="number">
+    ///   <item><description>
+    ///     If the symbol path has no stored value (was never written or seeded),
+    ///     an <see cref="AdsErrorException"/> with
+    ///     <see cref="AdsErrorCode.DeviceSymbolNotFound"/> is thrown — the same
+    ///     exception shape a real connection surfaces for an unknown symbol.
+    ///   </description></item>
+    ///   <item><description>
+    ///     If the stored value is <see langword="null"/> and <typeparamref name="T"/>
+    ///     is a non-nullable value type, an <see cref="InvalidCastException"/> is thrown
+    ///     (actionable: includes symbol, type name).
+    ///   </description></item>
+    ///   <item><description>
+    ///     If the stored value is <see langword="null"/> and <typeparamref name="T"/>
+    ///     is a reference type or nullable value type, <see langword="default"/>
+    ///     (<see langword="null"/>) is returned.
+    ///   </description></item>
+    ///   <item><description>
+    ///     If the stored value is already a <typeparamref name="T"/> (exact type or
+    ///     assignable), it is returned by direct cast.
+    ///   </description></item>
+    ///   <item><description>
+    ///     If the stored value implements <see cref="IConvertible"/> (covers all
+    ///     primitive types and <see cref="string"/>),
+    ///     <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> with
+    ///     <see cref="CultureInfo.InvariantCulture"/> is attempted. This enables
+    ///     numeric widening (<c>int</c>→<c>double</c>) and string-seeded conversions
+    ///     (<c>"42"</c>→<c>int</c>, <c>"true"</c>→<c>bool</c>, <c>"3.14"</c>→<c>double</c>).
+    ///   </description></item>
+    ///   <item><description>
+    ///     Otherwise an <see cref="InvalidCastException"/> is thrown with a message
+    ///     that includes the symbol path, the requested type, and the actual runtime
+    ///     type.
+    ///   </description></item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <b>Divergence from <see cref="ReadValueAsync(string, CancellationToken)"/>.</b>
+    /// The untyped overload returns <see langword="null"/> for missing symbols (for
+    /// backwards compatibility with dashboard/dynamic consumers). This typed overload
+    /// throws for missing symbols — a missing symbol has no value to convert and the
+    /// caller explicitly requested a concrete type.
+    /// </para>
+    /// </remarks>
+    public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (!_symbols.TryGetValue(symbolPath, out var stored))
+            // Same exception shape a real connection surfaces for an unknown
+            // symbol, so callers (and the C26 contract tests) see one consistent
+            // exception type across simulated and real targets.
+            throw new AdsErrorException(
+                $"Simulated symbol '{symbolPath}' has no stored value; cannot read it as '{typeof(T).Name}'. " +
+                $"Write or seed the symbol before performing a typed read.",
+                AdsErrorCode.DeviceSymbolNotFound);
+
+        if (stored is null)
+        {
+            var targetType = typeof(T);
+            // For non-nullable value types null is illegal: there's nothing to return.
+            if (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) is null)
+                throw new InvalidCastException(
+                    $"Simulated symbol '{symbolPath}' has a null stored value; " +
+                    $"cannot convert null to non-nullable value type '{targetType.Name}'.");
+
+            // Reference type or Nullable<T>: null is a valid result.
+            return Task.FromResult(default(T)!);
+        }
+
+        // Exact type or assignable — fast path, no conversion needed.
+        if (stored is T directResult)
+            return Task.FromResult(directResult);
+
+        // IConvertible covers all primitives and string; supports numeric widening and
+        // string-seeded values ("42"→int, "true"→bool, "3.14"→double).
+        if (stored is IConvertible)
+        {
+            try
+            {
+                var targetType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
+                var converted = (T)Convert.ChangeType(stored, targetType, CultureInfo.InvariantCulture);
+                return Task.FromResult(converted);
+            }
+            catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+            {
+                throw new InvalidCastException(
+                    $"Simulated symbol '{symbolPath}': cannot convert stored value " +
+                    $"'{stored}' (type: {stored.GetType().Name}) to '{typeof(T).Name}'. {ex.Message}",
+                    ex);
+            }
+        }
+
+        // Non-IConvertible, not assignable: fail with an actionable message.
+        throw new InvalidCastException(
+            $"Simulated symbol '{symbolPath}': stored value has type '{stored.GetType().Name}' " +
+            $"which cannot be converted to requested type '{typeof(T).Name}'.");
+    }
+
     public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         _symbols.TryGetValue(symbolPath, out var value);
         return Task.FromResult(value);
     }
+
+    /// <summary>
+    /// Writes a typed value. The value is stored boxed; subsequent typed reads will
+    /// apply the conversion rules documented on
+    /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>.
+    /// </summary>
+    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
+        => WriteValueAsync(symbolPath, (object)value!, ct);
 
     /// <summary>
     /// Writes a value and fires registered callbacks for <paramref name="symbolPath"/>

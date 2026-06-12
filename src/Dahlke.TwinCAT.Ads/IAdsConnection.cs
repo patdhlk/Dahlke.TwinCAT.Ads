@@ -46,6 +46,50 @@ public interface IAdsConnection
     event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
     /// <summary>
+    /// Reads the current value of a PLC symbol and returns it as <typeparamref name="T"/>.
+    /// </summary>
+    /// <typeparam name="T">
+    /// The expected .NET type of the symbol value. For numeric types, widening conversions are
+    /// applied automatically (e.g. a PLC <c>INT</c> stored as <c>int</c> can be read as
+    /// <c>double</c>). String-encoded values seeded in simulation are converted via
+    /// <see cref="System.Convert.ChangeType(object, Type, System.IFormatProvider)"/> with
+    /// <see cref="System.Globalization.CultureInfo.InvariantCulture"/> (e.g. <c>"42"</c>→<c>int</c>,
+    /// <c>"true"</c>→<c>bool</c>, <c>"3.14"</c>→<c>double</c>).
+    /// </typeparam>
+    /// <param name="symbolPath">The fully-qualified PLC symbol path (e.g. <c>MAIN.Counter</c>).</param>
+    /// <param name="ct">
+    /// Used to cancel the operation. When the caller's token fires an
+    /// <see cref="OperationCanceledException"/> is thrown with that token as the source, allowing
+    /// the caller to distinguish cancellation from timeout.
+    /// </param>
+    /// <returns>The symbol value converted to <typeparamref name="T"/>.</returns>
+    /// <exception cref="InvalidCastException">
+    /// Thrown when the symbol's runtime value cannot be converted to <typeparamref name="T"/>.
+    /// The message includes the symbol path, the requested type, and the actual runtime type to
+    /// aid diagnosis.
+    /// </exception>
+    /// <exception cref="AdsErrorException">
+    /// Thrown when the symbol is not found (<see cref="AdsErrorCode.DeviceSymbolNotFound"/>) or
+    /// when the ADS read operation itself reports a non-success error code.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="ct"/> is cancelled before or during the read. The exception's
+    /// <see cref="OperationCanceledException.CancellationToken"/> matches <paramref name="ct"/>.
+    /// </exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the per-target <see cref="PlcTargetOptions.TimeoutMs"/> elapses before the
+    /// read completes, without <paramref name="ct"/> having been cancelled first. This lets callers
+    /// distinguish a hardware/network timeout from an intentional cancellation.
+    /// </exception>
+    /// <remarks>
+    /// This is the preferred overload for compile-time-typed access to PLC values. For
+    /// runtime-typed or polymorphic scenarios where the target type is not known at compile time,
+    /// use <see cref="ReadValueAsync(string, CancellationToken)"/> — the dynamic escape hatch.
+    /// Cancellation, timeout, and ADS error semantics are identical between both overloads.
+    /// </remarks>
+    Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct);
+
+    /// <summary>
     /// Reads the current value of a PLC symbol identified by <paramref name="symbolPath"/>.
     /// </summary>
     /// <param name="symbolPath">The fully-qualified PLC symbol path (e.g. <c>MAIN.Counter</c>).</param>
@@ -74,7 +118,40 @@ public interface IAdsConnection
     /// read completes, without <paramref name="ct"/> having been cancelled first. This lets callers
     /// distinguish a hardware/network timeout from an intentional cancellation.
     /// </exception>
+    /// <remarks>
+    /// <b>Dynamic escape hatch.</b> Use this overload when the target type is not known at compile
+    /// time (e.g. generic dashboards, reflection-driven serialisation). For all other scenarios
+    /// prefer <see cref="ReadValueAsync{T}(string, CancellationToken)"/>, which provides
+    /// compile-time type safety and actionable conversion errors.
+    /// </remarks>
     Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct);
+
+    /// <summary>
+    /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
+    /// </summary>
+    /// <typeparam name="T">The compile-time type of the value to write.</typeparam>
+    /// <param name="symbolPath">The fully-qualified PLC symbol path.</param>
+    /// <param name="value">The value to write. Must be compatible with the symbol's PLC type.</param>
+    /// <param name="ct">
+    /// Used to cancel the operation. Cancellation and per-target timeout are both honored;
+    /// see <see cref="ReadValueAsync{T}(string, CancellationToken)"/> for the exception semantics —
+    /// the same rules apply here.
+    /// </param>
+    /// <exception cref="AdsErrorException">
+    /// Thrown when the symbol does not exist or the ADS write fails.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the per-target <see cref="PlcTargetOptions.TimeoutMs"/> elapses before the
+    /// write completes, without <paramref name="ct"/> having been cancelled first.
+    /// </exception>
+    /// <remarks>
+    /// This is the preferred overload for compile-time-typed writes. Overload resolution binds
+    /// <c>WriteValueAsync("path", 42, ct)</c> to <c>T=int</c> automatically. For runtime-typed
+    /// writes use <see cref="WriteValueAsync(string, object, CancellationToken)"/> — the dynamic
+    /// escape hatch.
+    /// </remarks>
+    Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct);
 
     /// <summary>
     /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
@@ -83,13 +160,18 @@ public interface IAdsConnection
     /// <param name="value">The value to write. Must be compatible with the symbol's PLC type.</param>
     /// <param name="ct">
     /// Used to cancel the operation. Cancellation and per-target timeout are both honored;
-    /// see <see cref="ReadValueAsync"/> for the exception semantics — the same rules apply here.
+    /// see <see cref="ReadValueAsync(string, CancellationToken)"/> for the exception semantics — the same rules apply here.
     /// </param>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
     /// <exception cref="TimeoutException">
     /// Thrown when the per-target <see cref="PlcTargetOptions.TimeoutMs"/> elapses before the
     /// write completes, without <paramref name="ct"/> having been cancelled first.
     /// </exception>
+    /// <remarks>
+    /// <b>Dynamic escape hatch.</b> Use this overload when the value type is not known at compile
+    /// time (e.g. generic dispatch, configuration-driven writes). For all other scenarios prefer
+    /// <see cref="WriteValueAsync{T}(string, T, CancellationToken)"/>.
+    /// </remarks>
     Task WriteValueAsync(string symbolPath, object value, CancellationToken ct);
     Task<Dictionary<string, object?>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct);
     Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct);

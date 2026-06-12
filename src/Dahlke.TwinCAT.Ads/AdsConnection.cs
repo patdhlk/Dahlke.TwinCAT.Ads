@@ -73,6 +73,30 @@ public sealed class AdsConnection : IManagedConnection
         try { _client.Disconnect(); } catch { /* best effort */ }
     }
 
+    public async Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+    {
+        using var cts = CreateTimeoutCts(ct);
+
+        ResultValue<T> result;
+        try
+        {
+            result = await _client.ReadValueAsync<T>(symbolPath, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
+        }
+
+        if (result.Failed)
+            throw new AdsErrorException(
+                $"Read of symbol '{symbolPath}' on PLC '{PlcId}' failed: {result.ErrorCode}",
+                result.ErrorCode);
+
+        // result.Value is non-null when result.Succeeded (we threw above on failure).
+        // The Beckhoff annotation is T? for the nullable-oblivious case; suppress the warning.
+        return result.Value!;
+    }
+
     public async Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
     {
         // NOTE: making this a proper async method (not a sync throw + Task.FromResult) is itself a
@@ -105,6 +129,9 @@ public sealed class AdsConnection : IManagedConnection
 
         return result.Value;
     }
+
+    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
+        => WriteValueAsync(symbolPath, (object)value!, ct);
 
     public async Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
     {

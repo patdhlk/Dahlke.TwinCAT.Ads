@@ -165,7 +165,13 @@ internal sealed class FakeManagedConnection : IManagedConnection
 
     // ---- IAdsConnection members never exercised by the pool --------------
 
+    public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+        => throw new NotSupportedException();
+
     public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
         => throw new NotSupportedException();
 
     public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
