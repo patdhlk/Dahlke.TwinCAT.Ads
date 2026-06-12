@@ -21,6 +21,14 @@ namespace Dahlke.TwinCAT.Ads;
 /// configured identifier, regardless of whether <c>StartAsync</c> has been called
 /// or whether the target has ever successfully connected.
 /// </para>
+/// <para>
+/// Hosted-service start is never delayed by router availability. Simulated-target
+/// loops connect immediately; real-target loops are deferred until the embedded
+/// ADS router becomes ready (the router itself retries startup with backoff), and
+/// are released automatically once it is. A facade for a real target therefore
+/// reports <c>IsConnected == false</c> while the router is still coming up, then
+/// transitions to connected without any caller action.
+/// </para>
 /// </remarks>
 public interface IAdsConnectionPool
 {
@@ -74,5 +82,12 @@ public interface IAdsConnectionPool
     /// Forces a reconnection to the PLC.
     /// Terminates the current connection loop and starts a new one.
     /// </summary>
+    /// <remarks>
+    /// No-op for a simulated target (its in-memory state is preserved). For a real
+    /// target whose loop has not yet been released — the embedded router is still
+    /// coming up — this is also a no-op (logged as a warning): the loop starts on
+    /// its own once the router is ready, so forcing it here would bypass the router
+    /// gate.
+    /// </remarks>
     void ForceReconnect(string plcId);
 }

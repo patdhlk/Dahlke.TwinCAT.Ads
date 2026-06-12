@@ -41,7 +41,8 @@ public class C23_RouterSignalResolutionTests
             Options.Create(options),
             configuration: null,
             NullLoggerFactory.Instance,
-            signal);
+            signal,
+            new FakeTimeProvider());
 
         // Pre-cancelled token: the OLD code's `await Task.Delay(1, token)` outside
         // the try would throw before any SetReady/SetFailed, leaving the signal

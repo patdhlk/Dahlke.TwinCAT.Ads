@@ -290,7 +290,8 @@ public class C9_ConditionalRouterAndUnifiedSimulationTests
             Options.Create(options),
             configuration: null,
             NullLoggerFactory.Instance,
-            signal);
+            signal,
+            new FakeTimeProvider());
 
         using var cts = new CancellationTokenSource(RealTimeout);
 

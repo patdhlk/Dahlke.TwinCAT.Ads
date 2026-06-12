@@ -30,6 +30,18 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     private readonly ConcurrentDictionary<string, ConnectionState> _states = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _stoppingCts;
 
+    // Background task that awaits the router signal and, on Ready, releases the
+    // deferred real-target loops. Tracked like a loop task so StopAsync can await
+    // it (it exits promptly via the stopping token). Null when there are no real
+    // targets (all-sim configs never wait on the router).
+    private Task? _routerWaitTask;
+
+    // Set true once the real-target loops have been released (router became
+    // Ready). Until then, ForceReconnect must NOT start a real loop — doing so
+    // would bypass the router gate. Volatile: written from the router wait task,
+    // read from the (possibly different) thread that calls ForceReconnect.
+    private volatile bool _realLoopsReleased;
+
     /// <summary>
     /// Raised on every connection-state transition for any target.
     /// </summary>
@@ -84,94 +96,125 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                 loggerFactory.CreateLogger<AdsConnectionFacade>());
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Starts the pool. Hosted-service start is never delayed by router
+    /// availability (C24): simulated-target loops start immediately, and
+    /// real-target loops are deferred behind a tracked background wait task that
+    /// releases them once the router signals Ready. <see cref="StartAsync"/>
+    /// itself returns promptly in every case.
+    /// </summary>
+    public Task StartAsync(CancellationToken cancellationToken)
     {
         _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         // Facades are already created in the constructor; StartAsync only starts
         // the connection loops that push live connections into those facades.
 
-        var hasRealTargets = _targets.Values.Any(t => t.Mode == ConnectionMode.Real);
+        var simTargets = _targets
+            .Where(kvp => kvp.Value.Mode == ConnectionMode.Simulated)
+            .ToList();
+        var realTargets = _targets
+            .Where(kvp => kvp.Value.Mode == ConnectionMode.Real)
+            .ToList();
 
-        if (!hasRealTargets)
+        // Simulated loops never need the router — start them immediately, always.
+        foreach (var (plcId, options) in simTargets)
+            StartConnectionLoop(plcId, options);
+
+        if (realTargets.Count == 0)
         {
-            // All targets are simulated — no router is needed; start loops immediately.
+            // All targets are simulated — no router wait task at all (the router
+            // service already gates itself).
             _logger.LogInformation(
                 "ADS connection pool starting — all {Count} target(s) are simulated, skipping router wait",
                 _targets.Count);
+            _realLoopsReleased = true; // no real loops to gate
+            return Task.CompletedTask;
+        }
 
-            foreach (var (plcId, options) in _targets)
+        // Real targets exist: defer their loops until the router becomes ready.
+        // StartAsync returns promptly; the wait happens on a tracked background
+        // task observed by StopAsync (exactly like a connection loop task).
+        _logger.LogInformation(
+            "ADS connection pool starting — real target loops deferred until router ready: {Ids}",
+            string.Join(", ", realTargets.Select(kvp => kvp.Key)));
+
+        var stoppingToken = _stoppingCts.Token;
+        _routerWaitTask = Task.Run(async () =>
+        {
+            try
+            {
+                await _readySignal.WaitAsync(stoppingToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is TaskCanceledException or InvalidOperationException)
+            {
+                // The signal resolved to a terminal non-Ready state. With the C24
+                // retry-forever router this only happens at shutdown (Cancelled)
+                // or the defensive Failed path — never a transient bind failure.
+                //   * InvalidOperationException → router FAILED. Its InnerException
+                //     is the captured reason; log it so operators know WHY.
+                //   * TaskCanceledException → router CANCELLED (host shutting down).
+                // Real loops stay unreleased either way.
+                if (ex is InvalidOperationException)
+                {
+                    _logger.LogWarning(
+                        ex.InnerException ?? ex,
+                        "ADS router failed to start: {Reason} — {RealCount} real target(s) not started: {RealIds}",
+                        ex.InnerException?.Message ?? ex.Message,
+                        realTargets.Count,
+                        string.Join(", ", realTargets.Select(kvp => kvp.Key)));
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "ADS router wait cancelled (shutting down) — {RealCount} real target(s) not started",
+                        realTargets.Count);
+                }
+
+                return;
+            }
+
+            // Router is ready: release the deferred real-target loops. Start the
+            // loops FIRST, then open the gate. Doing it in this order eliminates a
+            // double-start race with ForceReconnect: were the flag set first, a
+            // ForceReconnect arriving in the window before StartConnectionLoop runs
+            // would see the gate open, find no existing loop, and start its OWN —
+            // which the loop started here would then overwrite, orphaning a CTS.
+            // With this order, a ForceReconnect in the (now harmless) window
+            // observes the gate still closed and is refused (it warns and no-ops),
+            // while the loop started here proceeds normally.
+            _logger.LogInformation(
+                "ADS router ready, connecting to {Count} real target(s)", realTargets.Count);
+
+            foreach (var (plcId, options) in realTargets)
                 StartConnectionLoop(plcId, options);
 
-            return;
-        }
+            _realLoopsReleased = true;
+        }, CancellationToken.None);
 
-        _logger.LogInformation("ADS connection pool starting, waiting for router...");
-        try
-        {
-            await _readySignal.WaitAsync(_stoppingCts.Token).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is TaskCanceledException or InvalidOperationException)
-        {
-            // The router did not become ready. The tri-state signal distinguishes
-            // two unavailable outcomes, and BOTH land here (identical recovery —
-            // start simulated targets, skip real ones), but we log differently:
-            //   * InvalidOperationException → router FAILED. Its InnerException is
-            //     the captured reason; log it so operators know WHY.
-            //   * TaskCanceledException → router CANCELLED (host shutting down).
-            // Real targets are skipped either way (they require a working router).
-            if (ex is InvalidOperationException)
-            {
-                _logger.LogWarning(
-                    ex.InnerException ?? ex,
-                    "ADS router failed to start: {Reason}",
-                    ex.InnerException?.Message ?? ex.Message);
-            }
-
-            var simTargets = _targets
-                .Where(kvp => kvp.Value.Mode == ConnectionMode.Simulated)
-                .ToList();
-            var realTargets = _targets
-                .Where(kvp => kvp.Value.Mode == ConnectionMode.Real)
-                .ToList();
-
-            if (simTargets.Count > 0)
-            {
-                _logger.LogWarning(
-                    "ADS router not available — starting {SimCount} simulated target(s); " +
-                    "skipping {RealCount} real target(s): {RealIds}",
-                    simTargets.Count,
-                    realTargets.Count,
-                    string.Join(", ", realTargets.Select(kvp => kvp.Key)));
-
-                foreach (var (plcId, options) in simTargets)
-                    StartConnectionLoop(plcId, options);
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "ADS router not available — connection pool running without connections " +
-                    "({RealCount} real target(s) skipped: {RealIds})",
-                    realTargets.Count,
-                    string.Join(", ", realTargets.Select(kvp => kvp.Key)));
-            }
-
-            return;
-        }
-
-        _logger.LogInformation("ADS router ready, connecting to {Count} PLC target(s)", _targets.Count);
-
-        foreach (var (plcId, options) in _targets)
-        {
-            StartConnectionLoop(plcId, options);
-        }
+        return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("ADS connection pool stopping...");
 
-        // Cancel background loops
+        // Cancel the stopping token FIRST so a still-parked router wait task
+        // (awaiting the pending signal) unblocks promptly. Await it to settle
+        // BEFORE snapshotting the loop set: if the router had just become Ready,
+        // the wait task may be mid-flight starting real loops — letting it finish
+        // ensures every real loop it spawns is registered in _loopTasks before we
+        // cancel and drain them, so none is orphaned.
+        _stoppingCts?.Cancel();
+
+        if (_routerWaitTask is not null)
+        {
+            try { await _routerWaitTask.WaitAsync(TimeSpan.FromSeconds(10), _timeProvider, cancellationToken); }
+            catch { /* Timeout or cancellation — clean up anyway */ }
+        }
+
+        // Cancel background loops (now the complete set, including any real loops
+        // the router wait task released just before settling).
         foreach (var (_, cts) in _reconnectCts)
             cts.Cancel();
 
@@ -214,6 +257,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             SetState(plcId, ConnectionState.Disconnected);
 
         _connections.Clear();
+        _routerWaitTask = null;
         _stoppingCts?.Cancel();
         _stoppingCts?.Dispose();
         _stoppingCts = null;
@@ -341,6 +385,18 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         {
             _logger.LogInformation(
                 "ForceReconnect: simulated target {PlcId} — reconnect is a no-op", plcId);
+            return;
+        }
+
+        // Router gate (C24): a real target's loop is deferred until the router
+        // becomes ready. If the loops have not yet been released, starting one
+        // here would bypass the gate and connect before the router exists. Refuse
+        // and warn — the loop will start on its own once the router is ready.
+        if (!_realLoopsReleased)
+        {
+            _logger.LogWarning(
+                "ForceReconnect: router not ready; real target {PlcId} loop will start when it is",
+                plcId);
             return;
         }
 

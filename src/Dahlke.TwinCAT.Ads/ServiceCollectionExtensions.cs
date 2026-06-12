@@ -278,7 +278,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IOptions<TwinCatAdsOptions>>(),
             sp.GetService<IConfiguration>(),
             sp.GetRequiredService<ILoggerFactory>(),
-            sp.GetRequiredService<AdsRouterReadySignal>()));
+            sp.GetRequiredService<AdsRouterReadySignal>(),
+            sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton<IAdsConnectionFactory, AdsConnectionFactory>();
         services.AddSingleton<AdsConnectionPool>();
         services.AddSingleton<IAdsConnectionPool>(sp => sp.GetRequiredService<AdsConnectionPool>());
