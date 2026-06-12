@@ -106,8 +106,10 @@ public class C23_RouterSignalResolutionTests
         Assert.Equal(7, await simConn.ReadValueAsync("X", CancellationToken.None));
 
         // The reason was logged somewhere by the pool.
-        Assert.Contains(
-            capturingFactory.Entries,
+        // The log entry is written by the pool's background router-wait task
+        // (startup is non-blocking since C24), so we poll until it lands.
+        await WaitForLogEntry(
+            capturingFactory,
             e => e.Message.Contains(reasonText, StringComparison.Ordinal));
 
         // Real target was skipped.
@@ -174,6 +176,27 @@ public class C23_RouterSignalResolutionTests
         {
             if (DateTime.UtcNow > deadline)
                 throw new TimeoutException($"Facade for '{plcId}' never became connected.");
+            await Task.Delay(TimeSpan.FromMilliseconds(5));
+        }
+    }
+
+    private static async Task WaitForLogEntry(
+        CapturingLoggerFactory factory,
+        Func<(string Category, string Message), bool> predicate)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (true)
+        {
+            List<(string Category, string Message)> snapshot;
+            lock (factory.Entries)
+                snapshot = [..factory.Entries];
+
+            if (snapshot.Any(predicate))
+                return;
+
+            if (DateTime.UtcNow > deadline)
+                throw new TimeoutException("Expected log entry never appeared within 15 s.");
+
             await Task.Delay(TimeSpan.FromMilliseconds(5));
         }
     }
