@@ -1,5 +1,6 @@
 using TwinCAT;
 using TwinCAT.Ads;
+using TwinCAT.Ads.SumCommand;
 using TwinCAT.Ads.TypeSystem;
 using TwinCAT.TypeSystem;
 
@@ -149,102 +150,197 @@ public sealed class AdsConnection : IManagedConnection
 
     /// <inheritdoc />
     /// <remarks>
-    /// Interim implementation: iterates and issues one single read per distinct symbol, so each
-    /// symbol burns its own <see cref="PlcTargetOptions.TimeoutMs"/> window. A later commit adds
-    /// sum commands. A per-symbol failure is captured as <see cref="AdsValueResult.Failure"/>;
-    /// cancellation rethrows and aborts the whole batch.
+    /// <para>
+    /// <b>One round-trip.</b> All resolvable symbols are read in a single ADS sum command
+    /// (<see cref="SumSymbolRead"/>) rather than one read per symbol. Per-symbol granularity is
+    /// preserved: each symbol's outcome is reported independently via its
+    /// <see cref="AdsValueResult"/>.
+    /// </para>
+    /// <para>
+    /// <b>Symbol resolution.</b> Symbols that cannot be resolved on the PLC are recorded — before
+    /// the sum command is issued — as a per-symbol <see cref="AdsValueResult.Failure"/> carrying an
+    /// <see cref="AdsErrorException"/> with <see cref="AdsErrorCode.DeviceSymbolNotFound"/>; they
+    /// are excluded from the sum command. Duplicate paths are de-duplicated.
+    /// </para>
+    /// <para>
+    /// <b>Whole-batch timeout/cancellation.</b> The timeout and cancellation apply to the entire
+    /// batch as a single operation. Caller cancellation throws
+    /// <see cref="OperationCanceledException"/>; the per-target
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> elapsing throws a <see cref="TimeoutException"/> for
+    /// the whole batch — neither is recorded as a per-symbol failure.
+    /// </para>
     /// </remarks>
     public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
     {
-        var results = new Dictionary<string, AdsValueResult>();
-        foreach (var path in symbolPaths)
-        {
-            // De-dup: a repeated path is read once.
-            if (results.ContainsKey(path))
-                continue;
+        // De-dup: a repeated path is read once.
+        var paths = symbolPaths.Distinct().ToArray();
 
-            try
+        // Empty input shortcut — no ADS call.
+        if (paths.Length == 0)
+            return new Dictionary<string, AdsValueResult>();
+
+        ct.ThrowIfCancellationRequested();
+
+        var results = new Dictionary<string, AdsValueResult>();
+        var symbolLoader = GetSymbolLoader();
+
+        // Resolve symbols; unresolvable ones become per-symbol failures immediately and are
+        // excluded from the sum command.
+        var foundSymbols = new List<ISymbol>(paths.Length);
+        var foundPaths = new List<string>(paths.Length);
+
+        foreach (var path in paths)
+        {
+            if (symbolLoader.Symbols.TryGetInstance(path, out var symbol) && symbol is IValueSymbol)
             {
-                var value = await ReadValueAsync(path, ct).ConfigureAwait(false);
-                results[path] = AdsValueResult.Success(value, path);
+                foundSymbols.Add(symbol);
+                foundPaths.Add(path);
             }
-            catch (OperationCanceledException)
+            else
             {
-                // Cancellation aborts the WHOLE batch, not just this symbol.
-                throw;
-            }
-            catch (Exception ex)
-            {
-                results[path] = AdsValueResult.Failure(ex, path);
+                results[path] = AdsValueResult.Failure(
+                    new AdsErrorException(
+                        $"Symbol '{path}' not found on PLC '{PlcId}'.",
+                        AdsErrorCode.DeviceSymbolNotFound),
+                    path);
             }
         }
+
+        // If nothing to read after filtering, return early — no sum command.
+        if (foundSymbols.Count == 0)
+            return results;
+
+        // One sum-read round-trip for all found symbols.
+        using var cts = CreateTimeoutCts(ct);
+        ResultSumValues sumResult;
+        try
+        {
+            var sumRead = new SumSymbolRead(_client, foundSymbols);
+            sumResult = await sumRead.ReadAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Whole-batch: caller cancellation → OCE; timeout → TimeoutException.
+            var ex = CancellationDisambiguator.CreateException(ct, $"batch({foundSymbols.Count} symbols)", PlcId, _options.TimeoutMs);
+            if (ex is OperationCanceledException oce)
+                throw oce;
+            throw (TimeoutException)ex;
+        }
+
+        // Map per-symbol results.
+        var mapped = SumResultMapper.MapReadResults(
+            [.. foundPaths],
+            sumResult.Values ?? Array.Empty<object?>(),
+            sumResult.SubErrors ?? Array.Empty<AdsErrorCode>());
+
+        foreach (var kvp in mapped)
+            results[kvp.Key] = kvp.Value;
+
         return results;
     }
 
     /// <inheritdoc />
     /// <remarks>
     /// <para>
-    /// Interim implementation: iterates and issues one single write per symbol. A future commit
-    /// adds sum commands; the per-symbol result contract is designed to survive that change.
+    /// <b>One round-trip.</b> All writable symbols are written in a single ADS sum command
+    /// (<see cref="SumSymbolWrite"/>) rather than one write per symbol. Per-symbol granularity is
+    /// preserved via each symbol's <see cref="AdsValueResult"/>.
     /// </para>
     /// <para>
-    /// <b>Locking.</b> The write lock is acquired ONCE for the whole batch (matching batch write
-    /// semantics) using <paramref name="ct"/> only — the lock wait is a contention wait, not a
-    /// hardware operation, so it is not subject to a per-symbol timeout. If the lock wait is
-    /// cancelled the whole batch is aborted via <see cref="OperationCanceledException"/>.
+    /// <b>Pre-filtering.</b> A <see langword="null"/> value is a per-symbol programming error,
+    /// recorded as a <see cref="AdsValueResult.Failure"/> (an <see cref="ArgumentNullException"/>)
+    /// before the sum command and excluded from it. Symbols that cannot be resolved are likewise
+    /// recorded as a per-symbol <see cref="AdsErrorException"/> failure with
+    /// <see cref="AdsErrorCode.DeviceSymbolNotFound"/> and excluded.
     /// </para>
     /// <para>
-    /// <b>Per-symbol timeout windows.</b> Each individual <c>WriteSymbolAsync</c> call burns its
-    /// own <see cref="PlcTargetOptions.TimeoutMs"/> window. A timeout on an individual write is
-    /// recorded as a per-symbol <see cref="AdsValueResult.Failure"/> (carrying a
-    /// <see cref="TimeoutException"/>) and does NOT abort the batch; only caller cancellation
-    /// (via <paramref name="ct"/>) aborts the whole batch.
+    /// <b>Locking.</b> The write lock is held across the single sum write. The lock wait uses
+    /// <paramref name="ct"/> only — a contention wait, not a hardware op — so a cancelled wait
+    /// aborts the whole batch via <see cref="OperationCanceledException"/>.
+    /// </para>
+    /// <para>
+    /// <b>Whole-batch timeout/cancellation.</b> As with <see cref="ReadValuesAsync"/>, the timeout
+    /// and cancellation apply to the entire batch as a single operation: caller cancellation throws
+    /// <see cref="OperationCanceledException"/>; the timeout elapsing throws a
+    /// <see cref="TimeoutException"/> for the whole batch.
     /// </para>
     /// </remarks>
     public async Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
     {
-        var results = new Dictionary<string, AdsValueResult>();
+        // Empty input shortcut — no ADS call.
+        if (values.Count == 0)
+            return new Dictionary<string, AdsValueResult>();
 
-        // Acquire the write lock ONCE for the whole batch. The wait uses ct only: it is a
-        // contention wait, not a hardware op, so no per-symbol timeout applies. A cancelled
-        // wait aborts the whole batch (OCE propagates).
+        ct.ThrowIfCancellationRequested();
+
+        var results = new Dictionary<string, AdsValueResult>();
+        var symbolLoader = GetSymbolLoader();
+
+        // Pre-filter: null values and unresolvable symbols are per-symbol failures, excluded from
+        // the sum command. Found symbols and their values stay index-aligned.
+        var foundSymbols = new List<ISymbol>(values.Count);
+        var foundPaths = new List<string>(values.Count);
+        var foundValues = new List<object>(values.Count);
+
+        foreach (var (path, value) in values)
+        {
+            if (value is null)
+            {
+                results[path] = AdsValueResult.Failure(
+                    new ArgumentNullException(
+                        $"values[\"{path}\"]",
+                        $"Cannot write a null value to symbol '{path}'."),
+                    path);
+                continue;
+            }
+
+            if (symbolLoader.Symbols.TryGetInstance(path, out var symbol) && symbol is IValueSymbol)
+            {
+                foundSymbols.Add(symbol);
+                foundPaths.Add(path);
+                foundValues.Add(value);
+            }
+            else
+            {
+                results[path] = AdsValueResult.Failure(
+                    new AdsErrorException(
+                        $"Symbol '{path}' not found on PLC '{PlcId}'.",
+                        AdsErrorCode.DeviceSymbolNotFound),
+                    path);
+            }
+        }
+
+        // If nothing to write after filtering, return early — no sum command.
+        if (foundSymbols.Count == 0)
+            return results;
+
+        // One sum-write round-trip; hold _writeLock for the single operation.
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            foreach (var (path, value) in values)
+            using var cts = CreateTimeoutCts(ct);
+            ResultSumCommand sumResult;
+            try
             {
-                // A real PLC write needs an actual value; a null is a per-symbol programming
-                // error, captured as a failure rather than aborting the batch.
-                if (value is null)
-                {
-                    results[path] = AdsValueResult.Failure(
-                        new ArgumentNullException(
-                            $"values[\"{path}\"]", $"Cannot write a null value to symbol '{path}'."),
-                        path);
-                    continue;
-                }
-
-                try
-                {
-                    // Per-symbol timeout window applies only to the write itself.
-                    using var cts = CreateTimeoutCts(ct);
-                    await _client.WriteSymbolAsync(path, value, cts.Token).ConfigureAwait(false);
-                    results[path] = AdsValueResult.Success(null, path);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Disambiguate: caller cancellation aborts the batch; a per-symbol timeout
-                    // is recorded as a failure and the loop continues.
-                    var ex = CancellationDisambiguator.CreateException(ct, path, PlcId, _options.TimeoutMs);
-                    if (ex is OperationCanceledException oce)
-                        throw oce;
-                    results[path] = AdsValueResult.Failure(ex, path);
-                }
-                catch (Exception ex)
-                {
-                    results[path] = AdsValueResult.Failure(ex, path);
-                }
+                var sumWrite = new SumSymbolWrite(_client, foundSymbols);
+                sumResult = await sumWrite.WriteAsync([.. foundValues], cts.Token).ConfigureAwait(false);
             }
+            catch (OperationCanceledException)
+            {
+                // Whole-batch: caller cancellation → OCE; timeout → TimeoutException.
+                var ex = CancellationDisambiguator.CreateException(ct, $"batch({foundSymbols.Count} symbols)", PlcId, _options.TimeoutMs);
+                if (ex is OperationCanceledException oce)
+                    throw oce;
+                throw (TimeoutException)ex;
+            }
+
+            // Map per-symbol results.
+            var mapped = SumResultMapper.MapWriteResults(
+                [.. foundPaths],
+                sumResult.SubErrors ?? Array.Empty<AdsErrorCode>());
+
+            foreach (var kvp in mapped)
+                results[kvp.Key] = kvp.Value;
         }
         finally
         {

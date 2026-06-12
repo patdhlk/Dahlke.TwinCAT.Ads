@@ -192,16 +192,32 @@ public interface IAdsConnection
     /// is NOT recorded as a per-symbol failure. When this is thrown the returned dictionary is
     /// never produced.
     /// </exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the per-target <see cref="PlcTargetOptions.TimeoutMs"/> elapses before the batch
+    /// completes, without <paramref name="ct"/> having been cancelled first. The timeout applies to
+    /// the whole batch as a single operation — it is NOT a per-symbol failure.
+    /// </exception>
     /// <remarks>
     /// <para>
     /// <b>Per-symbol granularity.</b> One bad symbol does not kill the batch: every other symbol
     /// still gets its own result. Inspect each entry's <see cref="AdsValueResult.Succeeded"/>.
     /// </para>
     /// <para>
-    /// <b>Interim semantics (revisited in a later commit).</b> The current implementations read
-    /// each symbol with its own single-read call, so each symbol gets its own
-    /// <see cref="PlcTargetOptions.TimeoutMs"/> window. A future optimisation will issue sum
-    /// commands; the per-symbol result contract is designed to survive that change.
+    /// <b>One round-trip (sum command).</b> All resolvable symbols are read in a single ADS sum
+    /// command — one round-trip for the whole batch, not one read per symbol. Duplicate paths are
+    /// de-duplicated before the command is issued.
+    /// </para>
+    /// <para>
+    /// <b>Symbol not found.</b> A symbol that cannot be resolved on the PLC is recorded as a
+    /// per-symbol <see cref="AdsValueResult.Failure"/> carrying an <see cref="AdsErrorException"/>
+    /// with <see cref="AdsErrorCode.DeviceSymbolNotFound"/>, before the sum command, and is excluded
+    /// from it.
+    /// </para>
+    /// <para>
+    /// <b>Whole-batch timeout/cancellation.</b> Timeout and cancellation apply to the entire batch
+    /// as a single operation: caller cancellation throws <see cref="OperationCanceledException"/>,
+    /// and the timeout elapsing throws <see cref="TimeoutException"/> — neither is recorded as a
+    /// per-symbol failure.
     /// </para>
     /// </remarks>
     Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct);
@@ -225,13 +241,36 @@ public interface IAdsConnection
     /// is NOT recorded as a per-symbol failure. When this is thrown the returned dictionary is
     /// never produced.
     /// </exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the per-target <see cref="PlcTargetOptions.TimeoutMs"/> elapses before the batch
+    /// completes, without <paramref name="ct"/> having been cancelled first. The timeout applies to
+    /// the whole batch as a single operation — it is NOT a per-symbol failure.
+    /// </exception>
     /// <remarks>
-    /// Per-symbol granularity and interim per-symbol timeout semantics match
-    /// <see cref="ReadValuesAsync"/>; see its remarks. The write lock is acquired once for the
-    /// whole batch, but each individual write still gets its own
-    /// <see cref="PlcTargetOptions.TimeoutMs"/> window; a timeout on an individual write is
-    /// recorded as a per-symbol <see cref="AdsValueResult.Failure"/> and does NOT abort the batch,
-    /// while caller cancellation aborts the whole batch.
+    /// <para>
+    /// <b>One round-trip (sum command).</b> All writable symbols are written in a single ADS sum
+    /// command — one round-trip for the whole batch, not one write per symbol. Per-symbol
+    /// granularity matches <see cref="ReadValuesAsync"/>: inspect each entry's
+    /// <see cref="AdsValueResult.Succeeded"/>.
+    /// </para>
+    /// <para>
+    /// <b>Null values.</b> A <see langword="null"/> value is a per-symbol programming error,
+    /// recorded as a <see cref="AdsValueResult.Failure"/> (an <see cref="ArgumentNullException"/>)
+    /// before the sum command and excluded from it. A symbol that cannot be resolved is recorded as
+    /// a per-symbol <see cref="AdsErrorException"/> failure with
+    /// <see cref="AdsErrorCode.DeviceSymbolNotFound"/> and likewise excluded.
+    /// </para>
+    /// <para>
+    /// <b>Locking.</b> The write lock is held across the single sum write. The lock wait is a
+    /// contention wait governed only by <paramref name="ct"/>; a cancelled wait aborts the whole
+    /// batch.
+    /// </para>
+    /// <para>
+    /// <b>Whole-batch timeout/cancellation.</b> As with <see cref="ReadValuesAsync"/>, timeout and
+    /// cancellation apply to the entire batch as a single operation: caller cancellation throws
+    /// <see cref="OperationCanceledException"/>, and the timeout elapsing throws
+    /// <see cref="TimeoutException"/>.
+    /// </para>
     /// </remarks>
     Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct);
 
