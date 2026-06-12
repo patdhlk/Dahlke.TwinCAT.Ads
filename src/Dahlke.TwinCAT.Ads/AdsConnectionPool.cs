@@ -10,6 +10,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     private readonly AdsRouterReadySignal _readySignal;
     private readonly ILogger<AdsConnectionPool> _logger;
     private readonly IConfiguration _configuration;
+    private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<string, IManagedConnection> _connections = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _reconnectCts = new();
     private readonly ConcurrentDictionary<string, Task> _loopTasks = new();
@@ -25,13 +26,15 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         IAdsConnectionFactory connectionFactory,
         AdsRouterReadySignal readySignal,
         ILogger<AdsConnectionPool> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        TimeProvider timeProvider)
     {
         _targets = targets.Value;
         _connectionFactory = connectionFactory;
         _readySignal = readySignal;
         _logger = logger;
         _configuration = configuration;
+        _timeProvider = timeProvider;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -68,7 +71,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         var loopTasks = _loopTasks.Values.ToArray();
         if (loopTasks.Length > 0)
         {
-            try { await Task.WhenAll(loopTasks).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken); }
+            try { await Task.WhenAll(loopTasks).WaitAsync(TimeSpan.FromSeconds(10), _timeProvider, cancellationToken); }
             catch { /* Timeout or cancellation — clean up anyway */ }
         }
 
@@ -168,7 +171,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                     // Health check loop: checks if connection is still alive
                     while (!cts.Token.IsCancellationRequested)
                     {
-                        await Task.Delay(HealthCheckInterval, cts.Token).ConfigureAwait(false);
+                        await Task.Delay(HealthCheckInterval, _timeProvider, cts.Token).ConfigureAwait(false);
 
                         if (!await ads.IsAliveAsync(cts.Token).ConfigureAwait(false))
                         {
@@ -195,7 +198,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                     _connections.TryRemove(new KeyValuePair<string, IManagedConnection>(plcId, ads));
 
                     // Grace period: let in-flight operations on old connection finish
-                    try { await Task.Delay(DisposeGracePeriod, cts.Token).ConfigureAwait(false); }
+                    try { await Task.Delay(DisposeGracePeriod, _timeProvider, cts.Token).ConfigureAwait(false); }
                     catch { /* Clean up anyway on cancellation */ }
 
                     ads.ForceDisconnect();
@@ -205,7 +208,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                 if (cts.Token.IsCancellationRequested) break;
 
                 // Wait before next connection attempt
-                try { await Task.Delay(delay, cts.Token).ConfigureAwait(false); }
+                try { await Task.Delay(delay, _timeProvider, cts.Token).ConfigureAwait(false); }
                 catch { break; }
 
                 delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxReconnectDelay.Ticks));

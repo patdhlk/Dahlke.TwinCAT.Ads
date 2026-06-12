@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Dahlke.TwinCAT.Ads;
 
@@ -15,6 +16,7 @@ public static class ServiceCollectionExtensions
         services.Configure<Dictionary<string, PlcTargetOptions>>(
             configuration.GetSection("PlcTargets"));
 
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<AdsRouterReadySignal>();
         services.AddHostedService<AdsRouterService>();
         services.AddSingleton<IAdsConnectionFactory, AdsConnectionFactory>();
@@ -35,6 +37,7 @@ public static class ServiceCollectionExtensions
         services.Configure<Dictionary<string, PlcTargetOptions>>(
             configuration.GetSection("PlcTargets"));
 
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<SimulatedAdsConnectionPool>();
         services.AddSingleton<IAdsConnectionPool>(sp => sp.GetRequiredService<SimulatedAdsConnectionPool>());
         services.AddHostedService(sp => sp.GetRequiredService<SimulatedAdsConnectionPool>());
