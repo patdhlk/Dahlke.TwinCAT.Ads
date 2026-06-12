@@ -6,12 +6,35 @@ using TwinCAT.TypeSystem;
 
 namespace Dahlke.TwinCAT.Ads;
 
+/// <summary>
+/// A connected ADS session wrapping a Beckhoff <see cref="AdsClient"/>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Thread safety.</b> All members are safe for concurrent use from any thread; operations on a
+/// single connection may interleave freely. No operation blocks another. This is safe because
+/// Beckhoff <see cref="AdsClient"/> assigns every outgoing request a unique numeric invoke-id and
+/// correlates the response to the pending <see cref="System.Threading.Tasks.TaskCompletionSource{T}"/>
+/// via an internal <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey,TValue}"/>
+/// keyed by that id (field <c>_invokeIdDict</c> in <c>AdsClientServer</c>, confirmed by XML
+/// documentation in <c>TwinCAT.Ads.xml</c> and by <c>ConcurrentDictionary</c> strings in the
+/// shipped binary). The ADS protocol itself multiplexes requests over a single transport channel
+/// using those invoke-ids; each async call gets its own id and its own completion task regardless
+/// of how many other calls are in-flight.
+/// </para>
+/// <para>
+/// <b>Subscription callbacks.</b> Callbacks registered via
+/// <see cref="SubscribeAsync(string,int,Action{string,object?},CancellationToken)"/> are invoked on
+/// a background thread owned by the underlying ADS client — never the caller's thread. Callbacks
+/// must be thread-safe and must not block; an exception thrown by a callback is caught, logged at
+/// Warning severity, and does not interrupt the subscription.
+/// </para>
+/// </remarks>
 public sealed class AdsConnection : IManagedConnection
 {
     private readonly AdsClient _client;
     private readonly PlcTargetOptions _options;
     private readonly ILogger<AdsConnection> _logger;
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly object _symbolLoaderLock = new();
     private volatile IDynamicSymbolLoader? _symbolLoader;
 
@@ -134,17 +157,24 @@ public sealed class AdsConnection : IManagedConnection
     public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
         => WriteValueAsync(symbolPath, (object)value!, ct);
 
+    /// <summary>
+    /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
+    /// </summary>
+    /// <remarks>
+    /// Concurrent calls are safe: the underlying <see cref="AdsClient"/> multiplexes requests over
+    /// invoke-ids and correlates responses independently. No write lock is held; concurrent writes
+    /// to different (or the same) symbols interleave freely at the ADS transport layer.
+    /// </remarks>
     public async Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
     {
         using var cts = CreateTimeoutCts(ct);
-        await _writeLock.WaitAsync(cts.Token).ConfigureAwait(false);
         try
         {
             await _client.WriteSymbolAsync(symbolPath, value, cts.Token).ConfigureAwait(false);
         }
-        finally
+        catch (OperationCanceledException)
         {
-            _writeLock.Release();
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
         }
     }
 
@@ -254,11 +284,6 @@ public sealed class AdsConnection : IManagedConnection
     /// <see cref="AdsErrorCode.DeviceSymbolNotFound"/> and excluded.
     /// </para>
     /// <para>
-    /// <b>Locking.</b> The write lock is held across the single sum write. The lock wait uses
-    /// <paramref name="ct"/> only — a contention wait, not a hardware op — so a cancelled wait
-    /// aborts the whole batch via <see cref="OperationCanceledException"/>.
-    /// </para>
-    /// <para>
     /// <b>Whole-batch timeout/cancellation.</b> As with <see cref="ReadValuesAsync"/>, the timeout
     /// and cancellation apply to the entire batch as a single operation: caller cancellation throws
     /// <see cref="OperationCanceledException"/>; the timeout elapsing throws a
@@ -314,38 +339,31 @@ public sealed class AdsConnection : IManagedConnection
         if (foundSymbols.Count == 0)
             return results;
 
-        // One sum-write round-trip; hold _writeLock for the single operation.
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+        // One sum-write round-trip — no serialization lock needed; AdsClient multiplexes
+        // concurrent requests via invoke-ids (see class remarks).
+        using var cts = CreateTimeoutCts(ct);
+        ResultSumCommand sumResult;
         try
         {
-            using var cts = CreateTimeoutCts(ct);
-            ResultSumCommand sumResult;
-            try
-            {
-                var sumWrite = new SumSymbolWrite(_client, foundSymbols);
-                sumResult = await sumWrite.WriteAsync([.. foundValues], cts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // Whole-batch: caller cancellation → OCE; timeout → TimeoutException.
-                var ex = CancellationDisambiguator.CreateException(ct, $"batch({foundSymbols.Count} symbols)", PlcId, _options.TimeoutMs);
-                if (ex is OperationCanceledException oce)
-                    throw oce;
-                throw (TimeoutException)ex;
-            }
-
-            // Map per-symbol results.
-            var mapped = SumResultMapper.MapWriteResults(
-                [.. foundPaths],
-                sumResult.SubErrors ?? Array.Empty<AdsErrorCode>());
-
-            foreach (var kvp in mapped)
-                results[kvp.Key] = kvp.Value;
+            var sumWrite = new SumSymbolWrite(_client, foundSymbols);
+            sumResult = await sumWrite.WriteAsync([.. foundValues], cts.Token).ConfigureAwait(false);
         }
-        finally
+        catch (OperationCanceledException)
         {
-            _writeLock.Release();
+            // Whole-batch: caller cancellation → OCE; timeout → TimeoutException.
+            var ex = CancellationDisambiguator.CreateException(ct, $"batch({foundSymbols.Count} symbols)", PlcId, _options.TimeoutMs);
+            if (ex is OperationCanceledException oce)
+                throw oce;
+            throw (TimeoutException)ex;
         }
+
+        // Map per-symbol results.
+        var mapped = SumResultMapper.MapWriteResults(
+            [.. foundPaths],
+            sumResult.SubErrors ?? Array.Empty<AdsErrorCode>());
+
+        foreach (var kvp in mapped)
+            results[kvp.Key] = kvp.Value;
 
         return results;
     }
@@ -353,7 +371,15 @@ public sealed class AdsConnection : IManagedConnection
     public async Task<AdsState> GetAdsStateAsync(CancellationToken ct)
     {
         using var cts = CreateTimeoutCts(ct);
-        var result = await _client.ReadStateAsync(cts.Token).ConfigureAwait(false);
+        ResultReadDeviceState result;
+        try
+        {
+            result = await _client.ReadStateAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw CancellationDisambiguator.CreateException(ct, "AdsState", PlcId, _options.TimeoutMs);
+        }
         return result.State.AdsState;
     }
 
@@ -459,7 +485,6 @@ public sealed class AdsConnection : IManagedConnection
 
     public void Dispose()
     {
-        _writeLock.Dispose();
         _client.Dispose();
     }
 

@@ -21,6 +21,14 @@ namespace Dahlke.TwinCAT.Ads;
 /// Callers should design callbacks to be thread-safe regardless.
 /// </para>
 /// <para>
+/// <b>Concurrent writers.</b> Concurrent writes to the same path are resolved by the
+/// <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey,TValue}"/>
+/// <c>AddOrUpdate</c> compare-and-swap. Each value change fires callbacks exactly once: the first writer
+/// that transitions the stored value from A→B fires the callback; subsequent concurrent writers
+/// arriving with the same new value B see the store already at B and do not fire again. This
+/// makes the callback-fire-on-change guarantee well-defined under concurrency.
+/// </para>
+/// <para>
 /// <b>Boxed-type equality.</b> Equality uses <see cref="object.Equals(object, object)"/>, which
 /// delegates to the runtime type's <c>Equals</c>. A boxed <c>int</c> 42 and a boxed
 /// <c>double</c> 42.0 are NOT equal (different types), so writing the same numeric magnitude
@@ -188,20 +196,46 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// if the value changed (on-change semantics).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Callbacks are invoked synchronously on the caller's thread immediately after
     /// the value is stored. A callback that throws is caught and logged; it does not
     /// abort the write or suppress other registered callbacks for the same path.
     /// Writing the same value again (by <c>Equals</c>) does not invoke callbacks.
+    /// </para>
+    /// <para>
+    /// <b>Concurrency.</b> The check-then-store is resolved via
+    /// <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey,TValue}.AddOrUpdate"/>'s
+    /// compare-and-swap retry loop: the update factory may run multiple times under contention,
+    /// and the captured previous value is overwritten on each invocation, so after AddOrUpdate
+    /// returns it holds exactly the value displaced by the winning swap. The writer whose swap
+    /// changed the value fires the callback; concurrent writers arriving with the same new value
+    /// recapture the already-updated value and do not fire again.
+    /// </para>
     /// </remarks>
     public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var hadOldValue = _symbols.TryGetValue(symbolPath, out var existing);
-        _symbols[symbolPath] = value;
+
+        // The update factory runs OUTSIDE any lock and may be invoked multiple times in
+        // ConcurrentDictionary's CAS retry loop. capturedPrevious is overwritten on each
+        // invocation, so after AddOrUpdate returns it holds the value displaced by the
+        // WINNING compare-and-swap — which is exactly the "previous" the change check needs.
+        // The factory must therefore stay side-effect-free (capture only).
+        object? capturedPrevious = null;
+        var isFirstWrite = true;
+        _symbols.AddOrUpdate(
+            symbolPath,
+            addValueFactory: _ => value,
+            updateValueFactory: (_, existing) =>
+            {
+                capturedPrevious = existing;
+                isFirstWrite = false;
+                return value;
+            });
 
         // On-change: fire only when the value actually changed.
         // First write (path absent) always counts as a change.
-        if (!hadOldValue || !Equals(existing, value))
+        if (isFirstWrite || !Equals(capturedPrevious, value))
             FireCallbacks(symbolPath, value);
 
         return Task.CompletedTask;
@@ -273,12 +307,22 @@ public sealed class SimulatedAdsConnection : IManagedConnection
                 continue;
             }
 
-            var hadOldValue = _symbols.TryGetValue(path, out var existing);
-            _symbols[path] = value;
+            // Same atomic AddOrUpdate pattern as WriteValueAsync — see that method's remarks.
+            object? capturedPrevious = null;
+            var isFirstWrite = true;
+            _symbols.AddOrUpdate(
+                path,
+                addValueFactory: _ => value,
+                updateValueFactory: (_, existing) =>
+                {
+                    capturedPrevious = existing;
+                    isFirstWrite = false;
+                    return value;
+                });
 
             // FireCallbacks never rethrows (per-callback exceptions are caught and logged
             // inside the subscriber list), so no try/catch is needed around the loop body.
-            if (!hadOldValue || !Equals(existing, value))
+            if (isFirstWrite || !Equals(capturedPrevious, value))
                 FireCallbacks(path, value);
 
             results[path] = AdsValueResult.Success(null, path);

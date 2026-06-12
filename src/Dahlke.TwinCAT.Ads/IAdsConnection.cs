@@ -2,6 +2,27 @@ using TwinCAT.Ads;
 
 namespace Dahlke.TwinCAT.Ads;
 
+/// <summary>
+/// Represents a connection to a single PLC target over ADS.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Thread safety.</b> All members are safe for concurrent use from any thread; operations on a
+/// single connection may interleave freely. No operation blocks another. For
+/// <see cref="AdsConnection"/> this is guaranteed by the Beckhoff <c>AdsClient</c>, which
+/// multiplexes concurrent requests via unique invoke-ids correlated through an internal
+/// <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey,TValue}"/>. For
+/// <see cref="SimulatedAdsConnection"/> concurrent writes to the same path are resolved by the
+/// store's compare-and-swap; each value change fires callbacks exactly once.
+/// </para>
+/// <para>
+/// <b>Subscription callbacks.</b> Callbacks registered via
+/// <see cref="SubscribeAsync(string,int,Action{string,object?},CancellationToken)"/> are invoked
+/// on a background thread — never the caller's thread. Callbacks must be thread-safe and must not
+/// block; an exception thrown by a callback is caught, logged at Warning severity, and does not
+/// interrupt the subscription.
+/// </para>
+/// </remarks>
 public interface IAdsConnection
 {
     string PlcId { get; }
@@ -259,11 +280,6 @@ public interface IAdsConnection
     /// before the sum command and excluded from it. A symbol that cannot be resolved is recorded as
     /// a per-symbol <see cref="AdsErrorException"/> failure with
     /// <see cref="AdsErrorCode.DeviceSymbolNotFound"/> and likewise excluded.
-    /// </para>
-    /// <para>
-    /// <b>Locking.</b> The write lock is held across the single sum write. The lock wait is a
-    /// contention wait governed only by <paramref name="ct"/>; a cancelled wait aborts the whole
-    /// batch.
     /// </para>
     /// <para>
     /// <b>Whole-batch timeout/cancellation.</b> As with <see cref="ReadValuesAsync"/>, timeout and
