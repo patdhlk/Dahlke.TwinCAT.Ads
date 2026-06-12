@@ -5,7 +5,7 @@ using TwinCAT.TypeSystem;
 
 namespace Dahlke.TwinCAT.Ads;
 
-public sealed class AdsConnection : IAdsConnection, IDisposable
+public sealed class AdsConnection : IManagedConnection
 {
     private readonly AdsClient _client;
     private readonly PlcTargetOptions _options;

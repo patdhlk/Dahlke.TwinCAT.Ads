@@ -7,7 +7,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// In-memory simulated PLC connection for offline development and testing.
 /// Stores values in a thread-safe dictionary — written values are returned on subsequent reads.
 /// </summary>
-public sealed class SimulatedAdsConnection : IAdsConnection, IDisposable
+public sealed class SimulatedAdsConnection : IManagedConnection
 {
     private readonly ILogger<SimulatedAdsConnection> _logger;
     private readonly ConcurrentDictionary<string, object?> _symbols = new();
@@ -66,6 +66,12 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IDisposable
 
     public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
         => Task.FromResult<IDisposable>(NoOpDisposable.Instance);
+
+    void IManagedConnection.Connect() { }
+    void IManagedConnection.Disconnect() { }
+    Task<bool> IManagedConnection.IsAliveAsync(CancellationToken ct) => Task.FromResult(true);
+    void IManagedConnection.ForceDisconnect() { }
+    void IManagedConnection.LogSymbolTree() { }
 
     public void Dispose() { }
 

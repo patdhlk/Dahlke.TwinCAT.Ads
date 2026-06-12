@@ -3,14 +3,14 @@ using Microsoft.Extensions.Options;
 
 namespace Dahlke.TwinCAT.Ads;
 
-public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDisposable
+internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDisposable
 {
     private readonly Dictionary<string, PlcTargetOptions> _targets;
     private readonly IAdsConnectionFactory _connectionFactory;
     private readonly AdsRouterReadySignal _readySignal;
     private readonly ILogger<AdsConnectionPool> _logger;
     private readonly IConfiguration _configuration;
-    private readonly ConcurrentDictionary<string, IAdsConnection> _connections = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, IManagedConnection> _connections = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _reconnectCts = new();
     private readonly ConcurrentDictionary<string, Task> _loopTasks = new();
     private CancellationTokenSource? _stoppingCts;
@@ -79,12 +79,9 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
 
         foreach (var (plcId, connection) in _connections)
         {
-            if (connection is AdsConnection ads)
-            {
-                try { ads.Disconnect(); }
-                catch (Exception ex) { _logger.LogWarning(ex, "Error disconnecting from PLC {PlcId}", plcId); }
-            }
-            if (connection is IDisposable d) d.Dispose();
+            try { connection.Disconnect(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Error disconnecting from PLC {PlcId}", plcId); }
+            connection.Dispose();
         }
 
         _connections.Clear();
@@ -101,7 +98,7 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
 
     public IReadOnlyDictionary<string, IAdsConnection> GetAllConnections()
     {
-        return _connections.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+        return _connections.ToDictionary(kvp => kvp.Key, kvp => (IAdsConnection)kvp.Value);
     }
 
     public void ForceReconnect(string plcId)
@@ -133,10 +130,7 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
             cts.Dispose();
         }
         foreach (var (_, connection) in _connections)
-        {
-            if (connection is IDisposable disposable)
-                disposable.Dispose();
-        }
+            connection.Dispose();
         _stoppingCts?.Dispose();
     }
 
@@ -155,11 +149,11 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
 
             while (!cts.Token.IsCancellationRequested)
             {
-                AdsConnection? ads = null;
+                IManagedConnection? ads = null;
                 try
                 {
                     // Create new connection
-                    ads = (AdsConnection)_connectionFactory.Create(plcId, options);
+                    ads = _connectionFactory.Create(plcId, options);
                     _logger.LogInformation("Connecting to PLC {PlcId}...", plcId);
                     ads.Connect();
                     _connections[plcId] = ads;
@@ -198,7 +192,7 @@ public sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, IDis
                 // actually dead connection, not an already replaced new one
                 if (ads is not null)
                 {
-                    _connections.TryRemove(new KeyValuePair<string, IAdsConnection>(plcId, ads));
+                    _connections.TryRemove(new KeyValuePair<string, IManagedConnection>(plcId, ads));
 
                     // Grace period: let in-flight operations on old connection finish
                     try { await Task.Delay(DisposeGracePeriod, cts.Token).ConfigureAwait(false); }

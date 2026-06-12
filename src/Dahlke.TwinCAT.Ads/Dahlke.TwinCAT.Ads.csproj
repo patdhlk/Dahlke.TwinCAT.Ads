@@ -24,6 +24,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Dahlke.TwinCAT.Ads.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="6.*" />
     <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="6.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.*" />
