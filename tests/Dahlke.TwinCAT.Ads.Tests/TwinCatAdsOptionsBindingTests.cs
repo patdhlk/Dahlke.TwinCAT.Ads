@@ -230,6 +230,37 @@ public class TwinCatAdsOptionsBindingTests
     }
 
     // ------------------------------------------------------------------
+    // InitialValues — config-binding caveat (values come back as strings)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void InitialValues_FromInMemoryConfig_ValuesAreStrings()
+    {
+        // When InitialValues are populated from JSON/file configuration the
+        // Microsoft.Extensions.Configuration binder stores every scalar as a
+        // string, regardless of the original JSON type.  This test documents that
+        // caveat so a future refactor does not silently change the contract.
+        var opts = Resolve(
+            new()
+            {
+                ["PlcTargets:sim1:Mode"]                         = "Simulated",
+                ["PlcTargets:sim1:InitialValues:MAIN.bEnabled"]  = "true",
+            },
+            simulation: true);
+
+        Assert.True(opts.Targets.ContainsKey("sim1"));
+        var target = opts.Targets["sim1"];
+        Assert.True(target.InitialValues.ContainsKey("MAIN.bEnabled"));
+
+        var value = target.InitialValues["MAIN.bEnabled"];
+
+        // The value MUST be the string "true" — not the bool true.
+        // Code that reads config-seeded values must handle string representations.
+        Assert.IsType<string>(value);
+        Assert.Equal("true", value);
+    }
+
+    // ------------------------------------------------------------------
     // Simulation variant also registers IOptions<TwinCatAdsOptions>
     // ------------------------------------------------------------------
 

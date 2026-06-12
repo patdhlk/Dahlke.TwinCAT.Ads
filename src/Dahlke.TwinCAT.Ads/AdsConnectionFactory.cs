@@ -4,6 +4,13 @@ internal sealed class AdsConnectionFactory(ILoggerFactory loggerFactory) : IAdsC
 {
     public IManagedConnection Create(string plcId, PlcTargetOptions options)
     {
+        if (options.Mode == ConnectionMode.Simulated)
+        {
+            var simulated = new SimulatedAdsConnection(plcId, options.DisplayName, loggerFactory);
+            simulated.SetInitialValues(options.InitialValues);
+            return simulated;
+        }
+
         return new AdsConnection(plcId, options, loggerFactory);
     }
 }

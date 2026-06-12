@@ -28,8 +28,13 @@ public sealed class SimulatedAdsConnectionPool : IHostedService, IAdsConnectionP
 
         foreach (var (plcId, options) in _targets)
         {
-            _connections[plcId] = new SimulatedAdsConnection(
+            var connection = new SimulatedAdsConnection(
                 plcId, options.DisplayName, _loggerFactory);
+
+            if (options.InitialValues.Count > 0)
+                connection.SetInitialValues(options.InitialValues);
+
+            _connections[plcId] = connection;
         }
 
         return Task.CompletedTask;

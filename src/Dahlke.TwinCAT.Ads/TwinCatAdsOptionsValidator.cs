@@ -43,7 +43,12 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
 
         foreach (var (targetId, target) in options.Targets)
         {
-            ValidateTargetAmsNetId(targetId, target, failures);
+            // Simulated targets talk to an in-memory store, not AMS/ADS, so they
+            // need no AMS Net ID — skip that check. Port and TimeoutMs checks
+            // still apply for consistency across modes.
+            if (target.Mode == ConnectionMode.Real)
+                ValidateTargetAmsNetId(targetId, target, failures);
+
             ValidateTargetPort(targetId, target, failures);
             ValidateTargetTimeout(targetId, target, failures);
         }

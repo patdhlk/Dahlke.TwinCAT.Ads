@@ -112,6 +112,17 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             return;
         }
 
+        // A simulated target retains its runtime state in memory — replacing the
+        // connection would wipe values written since startup, which diverges from
+        // real PLC behavior (a real PLC retains its variables across client
+        // reconnects).  Log and return without touching the loop.
+        if (options.Mode == ConnectionMode.Simulated)
+        {
+            _logger.LogInformation(
+                "ForceReconnect: simulated target {PlcId} — reconnect is a no-op", plcId);
+            return;
+        }
+
         _logger.LogInformation("ForceReconnect: forcing reconnection to PLC {PlcId}", plcId);
 
         // Cancel old loop
@@ -141,6 +152,13 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     /// Connection loop: connects, periodically checks health,
     /// and rebuilds connection on failure.
     /// </summary>
+    /// <remarks>
+    /// This loop is connection-mode agnostic — it needs no special-casing for
+    /// <see cref="ConnectionMode.Simulated"/> targets. The factory decides which
+    /// concrete connection to build; a simulated connection's <c>Connect()</c> is
+    /// a no-op that succeeds instantly and its <c>IsAliveAsync</c> always returns
+    /// true, so a simulated target connects immediately and never reconnect-churns.
+    /// </remarks>
     private void StartConnectionLoop(string plcId, PlcTargetOptions options)
     {
         var cts = new CancellationTokenSource();

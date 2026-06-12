@@ -304,6 +304,85 @@ public class TwinCatAdsOptionsValidatorTests
     }
 
     // ------------------------------------------------------------------
+    // Per-target: Simulated mode relaxes AmsNetId
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Simulated_Target_Without_AmsNetId_Passes()
+    {
+        // A simulated target talks to an in-memory store, not AMS/ADS, so it
+        // needs no AMS Net ID. The validator must skip the AmsNetId checks.
+        var options = new TwinCatAdsOptions
+        {
+            Targets = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["sim1"] = new PlcTargetOptions { Mode = ConnectionMode.Simulated },
+            },
+        };
+
+        Assert.True(Validate(options).Succeeded);
+    }
+
+    [Fact]
+    public void Simulated_Target_StillValidates_Port_And_Timeout()
+    {
+        // Port/TimeoutMs checks still apply to simulated targets.
+        var options = new TwinCatAdsOptions
+        {
+            Targets = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["sim1"] = new PlcTargetOptions
+                {
+                    Mode = ConnectionMode.Simulated,
+                    Port = 0,
+                    TimeoutMs = -1,
+                },
+            },
+        };
+
+        var result = Validate(options);
+        Assert.False(result.Succeeded);
+        var failures = result.Failures!.ToList();
+        // Port and TimeoutMs failures — but NOT an AmsNetId failure.
+        Assert.Equal(2, failures.Count);
+        Assert.DoesNotContain(failures, f => f.Contains("AmsNetId", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Real_Target_Without_AmsNetId_Still_Fails()
+    {
+        // The default Mode is Real; a real target without an AMS Net ID is still invalid.
+        var options = new TwinCatAdsOptions
+        {
+            Targets = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["real1"] = new PlcTargetOptions { Mode = ConnectionMode.Real },
+            },
+        };
+
+        var result = Validate(options);
+        Assert.False(result.Succeeded);
+        var failures = result.Failures!.ToList();
+        Assert.Single(failures);
+        Assert.Contains("AmsNetId", failures[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Mixed_RealValid_And_SimulatedWithoutNetId_Passes()
+    {
+        var options = new TwinCatAdsOptions
+        {
+            Targets = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["real1"] = ValidTarget(),
+                ["sim1"]  = new PlcTargetOptions { Mode = ConnectionMode.Simulated },
+            },
+        };
+
+        Assert.True(Validate(options).Succeeded);
+    }
+
+    // ------------------------------------------------------------------
     // Router.NetId
     // ------------------------------------------------------------------
 
