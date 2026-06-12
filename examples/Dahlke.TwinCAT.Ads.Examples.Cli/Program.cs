@@ -46,34 +46,73 @@ if (!connection.IsConnected)
     return;
 }
 
-// Write a single value, then read it back.
+// -----------------------------------------------------------------
+// Typed write then typed read (preferred pattern)
+// -----------------------------------------------------------------
+await connection.WriteValueAsync<float>("GVL.SetpointTemperature", 21.5f, ct);
+float temp = await connection.ReadValueAsync<float>("GVL.SetpointTemperature", ct);
+Console.WriteLine($"GVL.SetpointTemperature = {temp} °C");
+
+// Write and read back an integer symbol.
 await connection.WriteValueAsync("GVL.Counter", (short)42, ct);
-var counter = await connection.ReadValueAsync("GVL.Counter", ct);
+short counter = await connection.ReadValueAsync<short>("GVL.Counter", ct);
 Console.WriteLine($"GVL.Counter = {counter}");
 
-// Batch write and batch read.
+// -----------------------------------------------------------------
+// Batch write and batch read (single ADS sum command per direction)
+// -----------------------------------------------------------------
 await connection.WriteValuesAsync(new Dictionary<string, object?>
 {
-    ["GVL.SetpointTemperature"] = 21.5f,
+    ["GVL.SetpointTemperature"] = 23.0f,
     ["GVL.PumpRunning"] = true,
 }, ct);
 
-var values = await connection.ReadValuesAsync(
+var results = await connection.ReadValuesAsync(
     ["GVL.SetpointTemperature", "GVL.PumpRunning"], ct);
+
 // Each entry carries a per-symbol AdsValueResult: Succeeded plus Value (or Error).
-foreach (var (symbol, result) in values)
+foreach (var (symbol, result) in results)
     Console.WriteLine($"{symbol} = {(result.Succeeded ? result.Value : $"ERROR: {result.Error?.Message}")}");
 
-// Query the PLC run state.
+// Typed access on a batch result:
+if (results["GVL.SetpointTemperature"].Succeeded)
+{
+    float setpoint = results["GVL.SetpointTemperature"].GetValue<float>();
+    Console.WriteLine($"Setpoint (typed): {setpoint} °C");
+}
+
+// -----------------------------------------------------------------
+// ADS state
+// -----------------------------------------------------------------
 var state = await connection.GetAdsStateAsync(ct);
 Console.WriteLine($"ADS state: {state}");
 
-// Subscribe to a symbol for a few seconds (with a real PLC the callback
-// fires on value changes; the simulation accepts the subscription as a no-op).
-using var subscription = await connection.SubscribeAsync(
-    "GVL.Counter", cycleTimeMs: 200,
-    (symbol, value) => Console.WriteLine($"Notification: {symbol} = {value}"), ct);
+// -----------------------------------------------------------------
+// Typed subscription — durable across reconnects
+// -----------------------------------------------------------------
+// The callback fires on a background thread; it must be thread-safe.
+// With a real PLC it fires on value change; the simulation fires when
+// a new (different) value is written.
+using var typedSub = await connection.SubscribeAsync<float>(
+    "GVL.SetpointTemperature",
+    cycleTimeMs: 200,
+    (symbol, value) => Console.WriteLine($"Typed notification: {symbol} = {value} °C"),
+    CancellationToken.None);
 
-await Task.Delay(TimeSpan.FromSeconds(3), ct);
+// Write a changed value to trigger the simulated subscription callback.
+await connection.WriteValueAsync<float>("GVL.SetpointTemperature", 25.0f, ct);
+await Task.Delay(TimeSpan.FromMilliseconds(100), ct);
+
+// -----------------------------------------------------------------
+// Untyped subscription
+// -----------------------------------------------------------------
+using var untypedSub = await connection.SubscribeAsync(
+    "GVL.Counter",
+    cycleTimeMs: 200,
+    (symbol, value) => Console.WriteLine($"Untyped notification: {symbol} = {value}"),
+    CancellationToken.None);
+
+await connection.WriteValueAsync("GVL.Counter", (short)99, ct);
+await Task.Delay(TimeSpan.FromSeconds(1), ct);
 
 await host.StopAsync();
