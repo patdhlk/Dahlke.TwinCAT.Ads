@@ -39,7 +39,7 @@ public class AdsConnectionPoolSymbolDumpTests
             Options.Create(adsOptions),
             factory,
             signal,
-            NullLogger<AdsConnectionPool>.Instance,
+            NullLoggerFactory.Instance,
             time);
 
         return (pool, conn, signal);

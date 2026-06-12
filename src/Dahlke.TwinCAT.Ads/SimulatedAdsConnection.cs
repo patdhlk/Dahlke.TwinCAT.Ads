@@ -160,46 +160,12 @@ public sealed class SimulatedAdsConnection : IManagedConnection
                 $"Write or seed the symbol before performing a typed read.",
                 AdsErrorCode.DeviceSymbolNotFound);
 
-        if (stored is null)
-        {
-            var targetType = typeof(T);
-            // For non-nullable value types null is illegal: there's nothing to return.
-            if (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) is null)
-                throw new InvalidCastException(
-                    $"Simulated symbol '{symbolPath}' has a null stored value; " +
-                    $"cannot convert null to non-nullable value type '{targetType.Name}'.");
-
-            // Reference type or Nullable<T>: null is a valid result.
-            return Task.FromResult(default(T)!);
-        }
-
-        // Exact type or assignable — fast path, no conversion needed.
-        if (stored is T directResult)
-            return Task.FromResult(directResult);
-
-        // IConvertible covers all primitives and string; supports numeric widening and
-        // string-seeded values ("42"→int, "true"→bool, "3.14"→double).
-        if (stored is IConvertible)
-        {
-            try
-            {
-                var targetType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
-                var converted = (T)Convert.ChangeType(stored, targetType, CultureInfo.InvariantCulture);
-                return Task.FromResult(converted);
-            }
-            catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
-            {
-                throw new InvalidCastException(
-                    $"Simulated symbol '{symbolPath}': cannot convert stored value " +
-                    $"'{stored}' (type: {stored.GetType().Name}) to '{typeof(T).Name}'. {ex.Message}",
-                    ex);
-            }
-        }
-
-        // Non-IConvertible, not assignable: fail with an actionable message.
-        throw new InvalidCastException(
-            $"Simulated symbol '{symbolPath}': stored value has type '{stored.GetType().Name}' " +
-            $"which cannot be converted to requested type '{typeof(T).Name}'.");
+        // Conversion (null-handling, direct cast, IConvertible widening, actionable
+        // throw on failure) is delegated to the shared converter so a typed read and a
+        // typed notification interpret the same stored value identically. The only
+        // simulation-specific rule kept here is the missing-symbol AdsErrorException
+        // above — a notification, by contrast, always has a value in hand.
+        return Task.FromResult(AdsValueConverter.ConvertForRead<T>(stored, symbolPath));
     }
 
     public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
@@ -318,6 +284,18 @@ public sealed class SimulatedAdsConnection : IManagedConnection
         var registration = list.Add(callback);
         return Task.FromResult<IDisposable>(registration);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Wraps <paramref name="callback"/> with <see cref="TypedCallbackAdapter.Wrap{T}"/>
+    /// and delegates to the untyped <see cref="SubscribeAsync"/>. Each notification value
+    /// is converted to <typeparamref name="T"/> with the same rules as
+    /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>; a value that fails
+    /// conversion (or a null with a non-nullable value-type <typeparamref name="T"/>) is
+    /// dropped with a Warning rather than delivered.
+    /// </remarks>
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
 
     private void FireCallbacks(string symbolPath, object? newValue)
     {

@@ -465,6 +465,18 @@ internal sealed class AdsConnectionFacade : IAdsConnection
         return subscription;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The typed callback is wrapped FIRST with <see cref="TypedCallbackAdapter.Wrap{T}"/>
+    /// into the untyped <c>Action&lt;string, object?&gt;</c> shape, then handed to the
+    /// durable untyped <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/>.
+    /// Durability comes for free: the durable record stores the already-wrapped untyped
+    /// callback, so each reconnect re-registers the same wrapper (conversion included)
+    /// without the facade needing to know the subscription was typed.
+    /// </remarks>
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
+
     /// <summary>
     /// A durable subscription record: the immutable subscribe arguments plus the
     /// current underlying registration (and the connection it was created on). Held

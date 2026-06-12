@@ -278,4 +278,14 @@ internal sealed class FakeManagedConnection : IManagedConnection
         _subscriptions.Enqueue(record);
         return record.Disposable;
     }
+
+    /// <summary>
+    /// The typed overload is never exercised against the underlying connection: the
+    /// facade wraps the typed callback into the untyped shape BEFORE storing it in the
+    /// durable record, so only the untyped <see cref="SubscribeAsync"/> ever reaches a
+    /// managed connection. Implemented as a hard failure to assert that contract.
+    /// </summary>
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+        => throw new NotSupportedException(
+            "FakeManagedConnection only speaks the untyped SubscribeAsync; the facade wraps typed callbacks before reaching it.");
 }

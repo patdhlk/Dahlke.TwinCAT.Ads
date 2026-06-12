@@ -298,7 +298,7 @@ public class SimulatedAdsConnectionSubscriptionTests
 
         var pool = new AdsConnectionPool(
             Options.Create(adsOptions), factory, signal,
-            NullLogger<AdsConnectionPool>.Instance, time);
+            NullLoggerFactory.Instance, time);
 
         signal.SetReady();
         await pool.StartAsync(CancellationToken.None);

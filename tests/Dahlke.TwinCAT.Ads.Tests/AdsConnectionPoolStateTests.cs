@@ -45,7 +45,7 @@ public class AdsConnectionPoolStateTests
             Options.Create(adsOptions),
             factory,
             signal,
-            NullLogger<AdsConnectionPool>.Instance,
+            NullLoggerFactory.Instance,
             time);
 
         return (pool, factory, time, signal);

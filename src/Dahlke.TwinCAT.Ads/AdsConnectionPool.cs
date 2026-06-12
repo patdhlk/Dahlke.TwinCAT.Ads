@@ -10,6 +10,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     private readonly SymbolDumpOptions _symbolDump;
     private readonly IAdsConnectionFactory _connectionFactory;
     private readonly AdsRouterReadySignal _readySignal;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<AdsConnectionPool> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<string, IManagedConnection> _connections = new(StringComparer.OrdinalIgnoreCase);
@@ -59,7 +60,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         IOptions<TwinCatAdsOptions> options,
         IAdsConnectionFactory connectionFactory,
         AdsRouterReadySignal readySignal,
-        ILogger<AdsConnectionPool> logger,
+        ILoggerFactory loggerFactory,
         TimeProvider timeProvider)
     {
         var value = options.Value;
@@ -67,16 +68,20 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         _symbolDump = value.Diagnostics.SymbolDump;
         _connectionFactory = connectionFactory;
         _readySignal = readySignal;
-        _logger = logger;
+        _loggerFactory = loggerFactory;
+        _logger = loggerFactory.CreateLogger<AdsConnectionPool>();
         _timeProvider = timeProvider;
 
         // Eagerly create one stable facade per CONFIGURED target in the constructor
         // so GetConnection is total from construction (before StartAsync). The
         // facade is pure state with no I/O — creating it here is side-effect-free.
-        // Pass the pool's logger so the facade can log Warning when a
-        // ConnectionStateChanged handler throws.
+        // Each facade receives its own ILogger<AdsConnectionFacade> so that facade-
+        // originated warnings (state-handler exceptions, dropped typed notifications)
+        // are logged under category Dahlke.TwinCAT.Ads.AdsConnectionFacade —
+        // distinguishable from pool-management noise in category AdsConnectionPool.
         foreach (var (plcId, targetOptions) in _targets)
-            _facades[plcId] = new AdsConnectionFacade(plcId, targetOptions, _timeProvider, _logger);
+            _facades[plcId] = new AdsConnectionFacade(plcId, targetOptions, _timeProvider,
+                loggerFactory.CreateLogger<AdsConnectionFacade>());
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)

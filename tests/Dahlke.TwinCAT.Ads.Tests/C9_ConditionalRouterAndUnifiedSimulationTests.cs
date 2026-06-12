@@ -66,7 +66,7 @@ public class C9_ConditionalRouterAndUnifiedSimulationTests
             Options.Create(adsOptions),
             factory,
             signal,
-            NullLogger<AdsConnectionPool>.Instance,
+            NullLoggerFactory.Instance,
             time);
 
         // Act: StartAsync must complete even though the signal is NEVER set.
@@ -174,7 +174,7 @@ public class C9_ConditionalRouterAndUnifiedSimulationTests
             Options.Create(adsOptions),
             dispatchFactory,
             signal,
-            NullLogger<AdsConnectionPool>.Instance,
+            NullLoggerFactory.Instance,
             time);
 
         // Simulate router failure

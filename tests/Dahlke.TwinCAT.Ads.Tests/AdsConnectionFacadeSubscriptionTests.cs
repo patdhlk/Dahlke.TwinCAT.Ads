@@ -365,7 +365,7 @@ public class AdsConnectionFacadeSubscriptionTests
         var time = new FakeTimeProvider();
         var signal = new AdsRouterReadySignal();
         var pool = new AdsConnectionPool(
-            Options.Create(adsOptions), factory, signal, NullLogger<AdsConnectionPool>.Instance, time);
+            Options.Create(adsOptions), factory, signal, NullLoggerFactory.Instance, time);
 
         signal.SetReady();
         await pool.StartAsync(CancellationToken.None);

@@ -274,7 +274,7 @@ public class AdsConnectionFacadeTests
             Options.Create(adsOptions),
             factory,
             signal,
-            NullLogger<AdsConnectionPool>.Instance,
+            NullLoggerFactory.Instance,
             time);
 
         return (pool, factory, time, signal);
@@ -465,7 +465,7 @@ public class AdsConnectionFacadeTests
             Options.Create(adsOptions),
             factory,
             signal,
-            NullLogger<AdsConnectionPool>.Instance,
+            NullLoggerFactory.Instance,
             time);
 
         signal.SetReady();
@@ -543,7 +543,7 @@ public class AdsConnectionFacadeTests
             Options.Create(adsOptions),
             recordingFactory,
             localSignal,
-            NullLogger<AdsConnectionPool>.Instance,
+            NullLoggerFactory.Instance,
             localTime);
 
         localSignal.SetReady();
@@ -620,6 +620,9 @@ public class AdsConnectionFacadeTests
 
         public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
             => Task.FromResult<IDisposable>(new DummyDisposable());
+
+        public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+            => throw new NotSupportedException();
 
         public void Connect() => IsConnected = true;
         public void Disconnect() => IsConnected = false;

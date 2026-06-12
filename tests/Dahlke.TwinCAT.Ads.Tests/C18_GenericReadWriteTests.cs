@@ -471,6 +471,9 @@ public class C18_GenericReadWriteTests
         public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
             => Task.FromResult<IDisposable>(new DummyDisposable());
 
+        public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
         public void Connect() => IsConnected = true;
         public void Disconnect() => IsConnected = false;
         public Task<bool> IsAliveAsync(CancellationToken ct) => Task.FromResult(true);

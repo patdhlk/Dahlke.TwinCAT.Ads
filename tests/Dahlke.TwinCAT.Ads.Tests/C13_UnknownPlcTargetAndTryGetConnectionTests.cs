@@ -34,7 +34,7 @@ public class C13_UnknownPlcTargetAndTryGetConnectionTests
             Options.Create(adsOptions),
             factory,
             signal,
-            NullLogger<AdsConnectionPool>.Instance,
+            NullLoggerFactory.Instance,
             time);
 
         return (pool, factory, time, signal);

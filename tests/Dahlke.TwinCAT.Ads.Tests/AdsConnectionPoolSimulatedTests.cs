@@ -72,7 +72,7 @@ public class AdsConnectionPoolSimulatedTests
             Options.Create(adsOptions),
             factory,
             signal,
-            NullLogger<AdsConnectionPool>.Instance,
+            NullLoggerFactory.Instance,
             time);
     }
 

@@ -225,4 +225,28 @@ public interface IAdsConnection
     /// </para>
     /// </remarks>
     Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct);
+
+    /// <summary>
+    /// Subscribes to value-change notifications for <paramref name="symbolPath"/>, invoking <paramref name="callback"/> with the value converted to <typeparamref name="T"/>.
+    /// </summary>
+    /// <remarks>
+    /// Durability and threading semantics are identical to the untyped overload:
+    /// subscriptions registered through the durable facade survive reconnects and are
+    /// automatically re-registered on the new underlying connection.
+    ///
+    /// Each notification value is converted to <typeparamref name="T"/> using the same
+    /// rules as <see cref="ReadValueAsync{T}"/>
+    /// (<see cref="System.Convert.ChangeType(object,System.Type,System.IFormatProvider)"/>
+    /// with <see cref="System.Globalization.CultureInfo.InvariantCulture"/>).
+    ///
+    /// A value that fails conversion is DROPPED: a Warning is logged and the callback is
+    /// NOT invoked for that notification.  Choose <typeparamref name="T"/> to match the
+    /// PLC symbol's type to avoid silent drops.
+    ///
+    /// A <see langword="null"/> notification value with a value-type <typeparamref name="T"/>
+    /// is also dropped (same Warning rule).  A <see langword="null"/> value with a
+    /// reference or nullable <typeparamref name="T"/> invokes the callback with
+    /// <see langword="null"/>.
+    /// </remarks>
+    Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default);
 }

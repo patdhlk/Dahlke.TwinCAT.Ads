@@ -236,6 +236,17 @@ public sealed class AdsConnection : IManagedConnection
     }
 
     /// <summary>
+    /// Typed subscription: wraps <paramref name="callback"/> with
+    /// <see cref="TypedCallbackAdapter.Wrap{T}"/> and delegates to the untyped
+    /// <see cref="SubscribeAsync"/>. Each notification value is converted to
+    /// <typeparamref name="T"/> with the same rules as
+    /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>; an unconvertible value
+    /// is dropped with a Warning rather than delivered.
+    /// </summary>
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
+
+    /// <summary>
     /// Logs the PLC symbol tree for diagnostics.
     /// Symbols are included when their depth (dot-count in <see cref="ISymbol.InstancePath"/>)
     /// is at most <see cref="SymbolDumpOptions.MaxDepth"/> and, when
