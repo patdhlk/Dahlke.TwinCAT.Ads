@@ -68,6 +68,41 @@ public class MyService(IAdsConnectionPool pool)
 }
 ```
 
+### Command-line applications
+
+Outside ASP.NET Core, use the generic host: register the services the same way, start the host so the pool establishes its connections, then resolve `IAdsConnectionPool`.
+
+```csharp
+using Dahlke.TwinCAT.Ads;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
+var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddTwinCatAds(builder.Configuration);
+// Or: builder.Services.AddTwinCatAdsSimulation(builder.Configuration);
+
+using var host = builder.Build();
+await host.StartAsync();
+
+var pool = host.Services.GetRequiredService<IAdsConnectionPool>();
+var connection = pool.GetConnection("plc1");
+
+if (connection is not null && connection.IsConnected)
+{
+    var value = await connection.ReadValueAsync("GVL.MyVariable", CancellationToken.None);
+    Console.WriteLine($"GVL.MyVariable = {value}");
+}
+
+await host.StopAsync();
+```
+
+## Examples
+
+Runnable projects live in [`examples/`](examples/) — both work out of the box in simulation mode, no PLC required:
+
+- [`Dahlke.TwinCAT.Ads.Examples.Cli`](examples/Dahlke.TwinCAT.Ads.Examples.Cli/) — console app demonstrating reads, writes, batch operations, ADS state, and subscriptions
+- [`Dahlke.TwinCAT.Ads.Examples.MinimalApi`](examples/Dahlke.TwinCAT.Ads.Examples.MinimalApi/) — ASP.NET Core minimal API exposing PLC symbols over HTTP
+
 ## Configuration Reference
 
 ### `AmsRouter` section (optional)
