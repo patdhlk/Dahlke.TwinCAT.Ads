@@ -111,10 +111,23 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         {
             await _readySignal.WaitAsync(_stoppingCts.Token).ConfigureAwait(false);
         }
-        catch (TaskCanceledException)
+        catch (Exception ex) when (ex is TaskCanceledException or InvalidOperationException)
         {
-            // Router failed or was cancelled: start loops only for simulated targets;
-            // real targets are skipped (they require a working router).
+            // The router did not become ready. The tri-state signal distinguishes
+            // two unavailable outcomes, and BOTH land here (identical recovery —
+            // start simulated targets, skip real ones), but we log differently:
+            //   * InvalidOperationException → router FAILED. Its InnerException is
+            //     the captured reason; log it so operators know WHY.
+            //   * TaskCanceledException → router CANCELLED (host shutting down).
+            // Real targets are skipped either way (they require a working router).
+            if (ex is InvalidOperationException)
+            {
+                _logger.LogWarning(
+                    ex.InnerException ?? ex,
+                    "ADS router failed to start: {Reason}",
+                    ex.InnerException?.Message ?? ex.Message);
+            }
+
             var simTargets = _targets
                 .Where(kvp => kvp.Value.Mode == ConnectionMode.Simulated)
                 .ToList();

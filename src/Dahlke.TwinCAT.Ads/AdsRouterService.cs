@@ -132,32 +132,52 @@ public sealed class AdsRouterService : BackgroundService
         !string.IsNullOrEmpty(configuration["AmsRouter:NetId"]);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Every exit path resolves <see cref="AdsRouterReadySignal"/> exactly once
+    /// so the pool can never hang waiting on it:
+    /// <list type="bullet">
+    ///   <item>no real targets / no NetId / router started → <c>SetReady</c>;</item>
+    ///   <item>host cancellation (including a pre-cancelled token) → <c>SetCancelled</c>;</item>
+    ///   <item>any other failure → <c>SetFailed(ex)</c> carrying the reason.</item>
+    /// </list>
+    /// The terminal <c>SetCancelled</c> after the try/catch is a structural
+    /// fallback: it is a no-op once a state has been set (TrySet semantics), but
+    /// guarantees the signal is resolved even on an exit the catches missed.
+    /// </remarks>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await Task.Delay(1, stoppingToken);
-
-        if (!_hasRealTargets)
-        {
-            // No real PLC targets configured — the embedded router is not needed
-            // (simulated targets talk to an in-memory store, not AMS/ADS).
-            // Signal ready immediately so the pool can proceed without delay.
-            _logger.LogInformation(
-                "No real PLC targets configured — embedded router not started");
-            _readySignal.SetReady();
-            return;
-        }
-
-        if (string.IsNullOrEmpty(_netId))
-        {
-            _logger.LogInformation("Embedded ADS router disabled — using system router");
-            _readySignal.SetReady();
-            return;
-        }
-
-        _logger.LogInformation("Starting embedded ADS router with NetId {NetId}", _netId);
-
         try
         {
+            // Task.Yield cannot throw on a cancelled token (unlike Task.Delay),
+            // so a pre-cancelled stoppingToken still reaches the branches below
+            // that resolve the signal — it is never skipped over.
+            await Task.Yield();
+
+            if (!_hasRealTargets)
+            {
+                // No real PLC targets configured — the embedded router is not needed
+                // (simulated targets talk to an in-memory store, not AMS/ADS).
+                // Signal ready immediately so the pool can proceed without delay.
+                _logger.LogInformation(
+                    "No real PLC targets configured — embedded router not started");
+                _readySignal.SetReady();
+                return;
+            }
+
+            if (string.IsNullOrEmpty(_netId))
+            {
+                _logger.LogInformation("Embedded ADS router disabled — using system router");
+                _readySignal.SetReady();
+                return;
+            }
+
+            // Honour a pre-cancelled token explicitly: with no real bind work yet,
+            // surface cancellation (resolved via SetCancelled in the catch below)
+            // instead of starting the router.
+            stoppingToken.ThrowIfCancellationRequested();
+
+            _logger.LogInformation("Starting embedded ADS router with NetId {NetId}", _netId);
+
             // Choose the AmsTcpIpRouter constructor via the pure strategy method.
             //
             // Strategy A — config pass-through (IConfiguration present AND
@@ -187,12 +207,24 @@ public sealed class AdsRouterService : BackgroundService
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+            // Host is shutting the router down before it became ready: resolve
+            // the signal as Cancelled (distinct from Failed) so the pool stops
+            // waiting and routes into its "router not available" path.
             _logger.LogInformation("Embedded ADS router stopped");
+            _readySignal.SetCancelled();
         }
         catch (Exception ex)
         {
+            // Genuine failure: capture the reason so awaiters (and the pool's
+            // log) can report why the router is unavailable.
             _logger.LogError(ex, "Embedded ADS router failed");
-            _readySignal.SetFailed();
+            _readySignal.SetFailed(ex);
         }
+
+        // Structural guarantee that the signal is resolved on EVERY exit. This is
+        // a no-op whenever a state was already set above (TrySet semantics); it
+        // only matters for an exit none of the catches handled — e.g. router
+        // StartAsync returning without ever raising RouterStatus.Started.
+        _readySignal.SetCancelled();
     }
 }

@@ -177,8 +177,8 @@ public class C9_ConditionalRouterAndUnifiedSimulationTests
             NullLoggerFactory.Instance,
             time);
 
-        // Simulate router failure
-        signal.SetFailed();
+        // Simulate router failure (tri-state signal: Failed carries a reason)
+        signal.SetFailed(new InvalidOperationException("simulated router failure"));
 
         // Act: StartAsync must complete (not hang)
         await pool.StartAsync(CancellationToken.None).WaitAsync(RealTimeout);
