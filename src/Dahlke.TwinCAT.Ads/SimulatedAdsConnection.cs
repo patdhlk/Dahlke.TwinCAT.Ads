@@ -98,6 +98,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
 
     public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         _symbols.TryGetValue(symbolPath, out var value);
         return Task.FromResult(value);
     }
@@ -114,6 +115,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// </remarks>
     public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         var hadOldValue = _symbols.TryGetValue(symbolPath, out var existing);
         _symbols[symbolPath] = value;
 
@@ -139,6 +141,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// </summary>
     public Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         foreach (var (path, value) in values)
         {
             var hadOldValue = _symbols.TryGetValue(path, out var existing);

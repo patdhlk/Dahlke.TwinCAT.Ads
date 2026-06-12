@@ -73,18 +73,37 @@ public sealed class AdsConnection : IManagedConnection
         try { _client.Disconnect(); } catch { /* best effort */ }
     }
 
-    public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+    public async Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
     {
+        // NOTE: making this a proper async method (not a sync throw + Task.FromResult) is itself a
+        // subtle behavioral fix: any synchronous exception (symbol not found) now arrives via the
+        // Task rather than being thrown before the task is returned. The facade awaits this method
+        // so consumers see no difference in how exceptions surface, but it is safer API practice.
+
         using var cts = CreateTimeoutCts(ct);
         var symbolLoader = GetSymbolLoader();
 
-        if (symbolLoader.Symbols.TryGetInstance(symbolPath, out var symbol) && symbol is IValueSymbol valueSymbol)
+        if (!symbolLoader.Symbols.TryGetInstance(symbolPath, out var symbol) || symbol is not IValueSymbol)
+            throw new AdsErrorException($"Symbol '{symbolPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+
+        ResultAnyValue result;
+        try
         {
-            object? value = valueSymbol.ReadValue();
-            return Task.FromResult<object?>(value);
+            result = await _client.ReadValueAsync(symbol, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Either the caller's token or the timeout CTS fired.
+            // Disambiguate: OCE when caller cancelled, TimeoutException when timeout elapsed.
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
         }
 
-        throw new AdsErrorException($"Symbol '{symbolPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+        if (result.Failed)
+            throw new AdsErrorException(
+                $"Read of symbol '{symbolPath}' on PLC '{PlcId}' failed: {result.ErrorCode}",
+                result.ErrorCode);
+
+        return result.Value;
     }
 
     public async Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)

@@ -45,7 +45,51 @@ public interface IAdsConnection
     /// </remarks>
     event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
+    /// <summary>
+    /// Reads the current value of a PLC symbol identified by <paramref name="symbolPath"/>.
+    /// </summary>
+    /// <param name="symbolPath">The fully-qualified PLC symbol path (e.g. <c>MAIN.Counter</c>).</param>
+    /// <param name="ct">
+    /// Used to cancel the operation. When the caller's token fires an
+    /// <see cref="OperationCanceledException"/> is thrown with that token as the source, allowing
+    /// the caller to distinguish cancellation from timeout.
+    /// </param>
+    /// <returns>
+    /// The symbol value marshaled to a .NET object — a boxed primitive for scalar symbols, a
+    /// dynamic object for struct/array symbols — matching the same value shapes produced by the
+    /// synchronous read path.
+    /// Returns <see langword="null"/> only for simulated connections where the path has never been
+    /// written; real PLC reads throw on unknown symbols.
+    /// </returns>
+    /// <exception cref="AdsErrorException">
+    /// Thrown when the symbol is not found (<see cref="AdsErrorCode.DeviceSymbolNotFound"/>) or
+    /// when the ADS read operation itself reports a non-success error code.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="ct"/> is cancelled before or during the read. The exception's
+    /// <see cref="OperationCanceledException.CancellationToken"/> matches <paramref name="ct"/>.
+    /// </exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the per-target <see cref="PlcTargetOptions.TimeoutMs"/> elapses before the
+    /// read completes, without <paramref name="ct"/> having been cancelled first. This lets callers
+    /// distinguish a hardware/network timeout from an intentional cancellation.
+    /// </exception>
     Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct);
+
+    /// <summary>
+    /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
+    /// </summary>
+    /// <param name="symbolPath">The fully-qualified PLC symbol path.</param>
+    /// <param name="value">The value to write. Must be compatible with the symbol's PLC type.</param>
+    /// <param name="ct">
+    /// Used to cancel the operation. Cancellation and per-target timeout are both honored;
+    /// see <see cref="ReadValueAsync"/> for the exception semantics — the same rules apply here.
+    /// </param>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the per-target <see cref="PlcTargetOptions.TimeoutMs"/> elapses before the
+    /// write completes, without <paramref name="ct"/> having been cancelled first.
+    /// </exception>
     Task WriteValueAsync(string symbolPath, object value, CancellationToken ct);
     Task<Dictionary<string, object?>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct);
     Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct);
