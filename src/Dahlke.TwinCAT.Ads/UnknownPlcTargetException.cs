@@ -60,7 +60,7 @@ public sealed class UnknownPlcTargetException : Exception
 
     /// <summary>
     /// Initializes a new instance of <see cref="UnknownPlcTargetException"/> with an
-    /// explicit message. Prefer the overloads that accept <paramref name="configuredIds"/>
+    /// explicit message. Prefer the overloads that accept <c>configuredIds</c>
     /// so the diagnostic information is generated consistently.
     /// </summary>
     /// <param name="plcId">The identifier that was requested but is not configured.</param>

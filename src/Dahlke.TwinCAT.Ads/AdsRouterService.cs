@@ -91,7 +91,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// <c>GetRequiredService</c>.
 /// </para>
 /// </remarks>
-public class AdsRouterService : BackgroundService
+internal class AdsRouterService : BackgroundService
 {
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<AdsRouterService> _logger;

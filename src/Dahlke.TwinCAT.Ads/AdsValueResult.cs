@@ -8,8 +8,8 @@ namespace Dahlke.TwinCAT.Ads;
 /// Batch operations (<see cref="IAdsConnection.ReadValuesAsync"/>,
 /// <see cref="IAdsConnection.WriteValuesAsync"/>) report success or failure independently
 /// for each requested symbol. One unreadable or unwritable symbol does not abort the whole
-/// batch: its slot in the result dictionary carries a <see cref="Failure"/> while every other
-/// symbol still carries its own <see cref="Success"/>. This is why a batch returns a
+/// batch: its slot in the result dictionary carries a <see cref="Failure(Exception, string?)"/> while every other
+/// symbol still carries its own <see cref="Success(object?, string?)"/>. This is why a batch returns a
 /// dictionary of <see cref="AdsValueResult"/> rather than a flat dictionary of values — the
 /// caller can inspect each symbol's outcome without a try/catch around the whole call.
 /// </para>
@@ -52,7 +52,7 @@ public sealed class AdsValueResult
     /// <summary>
     /// The symbol path this result belongs to, or <see langword="null"/> when the result was
     /// produced by a path-less factory overload (e.g. a free-standing
-    /// <see cref="Success(object?)"/> in a unit test). Batch operations populate this with the
+    /// <c>Success</c> call in a unit test). Batch operations populate this with the
     /// originating path so <see cref="GetValue{T}"/> can surface the symbol in conversion errors.
     /// </summary>
     public string? SymbolPath { get; }

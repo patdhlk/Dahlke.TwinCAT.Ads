@@ -56,8 +56,14 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     // the list under concurrent subscribe/dispose/fire operations.
     private readonly ConcurrentDictionary<string, SubscriberList> _subscribers = new();
 
+    /// <inheritdoc />
     public string PlcId { get; }
+
+    /// <inheritdoc />
     public string DisplayName { get; }
+
+    /// <inheritdoc />
+    /// <remarks>A simulated connection is permanently connected; this always returns <see langword="true"/>.</remarks>
     public bool IsConnected => true;
 
     /// <inheritdoc />
@@ -81,6 +87,12 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 #pragma warning restore CS0067
 
+    /// <summary>
+    /// Creates an in-memory simulated PLC connection.
+    /// </summary>
+    /// <param name="plcId">The configured identifier of the simulated target.</param>
+    /// <param name="displayName">A human-readable display name for the target.</param>
+    /// <param name="loggerFactory">Logger factory used for callback-exception logging.</param>
     public SimulatedAdsConnection(string plcId, string displayName, ILoggerFactory loggerFactory)
     {
         PlcId = plcId;
@@ -176,6 +188,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
         return Task.FromResult(AdsValueConverter.ConvertForRead<T>(stored, symbolPath));
     }
 
+    /// <inheritdoc />
     public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -204,7 +217,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// </para>
     /// <para>
     /// <b>Concurrency.</b> The check-then-store is resolved via
-    /// <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey,TValue}.AddOrUpdate"/>'s
+    /// <c>ConcurrentDictionary.AddOrUpdate</c>'s
     /// compare-and-swap retry loop: the update factory may run multiple times under contention,
     /// and the captured previous value is overwritten on each invocation, so after AddOrUpdate
     /// returns it holds exactly the value displaced by the winning swap. The writer whose swap
@@ -244,7 +257,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// <inheritdoc />
     /// <remarks>
     /// Per-symbol results. A missing symbol in simulation yields
-    /// <see cref="AdsValueResult.Success"/> with a <see langword="null"/> value — mirroring the
+    /// <see cref="AdsValueResult.Success(object?, string?)"/> with a <see langword="null"/> value — mirroring the
     /// untyped single-read (<see cref="ReadValueAsync(string, CancellationToken)"/>), which
     /// returns <see langword="null"/> for an unwritten path while a real connection throws
     /// <see cref="AdsErrorException"/>. This simulated/real divergence already exists on the
@@ -284,10 +297,10 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// </summary>
     /// <remarks>
     /// A non-null simulated write cannot fail, so each such symbol is wrapped in
-    /// <see cref="AdsValueResult.Success"/> (with a <see langword="null"/> value) to keep the
+    /// <see cref="AdsValueResult.Success(object?, string?)"/> (with a <see langword="null"/> value) to keep the
     /// batch contract uniform across simulated and real connections. A null value is rejected
     /// per-symbol with an <see cref="ArgumentNullException"/> wrapped in
-    /// <see cref="AdsValueResult.Failure"/> — matching the real connection, which cannot write a
+    /// <see cref="AdsValueResult.Failure(Exception, string?)"/> — matching the real connection, which cannot write a
     /// null — and is NOT stored. Cancellation aborts the whole batch before any value is stored.
     /// </remarks>
     public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
@@ -330,6 +343,8 @@ public sealed class SimulatedAdsConnection : IManagedConnection
         return Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(results);
     }
 
+    /// <inheritdoc />
+    /// <remarks>A simulated device is always in <see cref="AdsState.Run"/>.</remarks>
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
         => Task.FromResult(AdsState.Run);
 
@@ -391,7 +406,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// conversion (or a null with a non-nullable value-type <typeparamref name="T"/>) is
     /// dropped with a Warning rather than delivered.
     /// </remarks>
-    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
 
     private void FireCallbacks(string symbolPath, object? newValue)
@@ -408,6 +423,10 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     void IManagedConnection.ForceDisconnect() { }
     void IManagedConnection.LogSymbolTree(SymbolDumpOptions options) { }
 
+    /// <summary>
+    /// Disposes the simulated connection. A no-op: the in-memory store and subscriber
+    /// lists hold no unmanaged resources.
+    /// </summary>
     public void Dispose() { }
 
     // -------------------------------------------------------------------------

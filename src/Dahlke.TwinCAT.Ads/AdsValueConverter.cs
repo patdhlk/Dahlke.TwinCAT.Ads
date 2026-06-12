@@ -4,7 +4,7 @@ namespace Dahlke.TwinCAT.Ads;
 
 /// <summary>
 /// Shared conversion core that turns a boxed runtime value into a requested
-/// <typeparamref name="T"/>. The conversion rules are identical regardless of caller —
+/// <c>T</c>. The conversion rules are identical regardless of caller —
 /// <see cref="System.Convert.ChangeType(object, Type, IFormatProvider)"/> with
 /// <see cref="CultureInfo.InvariantCulture"/>, after a direct-cast fast path — so a typed
 /// READ (<see cref="SimulatedAdsConnection.ReadValueAsync{T}"/>) and a typed NOTIFICATION

@@ -42,7 +42,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// other (and future) waiter.
 /// </para>
 /// </remarks>
-public sealed class AdsRouterReadySignal
+internal sealed class AdsRouterReadySignal
 {
     private enum RouterReadyState
     {

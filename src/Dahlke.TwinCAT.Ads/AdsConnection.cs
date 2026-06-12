@@ -30,7 +30,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// Warning severity, and does not interrupt the subscription.
 /// </para>
 /// </remarks>
-public sealed class AdsConnection : IManagedConnection
+internal sealed class AdsConnection : IManagedConnection
 {
     private readonly AdsClient _client;
     private readonly PlcTargetOptions _options;
@@ -188,7 +188,7 @@ public sealed class AdsConnection : IManagedConnection
     /// </para>
     /// <para>
     /// <b>Symbol resolution.</b> Symbols that cannot be resolved on the PLC are recorded — before
-    /// the sum command is issued — as a per-symbol <see cref="AdsValueResult.Failure"/> carrying an
+    /// the sum command is issued — as a per-symbol <see cref="AdsValueResult.Failure(Exception, string?)"/> carrying an
     /// <see cref="AdsErrorException"/> with <see cref="AdsErrorCode.DeviceSymbolNotFound"/>; they
     /// are excluded from the sum command. Duplicate paths are de-duplicated.
     /// </para>
@@ -278,7 +278,7 @@ public sealed class AdsConnection : IManagedConnection
     /// </para>
     /// <para>
     /// <b>Pre-filtering.</b> A <see langword="null"/> value is a per-symbol programming error,
-    /// recorded as a <see cref="AdsValueResult.Failure"/> (an <see cref="ArgumentNullException"/>)
+    /// recorded as a <see cref="AdsValueResult.Failure(Exception, string?)"/> (an <see cref="ArgumentNullException"/>)
     /// before the sum command and excluded from it. Symbols that cannot be resolved are likewise
     /// recorded as a per-symbol <see cref="AdsErrorException"/> failure with
     /// <see cref="AdsErrorCode.DeviceSymbolNotFound"/> and excluded.
@@ -445,12 +445,12 @@ public sealed class AdsConnection : IManagedConnection
     /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>; an unconvertible value
     /// is dropped with a Warning rather than delivered.
     /// </summary>
-    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
 
     /// <summary>
     /// Logs the PLC symbol tree for diagnostics.
-    /// Symbols are included when their depth (dot-count in <see cref="ISymbol.InstancePath"/>)
+    /// Symbols are included when their depth (dot-count in the symbol's <c>InstancePath</c>)
     /// is at most <see cref="SymbolDumpOptions.MaxDepth"/> and, when
     /// <see cref="SymbolDumpOptions.Prefixes"/> is non-empty, the path starts with
     /// at least one configured prefix (case-insensitive).

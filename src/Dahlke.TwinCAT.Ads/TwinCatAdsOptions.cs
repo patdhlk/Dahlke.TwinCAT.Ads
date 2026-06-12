@@ -3,8 +3,8 @@ namespace Dahlke.TwinCAT.Ads;
 /// <summary>
 /// Root options type for Dahlke.TwinCAT.Ads. Aggregates all subsystem
 /// options and is bound from the application's configuration when
-/// <see cref="ServiceCollectionExtensions.AddTwinCatAds"/> or
-/// <see cref="ServiceCollectionExtensions.AddTwinCatAdsSimulation"/> is called.
+/// <c>ServiceCollectionExtensions.AddTwinCatAds</c> or
+/// <c>ServiceCollectionExtensions.AddTwinCatAdsSimulation</c> is called.
 /// </summary>
 public sealed class TwinCatAdsOptions
 {

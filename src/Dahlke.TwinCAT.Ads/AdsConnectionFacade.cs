@@ -485,7 +485,7 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     /// callback, so each reconnect re-registers the same wrapper (conversion included)
     /// without the facade needing to know the subscription was typed.
     /// </remarks>
-    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
 
     /// <summary>

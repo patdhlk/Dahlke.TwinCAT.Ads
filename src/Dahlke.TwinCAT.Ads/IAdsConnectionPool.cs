@@ -90,4 +90,41 @@ public interface IAdsConnectionPool
     /// gate.
     /// </remarks>
     void ForceReconnect(string plcId);
+
+    /// <summary>
+    /// Test-support API: attempts to retrieve the live
+    /// <see cref="SimulatedAdsConnection"/> backing a simulated target so that test
+    /// code can seed initial values or inspect simulated state directly, bypassing
+    /// the stable <see cref="IAdsConnection"/> facade.
+    /// </summary>
+    /// <param name="plcId">
+    /// The case-insensitive identifier of the PLC target to look up.
+    /// </param>
+    /// <param name="simulated">
+    /// When this method returns <see langword="true"/>, contains the non-null
+    /// simulated connection currently backing the target. When this method returns
+    /// <see langword="false"/>, contains <see langword="null"/>.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> only when <paramref name="plcId"/> identifies a
+    /// configured, started simulated target whose underlying connection is a live
+    /// <see cref="SimulatedAdsConnection"/>; otherwise <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This is a deliberate, narrow escape hatch for code-first test seeding and
+    /// inspection — it is NOT intended for production use. It never throws: a real
+    /// target, an unknown identifier, or a simulated target whose connection loop
+    /// has not yet published a connection (the pool has not been started, or is
+    /// mid-startup) all return <see langword="false"/> with a <see langword="null"/>
+    /// out-value rather than an exception.
+    /// </para>
+    /// <para>
+    /// The returned instance is the connection that is current at the instant of the
+    /// call. A simulated target's connection is stable in normal operation (its
+    /// in-memory state is preserved and <c>ForceReconnect</c> is a no-op), so the
+    /// reference is safe to use for seeding before the system under test reads it.
+    /// </para>
+    /// </remarks>
+    bool TryGetSimulatedConnection(string plcId, [NotNullWhen(true)] out SimulatedAdsConnection? simulated);
 }

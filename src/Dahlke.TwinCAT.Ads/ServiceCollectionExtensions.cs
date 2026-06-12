@@ -30,7 +30,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// <para>
 /// <c>AddTwinCatAdsSimulation</c> is sugar over <c>AddTwinCatAds</c>: it
 /// registers the identical core services (router service, factory, pool) and
-/// appends a <see cref="IServiceCollection.PostConfigure{TOptions}"/> delegate
+/// appends a <c>PostConfigure&lt;TOptions&gt;</c> delegate
 /// that forces every target into <see cref="ConnectionMode.Simulated"/> after all
 /// other <c>Configure</c> delegates have run.  The router service and pool detect
 /// the all-simulated configuration and skip the router wait entirely, so no

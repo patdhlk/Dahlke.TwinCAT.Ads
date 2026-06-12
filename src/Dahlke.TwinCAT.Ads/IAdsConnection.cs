@@ -25,8 +25,28 @@ namespace Dahlke.TwinCAT.Ads;
 /// </remarks>
 public interface IAdsConnection
 {
+    /// <summary>
+    /// The configured identifier of the PLC target this connection serves. Stable for the
+    /// connection's lifetime and case-insensitively unique across configured targets.
+    /// </summary>
     string PlcId { get; }
+
+    /// <summary>
+    /// A human-readable display name for the target, taken from
+    /// <see cref="PlcTargetOptions.DisplayName"/>. Intended for logging and dashboards;
+    /// not guaranteed unique.
+    /// </summary>
     string DisplayName { get; }
+
+    /// <summary>
+    /// Whether a live underlying connection exists and reports itself connected at the instant
+    /// this is read.
+    /// </summary>
+    /// <remarks>
+    /// Observational only — a hint, not a guard. The operation methods never consult it; they
+    /// apply their own wait-then-throw contract. For tri-state status use <see cref="State"/>;
+    /// for reactive notification subscribe to <see cref="ConnectionStateChanged"/>.
+    /// </remarks>
     bool IsConnected { get; }
 
     /// <summary>
@@ -204,8 +224,8 @@ public interface IAdsConnection
     /// <param name="ct">Cancels the whole batch (see remarks).</param>
     /// <returns>
     /// A dictionary keyed by symbol path with one <see cref="AdsValueResult"/> per requested
-    /// (distinct) symbol. A readable symbol yields <see cref="AdsValueResult.Success"/> carrying
-    /// its value; an unreadable symbol yields <see cref="AdsValueResult.Failure"/> carrying the
+    /// (distinct) symbol. A readable symbol yields <see cref="AdsValueResult.Success(object?, string?)"/> carrying
+    /// its value; an unreadable symbol yields <see cref="AdsValueResult.Failure(Exception, string?)"/> carrying the
     /// originating exception.
     /// </returns>
     /// <exception cref="OperationCanceledException">
@@ -230,7 +250,7 @@ public interface IAdsConnection
     /// </para>
     /// <para>
     /// <b>Symbol not found.</b> A symbol that cannot be resolved on the PLC is recorded as a
-    /// per-symbol <see cref="AdsValueResult.Failure"/> carrying an <see cref="AdsErrorException"/>
+    /// per-symbol <see cref="AdsValueResult.Failure(Exception, string?)"/> carrying an <see cref="AdsErrorException"/>
     /// with <see cref="AdsErrorCode.DeviceSymbolNotFound"/>, before the sum command, and is excluded
     /// from it.
     /// </para>
@@ -253,8 +273,8 @@ public interface IAdsConnection
     /// <param name="ct">Cancels the whole batch (see remarks).</param>
     /// <returns>
     /// A dictionary keyed by symbol path with one <see cref="AdsValueResult"/> per requested
-    /// symbol. A successful write yields <see cref="AdsValueResult.Success"/> with a
-    /// <see langword="null"/> value; a failed write yields <see cref="AdsValueResult.Failure"/>
+    /// symbol. A successful write yields <see cref="AdsValueResult.Success(object?, string?)"/> with a
+    /// <see langword="null"/> value; a failed write yields <see cref="AdsValueResult.Failure(Exception, string?)"/>
     /// carrying the originating exception.
     /// </returns>
     /// <exception cref="OperationCanceledException">
@@ -276,7 +296,7 @@ public interface IAdsConnection
     /// </para>
     /// <para>
     /// <b>Null values.</b> A <see langword="null"/> value is a per-symbol programming error,
-    /// recorded as a <see cref="AdsValueResult.Failure"/> (an <see cref="ArgumentNullException"/>)
+    /// recorded as a <see cref="AdsValueResult.Failure(Exception, string?)"/> (an <see cref="ArgumentNullException"/>)
     /// before the sum command and excluded from it. A symbol that cannot be resolved is recorded as
     /// a per-symbol <see cref="AdsErrorException"/> failure with
     /// <see cref="AdsErrorCode.DeviceSymbolNotFound"/> and likewise excluded.
@@ -290,6 +310,23 @@ public interface IAdsConnection
     /// </remarks>
     Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct);
 
+    /// <summary>
+    /// Reads the current ADS state of the target device (for example
+    /// <see cref="AdsState.Run"/>, <see cref="AdsState.Stop"/>, or
+    /// <see cref="AdsState.Config"/>).
+    /// </summary>
+    /// <param name="ct">
+    /// Used to cancel the operation. Cancellation and the per-target
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> are honored with the same semantics as
+    /// <see cref="ReadValueAsync(string, CancellationToken)"/>.
+    /// </param>
+    /// <returns>The device's current <see cref="AdsState"/>.</returns>
+    /// <exception cref="AdsErrorException">Thrown when the ADS state read reports a non-success error code.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the per-target <see cref="PlcTargetOptions.TimeoutMs"/> elapses before the
+    /// read completes, without <paramref name="ct"/> having been cancelled first.
+    /// </exception>
     Task<AdsState> GetAdsStateAsync(CancellationToken ct);
 
     /// <summary>
@@ -362,5 +399,5 @@ public interface IAdsConnection
     /// reference or nullable <typeparamref name="T"/> invokes the callback with
     /// <see langword="null"/>.
     /// </remarks>
-    Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default);
+    Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct);
 }
