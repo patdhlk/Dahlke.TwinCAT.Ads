@@ -12,7 +12,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// TwinCAT router already running.
 /// </summary>
 /// <remarks>
-/// <b>Retry semantics (C24):</b>
+/// <b>Retry semantics:</b>
 /// <para>
 /// Router construction and start are wrapped in a retry loop using the SAME
 /// backoff pattern as the connection pool's loops (a 2-second delay doubling up
@@ -175,7 +175,7 @@ internal class AdsRouterService : BackgroundService
 
     /// <inheritdoc />
     /// <remarks>
-    /// The body runs a retry loop (C24). The two "no router needed" branches
+    /// The body runs a retry loop. The two "no router needed" branches
     /// resolve the signal as Ready immediately and return. Otherwise the
     /// per-attempt body (<see cref="RunRouterAttemptAsync"/>) is run inside a
     /// backoff loop:

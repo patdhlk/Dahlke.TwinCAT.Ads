@@ -107,7 +107,7 @@ public class AdsConnectionPoolTests
     /// removing that window from assertions.
     /// </summary>
     /// <remarks>
-    /// Since the C11 facade redesign, <c>GetConnection</c> returns a STABLE
+    /// Since the facade redesign, <c>GetConnection</c> returns a STABLE
     /// per-target facade whose identity never changes — it is not the underlying
     /// managed connection. To pin "the facade routes to THIS managed connection"
     /// we assert on the facade's <c>CurrentForTesting</c> instead of on

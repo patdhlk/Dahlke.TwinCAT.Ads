@@ -22,7 +22,7 @@ public class AdsConnectionPoolSimulatedTests
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan Health = TimeSpan.FromSeconds(5);
 
-    // Since the C11 facade redesign, GetConnection returns the stable facade
+    // Since the facade redesign, GetConnection returns the stable facade
     // eagerly (before the underlying connects), so waiting for non-null no longer
     // means "connected". Wait until the facade reports IsConnected — i.e. the
     // underlying connection has been published into it.

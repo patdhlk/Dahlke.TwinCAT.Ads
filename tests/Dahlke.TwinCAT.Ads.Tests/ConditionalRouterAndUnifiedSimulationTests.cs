@@ -9,10 +9,10 @@ using Microsoft.Extensions.Time.Testing;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// TDD tests for C9: conditional router gating, unified simulation path,
+/// Conditional router gating, unified simulation path,
 /// and the AddTwinCatAdsSimulation PostConfigure mode-flip.
 /// </summary>
-public class C9_ConditionalRouterAndUnifiedSimulationTests
+public class ConditionalRouterAndUnifiedSimulationTests
 {
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(10);
 
@@ -20,8 +20,8 @@ public class C9_ConditionalRouterAndUnifiedSimulationTests
     // Helper: poll until connection appears
     // -------------------------------------------------------------------------
 
-    // Since the C11 facade redesign, GetConnection returns the stable facade
-    // eagerly (before the underlying connects). Wait until it reports IsConnected
+    // GetConnection returns the stable facade eagerly (before the underlying
+    // connects). Wait until it reports IsConnected
     // so the subsequent reads route to a live connection.
     private static async Task WaitForConnection(AdsConnectionPool pool, string plcId)
     {
@@ -191,10 +191,10 @@ public class C9_ConditionalRouterAndUnifiedSimulationTests
         var xVal = await simConn.ReadValueAsync("X", CancellationToken.None);
         Assert.Equal(42, xVal);
 
-        // Real target: configured but its loop was skipped (router failed). Since
-        // C11 a facade is created EAGERLY for every configured target, so
+        // Real target: configured but its loop was skipped (router failed). A
+        // facade is created EAGERLY for every configured target, so
         // GetConnection returns the (stable) facade — not null. The facade has no
-        // live connection. Since C12 an operation WAITS up to the target's
+        // live connection. An operation WAITS up to the target's
         // TimeoutMs (default 5000ms) for a connection that will never arrive (the
         // loop is skipped), then throws AdsConnectionUnavailableException. The
         // facade shares this test's FakeTimeProvider, so advancing past TimeoutMs

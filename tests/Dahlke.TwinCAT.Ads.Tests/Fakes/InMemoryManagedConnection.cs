@@ -10,7 +10,7 @@ namespace Dahlke.TwinCAT.Ads.Tests.Fakes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This double exists so the C26 contract suite can exercise the
+/// This double exists so the contract suite can exercise the
 /// <see cref="AdsConnectionFacade"/> plumbing (snapshot-then-route, durable subscriptions)
 /// against a managed connection that honours the SAME documented semantics the
 /// <see cref="SimulatedAdsConnection"/> honours, WITHOUT sharing its implementation. The two

@@ -81,7 +81,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// <see cref="IAdsConnectionPool.GetConnection"/> (the normal case) the
     /// facade's own <c>ConnectionStateChanged</c> reports pool-driven transitions
     /// instead; the direct-<c>SimulatedAdsConnection</c> case is mainly for
-    /// unit tests and the C26 adapter.
+    /// unit tests and the contract-test adapter.
     /// </remarks>
 #pragma warning disable CS0067 // The event is never used — by design; see remarks.
     public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
@@ -173,7 +173,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
 
         if (!_symbols.TryGetValue(symbolPath, out var stored))
             // Same exception shape a real connection surfaces for an unknown
-            // symbol, so callers (and the C26 contract tests) see one consistent
+            // symbol, so callers (and the contract tests) see one consistent
             // exception type across simulated and real targets.
             throw new AdsErrorException(
                 $"Simulated symbol '{symbolPath}' has no stored value; cannot read it as '{typeof(T).Name}'. " +
@@ -261,8 +261,8 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// untyped single-read (<see cref="ReadValueAsync(string, CancellationToken)"/>), which
     /// returns <see langword="null"/> for an unwritten path while a real connection throws
     /// <see cref="AdsErrorException"/>. This simulated/real divergence already exists on the
-    /// untyped single-read path; it is kept consistent here and flagged for the contract-test
-    /// commit (C26). Cancellation aborts the whole batch before any result is produced.
+    /// untyped single-read path; it is kept consistent here and flagged for the
+    /// contract suite. Cancellation aborts the whole batch before any result is produced.
     /// </remarks>
     public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
     {

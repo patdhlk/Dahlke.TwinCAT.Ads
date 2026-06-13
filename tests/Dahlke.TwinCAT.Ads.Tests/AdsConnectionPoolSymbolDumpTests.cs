@@ -45,7 +45,7 @@ public class AdsConnectionPoolSymbolDumpTests
         return (pool, conn, signal);
     }
 
-    // Since the C11 facade redesign, GetConnection returns the stable facade, not
+    // Since the facade redesign, GetConnection returns the stable facade, not
     // the underlying managed connection. Wait on the facade's current routing
     // target instead of on GetConnection identity.
     private static async Task WaitForConnection(AdsConnectionPool pool, string plcId, object expected)

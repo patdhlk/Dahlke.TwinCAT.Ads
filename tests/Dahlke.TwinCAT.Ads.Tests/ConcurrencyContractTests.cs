@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// C22: Concurrency smoke tests for <see cref="SimulatedAdsConnection"/>.
+/// Concurrency smoke tests for <see cref="SimulatedAdsConnection"/>.
 ///
 /// Verifies:
 /// <list type="number">
@@ -16,7 +16,7 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 ///         the written values (last writer wins is well-defined).</item>
 /// </list>
 /// </summary>
-public class C22_ConcurrencyContractTests
+public class ConcurrencyContractTests
 {
     private static SimulatedAdsConnection CreateConnection()
         => new("test-plc", "Test PLC", NullLoggerFactory.Instance);

@@ -3,12 +3,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// C17: Verifies that reads and writes on <see cref="SimulatedAdsConnection"/> genuinely
+/// Verifies that reads and writes on <see cref="SimulatedAdsConnection"/> genuinely
 /// observe the caller's <see cref="CancellationToken"/> and that the cancellation-vs-timeout
 /// disambiguation logic in <see cref="CancellationDisambiguator"/> behaves correctly.
 ///
 /// Hardware-only coverage note: <see cref="AdsConnection.ReadValueAsync"/> is not exercised
-/// here — it requires a live PLC and is covered in C28 integration tests. What IS verified:
+/// here — it requires a live PLC and is covered in the hardware integration tests. What IS verified:
 /// - SimulatedAdsConnection.ReadValueAsync observes ct.
 /// - SimulatedAdsConnection.WriteValueAsync observes ct.
 /// - SimulatedAdsConnection.ReadValuesAsync propagates ct to per-element reads.
@@ -16,7 +16,7 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// - CancellationDisambiguator correctly maps (callerCt fired) → OCE and
 ///   (timeout fired, caller not cancelled) → TimeoutException.
 /// </summary>
-public class C17_AsyncReadCancellationTests
+public class AsyncReadCancellationTests
 {
     private static SimulatedAdsConnection CreateConnection()
         => new("test-plc", "Test PLC", NullLoggerFactory.Instance);

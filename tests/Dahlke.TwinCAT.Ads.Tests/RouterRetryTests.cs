@@ -5,7 +5,7 @@ using Microsoft.Extensions.Time.Testing;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// TDD tests for C24: router startup failure becomes a transient, retried
+/// Router startup failure becomes a transient, retried
 /// state. <see cref="AdsRouterService.ExecuteAsync"/> wraps the per-attempt
 /// router body in a retry loop with the SAME backoff as the pool's connection
 /// loops (2s doubling to a 30s cap, paced by <see cref="TimeProvider"/>).
@@ -17,7 +17,7 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// is expected to call <c>SetReady</c> on a successful start — exactly as the
 /// real implementation does from the <c>RouterStatus.Started</c> event hook.
 /// </summary>
-public class C24_RouterRetryTests
+public class RouterRetryTests
 {
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(2);

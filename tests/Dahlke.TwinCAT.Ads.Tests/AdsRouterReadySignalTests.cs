@@ -1,7 +1,7 @@
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// TDD tests for C23: tri-state <see cref="AdsRouterReadySignal"/>.
+/// Tri-state <see cref="AdsRouterReadySignal"/>.
 ///
 /// The signal distinguishes three terminal states — Ready, Failed(reason),
 /// and Cancelled — and resolves deterministically on every path. Critically,
@@ -9,7 +9,7 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// shared signal: it cancels only that waiter, leaving the shared state free
 /// to be set Ready/Failed/Cancelled afterwards for other waiters.
 /// </summary>
-public class C23_AdsRouterReadySignalTests
+public class AdsRouterReadySignalTests
 {
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(10);
 

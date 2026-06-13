@@ -98,7 +98,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
     /// <summary>
     /// Starts the pool. Hosted-service start is never delayed by router
-    /// availability (C24): simulated-target loops start immediately, and
+    /// availability: simulated-target loops start immediately, and
     /// real-target loops are deferred behind a tracked background wait task that
     /// releases them once the router signals Ready. <see cref="StartAsync"/>
     /// itself returns promptly in every case.
@@ -148,7 +148,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             }
             catch (Exception ex) when (ex is TaskCanceledException or InvalidOperationException)
             {
-                // The signal resolved to a terminal non-Ready state. With the C24
+                // The signal resolved to a terminal non-Ready state. With the
                 // retry-forever router this only happens at shutdown (Cancelled)
                 // or the defensive Failed path — never a transient bind failure.
                 //   * InvalidOperationException → router FAILED. Its InnerException
@@ -434,7 +434,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             return;
         }
 
-        // Router gate (C24): a real target's loop is deferred until the router
+        // Router gate: a real target's loop is deferred until the router
         // becomes ready. If the loops have not yet been released, starting one
         // here would bypass the gate and connect before the router exists. Refuse
         // and warn — the loop will start on its own once the router is ready.

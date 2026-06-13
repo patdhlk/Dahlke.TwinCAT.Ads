@@ -14,7 +14,8 @@ namespace Dahlke.TwinCAT.Ads.Tests.Contract;
 /// pool's <see cref="AdsConnectionFacade"/> (wrapping a real or simulated managed connection)
 /// or, in tests/direct use, the <see cref="SimulatedAdsConnection"/> itself. Past drift between
 /// these two — sim subscriptions silently no-op'ing, mismatched missing-symbol exception types —
-/// was caught only by human review. This suite encodes the C18/C16/C20 alignment as an
+/// was caught only by human review. This suite encodes the typed-read/write, subscription, and
+/// batch alignment as an
 /// executable contract so the two implementations cannot drift apart silently: a behavioural
 /// change in one that the other does not match fails a shared [Fact].
 /// </para>
@@ -40,7 +41,7 @@ namespace Dahlke.TwinCAT.Ads.Tests.Contract;
 /// <see langword="null"/> value in BOTH implementations pinned here (sim and in-memory),
 /// mirroring the untyped single-read. A REAL hardware connection instead records a per-symbol
 /// <see cref="AdsValueResult.Failure"/> carrying <see cref="AdsErrorCode.DeviceSymbolNotFound"/>.
-/// This contract pins the sim/in-memory semantics by design (per the C20 decision); the real
+/// This contract pins the sim/in-memory semantics by design; the real
 /// connection's divergent batch behaviour is verified separately against hardware and is
 /// intentionally NOT asserted here.
 /// </para>

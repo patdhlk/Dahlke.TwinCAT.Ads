@@ -4,13 +4,13 @@ using Microsoft.Extensions.Time.Testing;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// C20 — per-symbol batch results (<see cref="AdsValueResult"/>).
+/// Per-symbol batch results (<see cref="AdsValueResult"/>).
 ///
 /// Batch read/write return one <see cref="AdsValueResult"/> per requested symbol so a single
 /// bad symbol no longer kills the whole batch. Cancellation, by contrast, aborts the WHOLE
 /// batch (it is not a per-symbol failure).
 /// </summary>
-public class C20_BatchValueResultTests
+public class BatchValueResultTests
 {
     private static SimulatedAdsConnection CreateSim()
         => new("plc1", "PLC 1", new NullLoggerFactory());

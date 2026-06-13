@@ -5,7 +5,7 @@ using Microsoft.Extensions.Time.Testing;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// C19: Generic <see cref="IAdsConnection.SubscribeAsync{T}"/> — typed value-change
+/// Generic <see cref="IAdsConnection.SubscribeAsync{T}"/> — typed value-change
 /// notifications.
 ///
 /// Each notification value is converted to <typeparamref name="T"/> using the SAME
@@ -19,7 +19,7 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// Durability and threading semantics are identical to the untyped overload: typed
 /// subscriptions made through the facade survive reconnects.
 /// </summary>
-public class C19_TypedSubscribeTests
+public class TypedSubscribeTests
 {
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(15);
 

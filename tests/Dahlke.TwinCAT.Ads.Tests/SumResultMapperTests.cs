@@ -3,13 +3,13 @@ using TwinCAT.Ads;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// C21 — pure mapping of ADS sum-command parallel arrays into per-symbol
+/// Pure mapping of ADS sum-command parallel arrays into per-symbol
 /// <see cref="AdsValueResult"/> dictionaries via <see cref="SumResultMapper"/>.
 ///
 /// These tests need no hardware: they exercise the index-aligned array → dictionary logic
 /// directly, covering all-success, mixed, all-failure, and empty inputs for both read and write.
 /// </summary>
-public class C21_SumResultMapperTests
+public class SumResultMapperTests
 {
     // ---- MapReadResults ---------------------------------------------------
 

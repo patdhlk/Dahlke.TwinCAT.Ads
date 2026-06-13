@@ -8,7 +8,7 @@ using Rec = Dahlke.TwinCAT.Ads.Tests.Fakes.FakeManagedConnection.SubscriptionRec
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// Tests for durable subscriptions (C15): a subscription made through the
+/// Tests for durable subscriptions: a subscription made through the
 /// <see cref="AdsConnectionFacade"/> survives reconnects. The facade holds the
 /// subscription record and re-registers it against each newly published
 /// connection; the caller's <see cref="IDisposable"/> stays valid across

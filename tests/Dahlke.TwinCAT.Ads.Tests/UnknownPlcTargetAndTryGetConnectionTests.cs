@@ -6,13 +6,13 @@ using Microsoft.Extensions.Time.Testing;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// TDD tests for C13: non-nullable <see cref="IAdsConnectionPool.GetConnection"/>
+/// Non-nullable <see cref="IAdsConnectionPool.GetConnection"/>
 /// that throws <see cref="UnknownPlcTargetException"/> for unconfigured identifiers,
 /// <see cref="IAdsConnectionPool.TryGetConnection"/> as the non-throwing variant,
 /// and the constructor-level eager facade creation that makes GetConnection total
 /// from construction (before StartAsync).
 /// </summary>
-public class C13_UnknownPlcTargetAndTryGetConnectionTests
+public class UnknownPlcTargetAndTryGetConnectionTests
 {
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(15);
 

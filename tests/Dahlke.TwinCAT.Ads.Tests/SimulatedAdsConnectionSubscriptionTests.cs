@@ -5,7 +5,7 @@ using Microsoft.Extensions.Time.Testing;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// Tests for C16: simulated subscriptions that actually fire on changed writes.
+/// Tests for simulated subscriptions that actually fire on changed writes.
 /// Covers on-change semantics, multi-subscriber, dispose, batch writes, exception
 /// safety, and facade end-to-end integration.
 /// </summary>

@@ -8,7 +8,7 @@ using Microsoft.Extensions.Time.Testing;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// TDD tests for C25: TwinCAT ADS health check with registration extension.
+/// TwinCAT ADS health check with registration extension.
 ///
 /// Covers:
 ///   - All targets connected → Healthy
@@ -19,7 +19,7 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 ///   - Registration test: AddHealthChecks().AddTwinCatAdsHealthCheck() wires up
 ///     and CheckHealthAsync returns Healthy for a started all-sim pool
 /// </summary>
-public class C25_HealthCheckTests
+public class HealthCheckTests
 {
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(15);
 

@@ -7,17 +7,17 @@ using Microsoft.Extensions.Time.Testing;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// TDD tests for C24: the pool no longer blocks startup on the router. SIM loops
+/// The pool no longer blocks startup on the router. SIM loops
 /// always start immediately; REAL-target loops are deferred behind a tracked
 /// background wait task that releases them once the router signals Ready. While
 /// the signal is PENDING, <see cref="AdsConnectionPool.StartAsync"/> returns
 /// promptly and real loops are NOT started — they start later, on Ready.
 ///
-/// This is the deliberate behavioural change from C9/C23: a PENDING signal now
+/// This is the deliberate behavioural change: a PENDING signal now
 /// DEFERS real loops rather than skipping them. (A terminal Failed/Cancelled
-/// signal still skips them — see C23_RouterSignalResolutionTests.)
+/// signal still skips them — see RouterSignalResolutionTests.)
 /// </summary>
-public class C24_PoolDeferredStartTests
+public class PoolDeferredStartTests
 {
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(10);
 

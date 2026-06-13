@@ -6,7 +6,7 @@ using TwinCAT.Ads;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// C18: Generic <see cref="IAdsConnection.ReadValueAsync{T}"/> and
+/// Generic <see cref="IAdsConnection.ReadValueAsync{T}"/> and
 /// <see cref="IAdsConnection.WriteValueAsync{T}"/> — typed read/write as the headline API.
 ///
 /// Coverage:
@@ -19,7 +19,7 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 ///   applies to typed reads too.
 /// - Cancellation: typed read observes CancellationToken.
 /// </summary>
-public class C18_GenericReadWriteTests
+public class GenericReadWriteTests
 {
     private static SimulatedAdsConnection CreateSim()
         => new("test-plc", "Test PLC", NullLoggerFactory.Instance);

@@ -7,12 +7,12 @@ using Microsoft.Extensions.Time.Testing;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// TDD tests for C23: deterministic signal resolution across the
+/// Deterministic signal resolution across the
 /// <see cref="AdsRouterService"/> exit paths, and the pool's tri-state
 /// reaction (Failed logs the reason; Failed and Cancelled both route into the
 /// "router not available" path).
 /// </summary>
-public class C23_RouterSignalResolutionTests
+public class RouterSignalResolutionTests
 {
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(10);
 

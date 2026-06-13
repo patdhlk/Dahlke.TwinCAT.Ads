@@ -322,7 +322,7 @@ public class AdsConnectionFacadeTests
     {
         var (pool, factory, _, signal) = CreatePool("plc1");
 
-        // C13: facades are created eagerly in the constructor — GetConnection is total
+        // Facades are created eagerly in the constructor — GetConnection is total
         // from construction, even BEFORE StartAsync is called.
         var facadePreStart = pool.GetConnection("plc1");
         Assert.NotNull(facadePreStart);
@@ -344,7 +344,7 @@ public class AdsConnectionFacadeTests
         await fail.ConnectCalled.WaitAsync(RealTimeout);
         Assert.False(facade.IsConnected); // connect failed -> not connected
 
-        // C13: unconfigured id throws UnknownPlcTargetException (no longer null).
+        // Unconfigured id throws UnknownPlcTargetException (no longer null).
         var ex = Assert.Throws<UnknownPlcTargetException>(() => pool.GetConnection("never-configured"));
         Assert.Equal("never-configured", ex.PlcId);
         Assert.Contains("plc1", ex.Message);
@@ -575,7 +575,7 @@ public class AdsConnectionFacadeTests
         public string DisplayName => PlcId;
         public bool IsConnected { get; set; }
 
-        // No-op implementations to satisfy IAdsConnection after C14.
+        // No-op implementations to satisfy IAdsConnection after the connection-state surface was added.
         public ConnectionState State => ConnectionState.Disconnected;
 #pragma warning disable CS0067
         public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;

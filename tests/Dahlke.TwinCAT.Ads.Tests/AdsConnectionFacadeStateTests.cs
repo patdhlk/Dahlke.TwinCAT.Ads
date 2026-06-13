@@ -7,11 +7,11 @@ using Microsoft.Extensions.Time.Testing;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// Tests for C14: the connection-state surface exposed on
+/// The connection-state surface exposed on
 /// <see cref="IAdsConnection"/> via the facade — the <c>State</c> property and the
 /// <c>ConnectionStateChanged</c> event. The pool already owns the authoritative
 /// state machine and an internal <c>ConnectionStateChanged</c> event keyed by
-/// plcId; C14 forwards each target's transitions onto the matching
+/// plcId; the facade forwards each target's transitions onto the matching
 /// <see cref="AdsConnectionFacade"/> so a caller holding the stable
 /// <see cref="IAdsConnection"/> can observe and react to connectivity changes
 /// without ever touching the pool.
@@ -126,7 +126,7 @@ public class AdsConnectionFacadeStateTests
     [Fact]
     public async Task FacadeState_InitiallyDisconnected()
     {
-        // C14 wires a logger into the facade via the pool, so build the facade
+        // The pool wires a logger into the facade, so build the facade
         // through the pool rather than constructing it directly. No connection is
         // ever published (we never enqueue one / never start), so the facade stays
         // in its initial Disconnected state.

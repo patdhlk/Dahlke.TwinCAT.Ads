@@ -3,14 +3,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// C19: <see cref="AdsValueConverter"/> — the shared conversion core used by both the
+/// <see cref="AdsValueConverter"/> — the shared conversion core used by both the
 /// typed read path (which THROWS on failure) and the typed-notification path (which
 /// DROPS on failure). These tests pin the drop-semantics entry point
 /// (<see cref="AdsValueConverter.TryConvertForNotification{T}"/>) that
 /// <see cref="TypedCallbackAdapter"/> relies on; the throwing read path is covered by
-/// the C18 read tests, which must remain green after the refactor.
+/// the typed-read tests, which must remain green after the refactor.
 /// </summary>
-public class C19_AdsValueConverterTests
+public class AdsValueConverterTests
 {
     [Fact]
     public void TryConvert_ExactType_ReturnsValue()

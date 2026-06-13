@@ -73,7 +73,7 @@ public class IdempotentRegistrationTests
     [Fact]
     public void AddTwinCatAdsSimulation_CalledTwice_DoesNotDuplicateHostedServices()
     {
-        // C9: AddTwinCatAdsSimulation now registers the same core services as
+        // AddTwinCatAdsSimulation now registers the same core services as
         // AddTwinCatAds (router + pool = 2 hosted services).  Calling it twice
         // must not result in 4 hosted services — the AdsRouterReadySignal guard
         // in RegisterCoreServices ensures idempotency for the service registrations.

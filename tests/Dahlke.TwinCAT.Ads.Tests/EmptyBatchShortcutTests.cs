@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// C21 — structural guard contracts shared by every <see cref="IAdsConnection"/> implementation:
+/// Structural guard contracts shared by every <see cref="IAdsConnection"/> implementation:
 /// empty-input batch shortcuts and the all-null-write guard.
 ///
 /// <see cref="AdsConnection"/> requires hardware, so these contracts are verified against
@@ -11,7 +11,7 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// a per-symbol failure recorded WITHOUT attempting the write) are part of the
 /// <see cref="IAdsConnection"/> contract and must hold for all implementations.
 /// </summary>
-public class C21_EmptyBatchShortcutTests
+public class EmptyBatchShortcutTests
 {
     private static SimulatedAdsConnection CreateSim()
         => new("plc1", "PLC 1", new NullLoggerFactory());

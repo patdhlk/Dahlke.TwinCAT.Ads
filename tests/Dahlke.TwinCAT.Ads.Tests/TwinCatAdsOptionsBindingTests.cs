@@ -95,7 +95,7 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void Targets_Empty_WhenNoPlcTargetsSection_ThrowsValidationException()
     {
-        // C6 / TwinCatAdsOptionsValidator: an empty Targets collection is now
+        // TwinCatAdsOptionsValidator: an empty Targets collection is now
         // rejected at startup.  Resolving .Value throws instead of returning
         // an unusable options object — this is the intended new behavior.
         using var sp = BuildProvider(new());
@@ -110,7 +110,7 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void Router_NetId_BindsFromAmsRouterSection()
     {
-        // C6: a minimal valid target is required to pass validation; the test's
+        // A minimal valid target is required to pass validation; the test's
         // purpose is Router binding, so the target entry is incidental scaffolding.
         var opts = Resolve(new()
         {
@@ -124,7 +124,7 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void Router_NetId_IsNull_WhenAbsent()
     {
-        // C6: a minimal valid target is required to pass validation; the test's
+        // A minimal valid target is required to pass validation; the test's
         // purpose is that an absent AmsRouter section → null NetId, which remains
         // valid (null NetId = use the system router).
         var opts = Resolve(new()
@@ -141,7 +141,7 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void SymbolDump_Defaults_WhenNoConfiguration()
     {
-        // C6: a minimal valid target is required to pass validation; the test's
+        // A minimal valid target is required to pass validation; the test's
         // purpose is SymbolDump default values, so the target entry is incidental scaffolding.
         var opts = Resolve(new()
         {
@@ -160,7 +160,7 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void SymbolDump_BindsFromAdsSymbolDumpSection()
     {
-        // C6: a minimal valid target is required to pass validation; the test's
+        // A minimal valid target is required to pass validation; the test's
         // purpose is AdsSymbolDump section binding, so the target entry is incidental scaffolding.
         var opts = Resolve(new()
         {
@@ -183,7 +183,7 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void SymbolDump_LegacyKeyTrue_SetsEnabled()
     {
-        // C6: a minimal valid target is required to pass validation; the test's
+        // A minimal valid target is required to pass validation; the test's
         // purpose is the legacy AdsSymbolTreeDump key behavior.
         var opts = Resolve(new()
         {
@@ -200,7 +200,7 @@ public class TwinCatAdsOptionsBindingTests
     [Fact]
     public void SymbolDump_LegacyKeyFalse_DoesNotSetEnabled()
     {
-        // C6: a minimal valid target is required to pass validation; the test's
+        // A minimal valid target is required to pass validation; the test's
         // purpose is that the legacy key=false leaves Enabled=false.
         var opts = Resolve(new()
         {
@@ -216,7 +216,7 @@ public class TwinCatAdsOptionsBindingTests
     {
         // Legacy says enabled=true, new section says enabled=false.
         // New section wins.
-        // C6: a minimal valid target is required to pass validation.
+        // A minimal valid target is required to pass validation.
         var opts = Resolve(new()
         {
             ["PlcTargets:plc1:AmsNetId"] = "1.2.3.4.5.6",

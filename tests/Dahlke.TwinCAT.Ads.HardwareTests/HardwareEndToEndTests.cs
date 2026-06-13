@@ -142,7 +142,7 @@ public sealed class HardwareEndToEndTests : IAsyncLifetime
 
     // ------------------------------------------------------------------
     // 4. Batch sum-command read: good + bogus symbol → per-symbol results
-    //    THE C20/C21 real-divergence check
+    //    THE batch real-divergence check
     // ------------------------------------------------------------------
 
     [HardwareFact]
