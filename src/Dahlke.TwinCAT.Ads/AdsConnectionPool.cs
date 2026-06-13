@@ -103,7 +103,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     /// releases them once the router signals Ready. <see cref="StartAsync"/>
     /// itself returns promptly in every case.
     /// </summary>
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
         _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -118,8 +118,27 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             .ToList();
 
         // Simulated loops never need the router — start them immediately, always.
+        // A simulated connection's Connect() is a synchronous in-memory no-op, so
+        // await each one's FIRST connection before returning: an all-simulated (or
+        // the simulated half of a mixed) pool then reports its simulated targets
+        // Connected the instant StartAsync completes, honouring the "instantly
+        // connected" contract. Real targets are NOT awaited here — they stay
+        // deferred behind the router so startup never blocks on hardware.
+        var simFirstConnects = new List<Task>(simTargets.Count);
         foreach (var (plcId, options) in simTargets)
-            StartConnectionLoop(plcId, options);
+        {
+            var firstConnect = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            simFirstConnects.Add(firstConnect.Task);
+            StartConnectionLoop(plcId, options, firstConnectSignal: firstConnect);
+        }
+
+        if (simFirstConnects.Count > 0)
+        {
+            // Bounded by the host's startup token; each signal also fires on loop
+            // teardown, so a StopAsync racing startup can never wedge this await.
+            try { await Task.WhenAll(simFirstConnects).WaitAsync(cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) { /* startup cancelled — loops settle via their own cancellation */ }
+        }
 
         if (realTargets.Count == 0)
         {
@@ -129,7 +148,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                 "ADS connection pool starting — all {Count} target(s) are simulated, skipping router wait",
                 _targets.Count);
             _realLoopsReleased = true; // no real loops to gate
-            return Task.CompletedTask;
+            return;
         }
 
         // Real targets exist: defer their loops until the router becomes ready.
@@ -191,8 +210,6 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
             _realLoopsReleased = true;
         }, CancellationToken.None);
-
-        return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -500,7 +517,8 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     /// true, so a simulated target connects immediately and never reconnect-churns.
     /// </remarks>
     private void StartConnectionLoop(
-        string plcId, PlcTargetOptions options, Task? predecessor = null)
+        string plcId, PlcTargetOptions options, Task? predecessor = null,
+        TaskCompletionSource? firstConnectSignal = null)
     {
         var cts = new CancellationTokenSource();
         _reconnectCts[plcId] = cts;
@@ -548,6 +566,9 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                         facadeToSet.SetCurrent(ads);
                     published = true;
                     SetState(plcId, ConnectionState.Connected);
+                    // Release StartAsync's first-connect await as soon as this
+                    // target publishes its first live connection.
+                    firstConnectSignal?.TrySetResult();
                     delay = MinReconnectDelay;
 
                     _logger.LogInformation("PLC {PlcId} connected, starting health check", plcId);
@@ -634,6 +655,12 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
                 delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxReconnectDelay.Ticks));
             }
+
+            // The loop has exited (cancelled, or cancelled before the first
+            // attempt ever ran). Release any StartAsync first-connect await that is
+            // still parked, so a connection that was never published cannot wedge
+            // startup. Idempotent with the success-path signal above.
+            firstConnectSignal?.TrySetResult();
         }, CancellationToken.None);
     }
 }

@@ -77,6 +77,30 @@ public class AdsConnectionPoolSimulatedTests
     }
 
     [Fact]
+    public async Task SimulatedTarget_IsConnected_ImmediatelyAfterStartAsync_WithoutPolling()
+    {
+        // Regression: StartAsync used to return before the simulated connection
+        // had been published into its facade, so a consumer that checked
+        // IsConnected right after `await host.StartAsync()` saw False even though
+        // the target connected a moment later. StartAsync now awaits each
+        // simulated target's first (synchronous, in-memory) connection, so the
+        // "instantly connected" contract holds with NO polling here.
+        var factory = new AdsConnectionFactory(NullLoggerFactory.Instance);
+        var time = new FakeTimeProvider();
+        var signal = new AdsRouterReadySignal();
+        var pool = CreatePool(
+            factory, time, signal,
+            ("sim1", new PlcTargetOptions { Mode = ConnectionMode.Simulated, DisplayName = "Sim" }));
+
+        await pool.StartAsync(CancellationToken.None);
+
+        // No WaitForConnection — the assertion is that the await above was enough.
+        Assert.True(pool.GetConnection("sim1").IsConnected);
+
+        await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);
+    }
+
+    [Fact]
     public async Task SimulatedTarget_ConnectsOnce_AndNeverChurns_AcrossManyHealthIntervals()
     {
         var factory = new CountingSimFactory();
