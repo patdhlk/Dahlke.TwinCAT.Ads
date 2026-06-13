@@ -266,7 +266,7 @@ builder.Services
 app.MapHealthChecks("/health");
 ```
 
-Returns `Healthy` when all targets are connected, `Degraded` when at least one real target is disconnected, and `Unhealthy` when all real targets are down. The response includes per-target data.
+Returns `Healthy` when every target is connected, `Degraded` when some — but not all — targets are connected (a disconnected simulated target degrades health too), and `Unhealthy` when no target is connected (including the case where real targets are still waiting on the router). The response includes per-target data.
 
 ## Configuration Reference
 

@@ -65,9 +65,12 @@ public sealed class AdsValueResult
 
     /// <summary>
     /// Creates a successful result carrying <paramref name="value"/> (which may be
-    /// <see langword="null"/>) for <paramref name="symbolPath"/>.
+    /// <see langword="null"/>) for <paramref name="symbolPath"/>. Internal: the path is
+    /// threaded by the batch machinery so <see cref="GetValue{T}"/> can name the symbol in
+    /// conversion errors; callers constructing results (e.g. test doubles of
+    /// <see cref="IAdsConnection"/>) use the path-less <see cref="Success(object?)"/>.
     /// </summary>
-    public static AdsValueResult Success(object? value, string? symbolPath)
+    internal static AdsValueResult Success(object? value, string? symbolPath)
         => new(succeeded: true, value, error: null, symbolPath);
 
     /// <summary>
@@ -79,9 +82,11 @@ public sealed class AdsValueResult
 
     /// <summary>
     /// Creates a failed result carrying <paramref name="error"/> for <paramref name="symbolPath"/>.
+    /// Internal counterpart to <see cref="Failure(Exception)"/>; the batch machinery threads the
+    /// originating path so failures can be attributed to a symbol.
     /// </summary>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="error"/> is null.</exception>
-    public static AdsValueResult Failure(Exception error, string? symbolPath)
+    internal static AdsValueResult Failure(Exception error, string? symbolPath)
         => new(succeeded: false, value: null, error ?? throw new ArgumentNullException(nameof(error)), symbolPath);
 
     /// <summary>

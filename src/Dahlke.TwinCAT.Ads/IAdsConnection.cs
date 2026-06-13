@@ -209,9 +209,18 @@ public interface IAdsConnection
     /// write completes, without <paramref name="ct"/> having been cancelled first.
     /// </exception>
     /// <remarks>
+    /// <para>
     /// <b>Dynamic escape hatch.</b> Use this overload when the value type is not known at compile
     /// time (e.g. generic dispatch, configuration-driven writes). For all other scenarios prefer
     /// <see cref="WriteValueAsync{T}(string, T, CancellationToken)"/>.
+    /// </para>
+    /// <para>
+    /// <paramref name="value"/> is non-nullable by design: a single write must supply a value, so a
+    /// missing one is a compile-time error rather than a runtime fault. This deliberately differs from
+    /// <see cref="WriteValuesAsync"/>, whose dictionary values are <see langword="object?"/> because a
+    /// batch records a per-symbol <see cref="AdsValueResult.Failure(Exception)"/> for a null instead of
+    /// aborting the whole batch.
+    /// </para>
     /// </remarks>
     Task WriteValueAsync(string symbolPath, object value, CancellationToken ct);
     /// <summary>

@@ -107,9 +107,7 @@ Dahlke.TwinCAT.Ads.UnknownPlcTargetException.UnknownPlcTargetException(string! p
 Dahlke.TwinCAT.Ads.UnknownPlcTargetException.UnknownPlcTargetException(string! plcId, System.Collections.Generic.IEnumerable<string!>! configuredIds, System.Exception! innerException) -> void
 Dahlke.TwinCAT.Ads.UnknownPlcTargetException.UnknownPlcTargetException(string! plcId, string! message, System.Exception? innerException) -> void
 static Dahlke.TwinCAT.Ads.AdsValueResult.Failure(System.Exception! error) -> Dahlke.TwinCAT.Ads.AdsValueResult!
-static Dahlke.TwinCAT.Ads.AdsValueResult.Failure(System.Exception! error, string? symbolPath) -> Dahlke.TwinCAT.Ads.AdsValueResult!
 static Dahlke.TwinCAT.Ads.AdsValueResult.Success(object? value) -> Dahlke.TwinCAT.Ads.AdsValueResult!
-static Dahlke.TwinCAT.Ads.AdsValueResult.Success(object? value, string? symbolPath) -> Dahlke.TwinCAT.Ads.AdsValueResult!
 static Dahlke.TwinCAT.Ads.HealthChecksBuilderExtensions.AddTwinCatAdsHealthCheck(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder! builder, string! name = "twincat_ads", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = null, System.Collections.Generic.IEnumerable<string!>? tags = null) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
 static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAds(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAds(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration, System.Action<Dahlke.TwinCAT.Ads.TwinCatAdsOptions!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
