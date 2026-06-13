@@ -1,6 +1,6 @@
 namespace Dahlke.TwinCAT.Ads;
 
-public interface IAdsConnectionFactory
+internal interface IAdsConnectionFactory
 {
-    IAdsConnection Create(string plcId, PlcTargetOptions options);
+    IManagedConnection Create(string plcId, PlcTargetOptions options);
 }

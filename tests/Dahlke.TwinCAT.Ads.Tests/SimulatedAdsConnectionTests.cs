@@ -45,12 +45,12 @@ public class SimulatedAdsConnectionTests
     public async Task ReadWriteValues_BatchOperations()
     {
         using var conn = CreateConnection();
-        await conn.WriteValuesAsync(new Dictionary<string, object> { ["X"] = 10, ["Y"] = 20 }, CancellationToken.None);
+        await conn.WriteValuesAsync(new Dictionary<string, object?> { ["X"] = 10, ["Y"] = 20 }, CancellationToken.None);
         var results = await conn.ReadValuesAsync(["X", "Y", "Z"], CancellationToken.None);
 
-        Assert.Equal(10, results["X"]);
-        Assert.Equal(20, results["Y"]);
-        Assert.Null(results["Z"]);
+        Assert.Equal(10, results["X"].Value);
+        Assert.Equal(20, results["Y"].Value);
+        Assert.Null(results["Z"].Value);
     }
 
     [Fact]

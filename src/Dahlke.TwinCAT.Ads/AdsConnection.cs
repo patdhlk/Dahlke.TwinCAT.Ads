@@ -1,22 +1,70 @@
 using TwinCAT;
 using TwinCAT.Ads;
+using TwinCAT.Ads.SumCommand;
 using TwinCAT.Ads.TypeSystem;
 using TwinCAT.TypeSystem;
 
 namespace Dahlke.TwinCAT.Ads;
 
-public sealed class AdsConnection : IAdsConnection, IDisposable
+/// <summary>
+/// A connected ADS session wrapping a Beckhoff <see cref="AdsClient"/>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Thread safety.</b> All members are safe for concurrent use from any thread; operations on a
+/// single connection may interleave freely. No operation blocks another. This is safe because
+/// Beckhoff <see cref="AdsClient"/> assigns every outgoing request a unique numeric invoke-id and
+/// correlates the response to the pending <see cref="System.Threading.Tasks.TaskCompletionSource{T}"/>
+/// via an internal <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey,TValue}"/>
+/// keyed by that id (field <c>_invokeIdDict</c> in <c>AdsClientServer</c>, confirmed by XML
+/// documentation in <c>TwinCAT.Ads.xml</c> and by <c>ConcurrentDictionary</c> strings in the
+/// shipped binary). The ADS protocol itself multiplexes requests over a single transport channel
+/// using those invoke-ids; each async call gets its own id and its own completion task regardless
+/// of how many other calls are in-flight.
+/// </para>
+/// <para>
+/// <b>Subscription callbacks.</b> Callbacks registered via
+/// <see cref="SubscribeAsync(string,int,Action{string,object?},CancellationToken)"/> are invoked on
+/// a background thread owned by the underlying ADS client — never the caller's thread. Callbacks
+/// must be thread-safe and must not block; an exception thrown by a callback is caught, logged at
+/// Warning severity, and does not interrupt the subscription.
+/// </para>
+/// </remarks>
+internal sealed class AdsConnection : IManagedConnection
 {
     private readonly AdsClient _client;
     private readonly PlcTargetOptions _options;
     private readonly ILogger<AdsConnection> _logger;
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly object _symbolLoaderLock = new();
     private volatile IDynamicSymbolLoader? _symbolLoader;
 
     public string PlcId { get; }
     public string DisplayName => _options.DisplayName;
     public bool IsConnected => _client.IsConnected;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Derived from <see cref="IsConnected"/>: returns
+    /// <see cref="ConnectionState.Connected"/> when the underlying ADS client is
+    /// connected, and <see cref="ConnectionState.Disconnected"/> otherwise.
+    /// Pool-driven lifecycle transitions (including
+    /// <see cref="ConnectionState.Connecting"/>) are surfaced on the
+    /// <see cref="AdsConnectionFacade"/> that wraps this instance; consumers do
+    /// not hold <see cref="AdsConnection"/> directly.
+    /// </remarks>
+    public ConnectionState State => _client.IsConnected
+        ? ConnectionState.Connected
+        : ConnectionState.Disconnected;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Pool-driven transitions are surfaced on the wrapping
+    /// <see cref="AdsConnectionFacade"/>; this event is never raised on the raw
+    /// <see cref="AdsConnection"/> instance.
+    /// </remarks>
+#pragma warning disable CS0067 // The event is never used — by design; see remarks.
+    public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
+#pragma warning restore CS0067
 
     public AdsConnection(string plcId, PlcTargetOptions options, ILoggerFactory loggerFactory)
     {
@@ -49,65 +97,289 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
         try { _client.Disconnect(); } catch { /* best effort */ }
     }
 
-    public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+    public async Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
     {
+        using var cts = CreateTimeoutCts(ct);
+
+        ResultValue<T> result;
+        try
+        {
+            result = await _client.ReadValueAsync<T>(symbolPath, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
+        }
+
+        if (result.Failed)
+            throw new AdsErrorException(
+                $"Read of symbol '{symbolPath}' on PLC '{PlcId}' failed: {result.ErrorCode}",
+                result.ErrorCode);
+
+        // result.Value is non-null when result.Succeeded (we threw above on failure).
+        // The Beckhoff annotation is T? for the nullable-oblivious case; suppress the warning.
+        return result.Value!;
+    }
+
+    public async Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+    {
+        // NOTE: making this a proper async method (not a sync throw + Task.FromResult) is itself a
+        // subtle behavioral fix: any synchronous exception (symbol not found) now arrives via the
+        // Task rather than being thrown before the task is returned. The facade awaits this method
+        // so consumers see no difference in how exceptions surface, but it is safer API practice.
+
         using var cts = CreateTimeoutCts(ct);
         var symbolLoader = GetSymbolLoader();
 
-        if (symbolLoader.Symbols.TryGetInstance(symbolPath, out var symbol) && symbol is IValueSymbol valueSymbol)
+        if (!symbolLoader.Symbols.TryGetInstance(symbolPath, out var symbol) || symbol is not IValueSymbol)
+            throw new AdsErrorException($"Symbol '{symbolPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+
+        ResultAnyValue result;
+        try
         {
-            object? value = valueSymbol.ReadValue();
-            return Task.FromResult<object?>(value);
+            result = await _client.ReadValueAsync(symbol, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Either the caller's token or the timeout CTS fired.
+            // Disambiguate: OCE when caller cancelled, TimeoutException when timeout elapsed.
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
         }
 
-        throw new AdsErrorException($"Symbol '{symbolPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+        if (result.Failed)
+            throw new AdsErrorException(
+                $"Read of symbol '{symbolPath}' on PLC '{PlcId}' failed: {result.ErrorCode}",
+                result.ErrorCode);
+
+        return result.Value;
     }
 
+    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
+        => WriteValueAsync(symbolPath, (object)value!, ct);
+
+    /// <summary>
+    /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
+    /// </summary>
+    /// <remarks>
+    /// Concurrent calls are safe: the underlying <see cref="AdsClient"/> multiplexes requests over
+    /// invoke-ids and correlates responses independently. No write lock is held; concurrent writes
+    /// to different (or the same) symbols interleave freely at the ADS transport layer.
+    /// </remarks>
     public async Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
     {
         using var cts = CreateTimeoutCts(ct);
-        await _writeLock.WaitAsync(cts.Token).ConfigureAwait(false);
         try
         {
             await _client.WriteSymbolAsync(symbolPath, value, cts.Token).ConfigureAwait(false);
         }
-        finally
+        catch (OperationCanceledException)
         {
-            _writeLock.Release();
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
         }
     }
 
-    public async Task<Dictionary<string, object?>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>One round-trip.</b> All resolvable symbols are read in a single ADS sum command
+    /// (<see cref="SumSymbolRead"/>) rather than one read per symbol. Per-symbol granularity is
+    /// preserved: each symbol's outcome is reported independently via its
+    /// <see cref="AdsValueResult"/>.
+    /// </para>
+    /// <para>
+    /// <b>Symbol resolution.</b> Symbols that cannot be resolved on the PLC are recorded — before
+    /// the sum command is issued — as a per-symbol <see cref="AdsValueResult.Failure(Exception, string?)"/> carrying an
+    /// <see cref="AdsErrorException"/> with <see cref="AdsErrorCode.DeviceSymbolNotFound"/>; they
+    /// are excluded from the sum command. Duplicate paths are de-duplicated.
+    /// </para>
+    /// <para>
+    /// <b>Whole-batch timeout/cancellation.</b> The timeout and cancellation apply to the entire
+    /// batch as a single operation. Caller cancellation throws
+    /// <see cref="OperationCanceledException"/>; the per-target
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> elapsing throws a <see cref="TimeoutException"/> for
+    /// the whole batch — neither is recorded as a per-symbol failure.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
     {
-        var results = new Dictionary<string, object?>();
-        foreach (var path in symbolPaths)
+        // De-dup: a repeated path is read once.
+        var paths = symbolPaths.Distinct().ToArray();
+
+        // Empty input shortcut — no ADS call.
+        if (paths.Length == 0)
+            return new Dictionary<string, AdsValueResult>();
+
+        ct.ThrowIfCancellationRequested();
+
+        var results = new Dictionary<string, AdsValueResult>();
+        var symbolLoader = GetSymbolLoader();
+
+        // Resolve symbols; unresolvable ones become per-symbol failures immediately and are
+        // excluded from the sum command.
+        var foundSymbols = new List<ISymbol>(paths.Length);
+        var foundPaths = new List<string>(paths.Length);
+
+        foreach (var path in paths)
         {
-            results[path] = await ReadValueAsync(path, ct).ConfigureAwait(false);
+            if (symbolLoader.Symbols.TryGetInstance(path, out var symbol) && symbol is IValueSymbol)
+            {
+                foundSymbols.Add(symbol);
+                foundPaths.Add(path);
+            }
+            else
+            {
+                results[path] = AdsValueResult.Failure(
+                    new AdsErrorException(
+                        $"Symbol '{path}' not found on PLC '{PlcId}'.",
+                        AdsErrorCode.DeviceSymbolNotFound),
+                    path);
+            }
         }
+
+        // If nothing to read after filtering, return early — no sum command.
+        if (foundSymbols.Count == 0)
+            return results;
+
+        // One sum-read round-trip for all found symbols.
+        using var cts = CreateTimeoutCts(ct);
+        ResultSumValues sumResult;
+        try
+        {
+            var sumRead = new SumSymbolRead(_client, foundSymbols);
+            sumResult = await sumRead.ReadAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Whole-batch: caller cancellation → OCE; timeout → TimeoutException.
+            var ex = CancellationDisambiguator.CreateException(ct, $"batch({foundSymbols.Count} symbols)", PlcId, _options.TimeoutMs);
+            if (ex is OperationCanceledException oce)
+                throw oce;
+            throw (TimeoutException)ex;
+        }
+
+        // Map per-symbol results.
+        var mapped = SumResultMapper.MapReadResults(
+            [.. foundPaths],
+            sumResult.Values ?? Array.Empty<object?>(),
+            sumResult.SubErrors ?? Array.Empty<AdsErrorCode>());
+
+        foreach (var kvp in mapped)
+            results[kvp.Key] = kvp.Value;
+
         return results;
     }
 
-    public async Task WriteValuesAsync(Dictionary<string, object> values, CancellationToken ct)
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>One round-trip.</b> All writable symbols are written in a single ADS sum command
+    /// (<see cref="SumSymbolWrite"/>) rather than one write per symbol. Per-symbol granularity is
+    /// preserved via each symbol's <see cref="AdsValueResult"/>.
+    /// </para>
+    /// <para>
+    /// <b>Pre-filtering.</b> A <see langword="null"/> value is a per-symbol programming error,
+    /// recorded as a <see cref="AdsValueResult.Failure(Exception, string?)"/> (an <see cref="ArgumentNullException"/>)
+    /// before the sum command and excluded from it. Symbols that cannot be resolved are likewise
+    /// recorded as a per-symbol <see cref="AdsErrorException"/> failure with
+    /// <see cref="AdsErrorCode.DeviceSymbolNotFound"/> and excluded.
+    /// </para>
+    /// <para>
+    /// <b>Whole-batch timeout/cancellation.</b> As with <see cref="ReadValuesAsync"/>, the timeout
+    /// and cancellation apply to the entire batch as a single operation: caller cancellation throws
+    /// <see cref="OperationCanceledException"/>; the timeout elapsing throws a
+    /// <see cref="TimeoutException"/> for the whole batch.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
     {
-        using var cts = CreateTimeoutCts(ct);
-        await _writeLock.WaitAsync(cts.Token).ConfigureAwait(false);
-        try
+        // Empty input shortcut — no ADS call.
+        if (values.Count == 0)
+            return new Dictionary<string, AdsValueResult>();
+
+        ct.ThrowIfCancellationRequested();
+
+        var results = new Dictionary<string, AdsValueResult>();
+        var symbolLoader = GetSymbolLoader();
+
+        // Pre-filter: null values and unresolvable symbols are per-symbol failures, excluded from
+        // the sum command. Found symbols and their values stay index-aligned.
+        var foundSymbols = new List<ISymbol>(values.Count);
+        var foundPaths = new List<string>(values.Count);
+        var foundValues = new List<object>(values.Count);
+
+        foreach (var (path, value) in values)
         {
-            foreach (var (path, value) in values)
+            if (value is null)
             {
-                await _client.WriteSymbolAsync(path, value, cts.Token).ConfigureAwait(false);
+                results[path] = AdsValueResult.Failure(
+                    new ArgumentNullException(
+                        $"values[\"{path}\"]",
+                        $"Cannot write a null value to symbol '{path}'."),
+                    path);
+                continue;
+            }
+
+            if (symbolLoader.Symbols.TryGetInstance(path, out var symbol) && symbol is IValueSymbol)
+            {
+                foundSymbols.Add(symbol);
+                foundPaths.Add(path);
+                foundValues.Add(value);
+            }
+            else
+            {
+                results[path] = AdsValueResult.Failure(
+                    new AdsErrorException(
+                        $"Symbol '{path}' not found on PLC '{PlcId}'.",
+                        AdsErrorCode.DeviceSymbolNotFound),
+                    path);
             }
         }
-        finally
+
+        // If nothing to write after filtering, return early — no sum command.
+        if (foundSymbols.Count == 0)
+            return results;
+
+        // One sum-write round-trip — no serialization lock needed; AdsClient multiplexes
+        // concurrent requests via invoke-ids (see class remarks).
+        using var cts = CreateTimeoutCts(ct);
+        ResultSumCommand sumResult;
+        try
         {
-            _writeLock.Release();
+            var sumWrite = new SumSymbolWrite(_client, foundSymbols);
+            sumResult = await sumWrite.WriteAsync([.. foundValues], cts.Token).ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            // Whole-batch: caller cancellation → OCE; timeout → TimeoutException.
+            var ex = CancellationDisambiguator.CreateException(ct, $"batch({foundSymbols.Count} symbols)", PlcId, _options.TimeoutMs);
+            if (ex is OperationCanceledException oce)
+                throw oce;
+            throw (TimeoutException)ex;
+        }
+
+        // Map per-symbol results.
+        var mapped = SumResultMapper.MapWriteResults(
+            [.. foundPaths],
+            sumResult.SubErrors ?? Array.Empty<AdsErrorCode>());
+
+        foreach (var kvp in mapped)
+            results[kvp.Key] = kvp.Value;
+
+        return results;
     }
 
     public async Task<AdsState> GetAdsStateAsync(CancellationToken ct)
     {
         using var cts = CreateTimeoutCts(ct);
-        var result = await _client.ReadStateAsync(cts.Token).ConfigureAwait(false);
+        ResultReadDeviceState result;
+        try
+        {
+            result = await _client.ReadStateAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw CancellationDisambiguator.CreateException(ct, "AdsState", PlcId, _options.TimeoutMs);
+        }
         return result.State.AdsState;
     }
 
@@ -166,27 +438,38 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
     }
 
     /// <summary>
-    /// Logs all PLC symbols (flat, recursive) for diagnostics after PLC program update.
+    /// Typed subscription: wraps <paramref name="callback"/> with
+    /// <see cref="TypedCallbackAdapter.Wrap{T}"/> and delegates to the untyped
+    /// <see cref="SubscribeAsync"/>. Each notification value is converted to
+    /// <typeparamref name="T"/> with the same rules as
+    /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>; an unconvertible value
+    /// is dropped with a Warning rather than delivered.
     /// </summary>
-    public void LogSymbolTree()
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
+        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
+
+    /// <summary>
+    /// Logs the PLC symbol tree for diagnostics.
+    /// Symbols are included when their depth (dot-count in the symbol's <c>InstancePath</c>)
+    /// is at most <see cref="SymbolDumpOptions.MaxDepth"/> and, when
+    /// <see cref="SymbolDumpOptions.Prefixes"/> is non-empty, the path starts with
+    /// at least one configured prefix (case-insensitive).
+    /// Filter logic is delegated to <see cref="SymbolDumpFilter.ShouldInclude"/>.
+    /// </summary>
+    public void LogSymbolTree(SymbolDumpOptions options)
     {
         try
         {
             var settings = new SymbolLoaderSettings(SymbolsLoadMode.DynamicTree);
             var loader = SymbolLoaderFactory.Create(_client, settings);
 
-            // SymbolIterator with recursive search — as recommended in Beckhoff docs
+            // SymbolIterator with recursive search — as recommended in Beckhoff docs.
             var iterator = new SymbolIterator(loader.Symbols, recurse: true);
 
             _logger.LogInformation("=== PLC symbol tree ({Count} top-level) ===", loader.Symbols.Count);
             foreach (var sym in iterator)
             {
-                var depth = sym.InstancePath.Count(c => c == '.');
-                // Log GVL_Visu and PRGMain up to depth 3 (struct members visible)
-                var isRelevant = sym.InstancePath.StartsWith("GVL_Visu") ||
-                                 sym.InstancePath.StartsWith("PRGMain");
-                var maxDepth = isRelevant ? 3 : 1;
-                if (depth <= maxDepth)
+                if (SymbolDumpFilter.ShouldInclude(sym.InstancePath, options))
                 {
                     _logger.LogInformation("  {Path} [{Type}, {Size}B]",
                         sym.InstancePath, sym.TypeName, sym.ByteSize);
@@ -202,7 +485,6 @@ public sealed class AdsConnection : IAdsConnection, IDisposable
 
     public void Dispose()
     {
-        _writeLock.Dispose();
         _client.Dispose();
     }
 

@@ -1,0 +1,117 @@
+#nullable enable
+Dahlke.TwinCAT.Ads.AdsConnectionUnavailableException
+Dahlke.TwinCAT.Ads.AdsConnectionUnavailableException.AdsConnectionUnavailableException(string! plcId) -> void
+Dahlke.TwinCAT.Ads.AdsConnectionUnavailableException.AdsConnectionUnavailableException(string! plcId, System.Exception! innerException) -> void
+Dahlke.TwinCAT.Ads.AdsConnectionUnavailableException.AdsConnectionUnavailableException(string! plcId, string! message, System.Exception? innerException) -> void
+Dahlke.TwinCAT.Ads.AdsConnectionUnavailableException.PlcId.get -> string?
+Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions
+Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.AdsDiagnosticsOptions() -> void
+Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.SymbolDump.get -> Dahlke.TwinCAT.Ads.SymbolDumpOptions!
+Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.SymbolDump.set -> void
+Dahlke.TwinCAT.Ads.AdsValueResult
+Dahlke.TwinCAT.Ads.AdsValueResult.Error.get -> System.Exception?
+Dahlke.TwinCAT.Ads.AdsValueResult.GetValue<T>() -> T
+Dahlke.TwinCAT.Ads.AdsValueResult.Succeeded.get -> bool
+Dahlke.TwinCAT.Ads.AdsValueResult.SymbolPath.get -> string?
+Dahlke.TwinCAT.Ads.AdsValueResult.Value.get -> object?
+Dahlke.TwinCAT.Ads.AmsRouterOptions
+Dahlke.TwinCAT.Ads.AmsRouterOptions.AmsRouterOptions() -> void
+Dahlke.TwinCAT.Ads.AmsRouterOptions.NetId.get -> string?
+Dahlke.TwinCAT.Ads.AmsRouterOptions.NetId.set -> void
+Dahlke.TwinCAT.Ads.ConnectionMode
+Dahlke.TwinCAT.Ads.ConnectionMode.Real = 0 -> Dahlke.TwinCAT.Ads.ConnectionMode
+Dahlke.TwinCAT.Ads.ConnectionMode.Simulated = 1 -> Dahlke.TwinCAT.Ads.ConnectionMode
+Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.ConnectionState.Connected = 2 -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.ConnectionState.Connecting = 1 -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.ConnectionState.Disconnected = 0 -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs
+Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs.ConnectionStateChangedEventArgs(string! plcId, Dahlke.TwinCAT.Ads.ConnectionState state, Dahlke.TwinCAT.Ads.ConnectionState previousState) -> void
+Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs.PlcId.get -> string!
+Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs.PreviousState.get -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs.State.get -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.HealthChecksBuilderExtensions
+Dahlke.TwinCAT.Ads.IAdsConnection
+Dahlke.TwinCAT.Ads.IAdsConnection.ConnectionStateChanged -> System.EventHandler<Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs!>?
+Dahlke.TwinCAT.Ads.IAdsConnection.DisplayName.get -> string!
+Dahlke.TwinCAT.Ads.IAdsConnection.GetAdsStateAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<TwinCAT.Ads.AdsState>!
+Dahlke.TwinCAT.Ads.IAdsConnection.IsConnected.get -> bool
+Dahlke.TwinCAT.Ads.IAdsConnection.PlcId.get -> string!
+Dahlke.TwinCAT.Ads.IAdsConnection.ReadValueAsync(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<object?>!
+Dahlke.TwinCAT.Ads.IAdsConnection.ReadValueAsync<T>(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<T>!
+Dahlke.TwinCAT.Ads.IAdsConnection.ReadValuesAsync(System.Collections.Generic.IEnumerable<string!>! symbolPaths, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string!, Dahlke.TwinCAT.Ads.AdsValueResult!>!>!
+Dahlke.TwinCAT.Ads.IAdsConnection.State.get -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.IAdsConnection.SubscribeAsync(string! symbolPath, int cycleTimeMs, System.Action<string!, object?>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
+Dahlke.TwinCAT.Ads.IAdsConnection.SubscribeAsync<T>(string! symbolPath, int cycleTimeMs, System.Action<string!, T?>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
+Dahlke.TwinCAT.Ads.IAdsConnection.WriteValueAsync(string! symbolPath, object! value, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
+Dahlke.TwinCAT.Ads.IAdsConnection.WriteValueAsync<T>(string! symbolPath, T value, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
+Dahlke.TwinCAT.Ads.IAdsConnection.WriteValuesAsync(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! values, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string!, Dahlke.TwinCAT.Ads.AdsValueResult!>!>!
+Dahlke.TwinCAT.Ads.IAdsConnectionPool
+Dahlke.TwinCAT.Ads.IAdsConnectionPool.ForceReconnect(string! plcId) -> void
+Dahlke.TwinCAT.Ads.IAdsConnectionPool.GetAllConnections() -> System.Collections.Generic.IReadOnlyDictionary<string!, Dahlke.TwinCAT.Ads.IAdsConnection!>!
+Dahlke.TwinCAT.Ads.IAdsConnectionPool.GetConnection(string! plcId) -> Dahlke.TwinCAT.Ads.IAdsConnection!
+Dahlke.TwinCAT.Ads.IAdsConnectionPool.TryGetConnection(string! plcId, out Dahlke.TwinCAT.Ads.IAdsConnection? connection) -> bool
+Dahlke.TwinCAT.Ads.IAdsConnectionPool.TryGetSimulatedConnection(string! plcId, out Dahlke.TwinCAT.Ads.SimulatedAdsConnection? simulated) -> bool
+Dahlke.TwinCAT.Ads.PlcTargetOptions
+Dahlke.TwinCAT.Ads.PlcTargetOptions.AmsNetId.get -> string!
+Dahlke.TwinCAT.Ads.PlcTargetOptions.AmsNetId.set -> void
+Dahlke.TwinCAT.Ads.PlcTargetOptions.DisplayName.get -> string!
+Dahlke.TwinCAT.Ads.PlcTargetOptions.DisplayName.set -> void
+Dahlke.TwinCAT.Ads.PlcTargetOptions.InitialValues.get -> System.Collections.Generic.Dictionary<string!, object?>!
+Dahlke.TwinCAT.Ads.PlcTargetOptions.InitialValues.set -> void
+Dahlke.TwinCAT.Ads.PlcTargetOptions.Mode.get -> Dahlke.TwinCAT.Ads.ConnectionMode
+Dahlke.TwinCAT.Ads.PlcTargetOptions.Mode.set -> void
+Dahlke.TwinCAT.Ads.PlcTargetOptions.PlcTargetOptions() -> void
+Dahlke.TwinCAT.Ads.PlcTargetOptions.Port.get -> int
+Dahlke.TwinCAT.Ads.PlcTargetOptions.Port.set -> void
+Dahlke.TwinCAT.Ads.PlcTargetOptions.TimeoutMs.get -> int
+Dahlke.TwinCAT.Ads.PlcTargetOptions.TimeoutMs.set -> void
+Dahlke.TwinCAT.Ads.ServiceCollectionExtensions
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.ConnectionStateChanged -> System.EventHandler<Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs!>?
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.DisplayName.get -> string!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.Dispose() -> void
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.GetAdsStateAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<TwinCAT.Ads.AdsState>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.IsConnected.get -> bool
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.PlcId.get -> string!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.ReadValueAsync(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<object?>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.ReadValueAsync<T>(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<T>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.ReadValuesAsync(System.Collections.Generic.IEnumerable<string!>! symbolPaths, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string!, Dahlke.TwinCAT.Ads.AdsValueResult!>!>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SetInitialValues(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! values) -> void
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SimulatedAdsConnection(string! plcId, string! displayName, Microsoft.Extensions.Logging.ILoggerFactory! loggerFactory) -> void
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.State.get -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SubscribeAsync(string! symbolPath, int cycleTimeMs, System.Action<string!, object?>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SubscribeAsync<T>(string! symbolPath, int cycleTimeMs, System.Action<string!, T?>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.WriteValueAsync(string! symbolPath, object! value, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.WriteValueAsync<T>(string! symbolPath, T value, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.WriteValuesAsync(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! values, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string!, Dahlke.TwinCAT.Ads.AdsValueResult!>!>!
+Dahlke.TwinCAT.Ads.SymbolDumpOptions
+Dahlke.TwinCAT.Ads.SymbolDumpOptions.Enabled.get -> bool
+Dahlke.TwinCAT.Ads.SymbolDumpOptions.Enabled.set -> void
+Dahlke.TwinCAT.Ads.SymbolDumpOptions.MaxDepth.get -> int
+Dahlke.TwinCAT.Ads.SymbolDumpOptions.MaxDepth.set -> void
+Dahlke.TwinCAT.Ads.SymbolDumpOptions.Prefixes.get -> System.Collections.Generic.List<string!>!
+Dahlke.TwinCAT.Ads.SymbolDumpOptions.Prefixes.set -> void
+Dahlke.TwinCAT.Ads.SymbolDumpOptions.SymbolDumpOptions() -> void
+Dahlke.TwinCAT.Ads.TwinCatAdsOptions
+Dahlke.TwinCAT.Ads.TwinCatAdsOptions.Diagnostics.get -> Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions!
+Dahlke.TwinCAT.Ads.TwinCatAdsOptions.Diagnostics.set -> void
+Dahlke.TwinCAT.Ads.TwinCatAdsOptions.Router.get -> Dahlke.TwinCAT.Ads.AmsRouterOptions!
+Dahlke.TwinCAT.Ads.TwinCatAdsOptions.Router.set -> void
+Dahlke.TwinCAT.Ads.TwinCatAdsOptions.Targets.get -> System.Collections.Generic.Dictionary<string!, Dahlke.TwinCAT.Ads.PlcTargetOptions!>!
+Dahlke.TwinCAT.Ads.TwinCatAdsOptions.Targets.set -> void
+Dahlke.TwinCAT.Ads.TwinCatAdsOptions.TwinCatAdsOptions() -> void
+Dahlke.TwinCAT.Ads.UnknownPlcTargetException
+Dahlke.TwinCAT.Ads.UnknownPlcTargetException.PlcId.get -> string!
+Dahlke.TwinCAT.Ads.UnknownPlcTargetException.UnknownPlcTargetException(string! plcId, System.Collections.Generic.IEnumerable<string!>! configuredIds) -> void
+Dahlke.TwinCAT.Ads.UnknownPlcTargetException.UnknownPlcTargetException(string! plcId, System.Collections.Generic.IEnumerable<string!>! configuredIds, System.Exception! innerException) -> void
+Dahlke.TwinCAT.Ads.UnknownPlcTargetException.UnknownPlcTargetException(string! plcId, string! message, System.Exception? innerException) -> void
+static Dahlke.TwinCAT.Ads.AdsValueResult.Failure(System.Exception! error) -> Dahlke.TwinCAT.Ads.AdsValueResult!
+static Dahlke.TwinCAT.Ads.AdsValueResult.Success(object? value) -> Dahlke.TwinCAT.Ads.AdsValueResult!
+static Dahlke.TwinCAT.Ads.HealthChecksBuilderExtensions.AddTwinCatAdsHealthCheck(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder! builder, string! name = "twincat_ads", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = null, System.Collections.Generic.IEnumerable<string!>? tags = null) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
+static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAds(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAds(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration, System.Action<Dahlke.TwinCAT.Ads.TwinCatAdsOptions!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAds(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Dahlke.TwinCAT.Ads.TwinCatAdsOptions!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAdsSimulation(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAdsSimulation(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration, System.Action<Dahlke.TwinCAT.Ads.TwinCatAdsOptions!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAdsSimulation(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Dahlke.TwinCAT.Ads.TwinCatAdsOptions!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

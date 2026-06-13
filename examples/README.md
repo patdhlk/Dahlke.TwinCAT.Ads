@@ -4,7 +4,7 @@ Both examples run out of the box in **simulation mode** — no TwinCAT installat
 
 ## Dahlke.TwinCAT.Ads.Examples.Cli
 
-A console application using the generic host. Demonstrates connection listing, single and batch reads/writes, ADS state queries, and symbol subscriptions.
+A console application using the generic host. Demonstrates typed reads and writes, batch operations with `AdsValueResult`, ADS state queries, typed subscriptions, and untyped subscriptions.
 
 ```bash
 # Simulation mode (default)
@@ -24,6 +24,7 @@ dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.MinimalApi
 
 | Method | Route | Description |
 |--------|-------|-------------|
+| `GET` | `/health` | TwinCAT ADS health check (Healthy / Degraded / Unhealthy) |
 | `GET` | `/plcs` | List all PLC connections and their status |
 | `GET` | `/plcs/{plcId}/state` | Current ADS state (`Run`, `Stop`, ...) |
 | `GET` | `/plcs/{plcId}/symbols/{symbolPath}` | Read a symbol value |
@@ -35,4 +36,7 @@ dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.MinimalApi
 curl -X PUT localhost:5000/plcs/plc1/symbols/GVL.Counter \
      -H "Content-Type: application/json" -d '{"value": 42}'
 curl localhost:5000/plcs/plc1/symbols/GVL.Counter
+
+# Health check
+curl localhost:5000/health
 ```

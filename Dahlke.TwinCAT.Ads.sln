@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dahlke.TwinCAT.Ads.Examples
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dahlke.TwinCAT.Ads.Examples.MinimalApi", "examples\Dahlke.TwinCAT.Ads.Examples.MinimalApi\Dahlke.TwinCAT.Ads.Examples.MinimalApi.csproj", "{4B973597-BCE0-4791-967F-3E81B1DA3F80}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dahlke.TwinCAT.Ads.HardwareTests", "tests\Dahlke.TwinCAT.Ads.HardwareTests\Dahlke.TwinCAT.Ads.HardwareTests.csproj", "{E9C183B7-3EE7-42F3-B609-999E1591E8E4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -75,6 +77,18 @@ Global
 		{4B973597-BCE0-4791-967F-3E81B1DA3F80}.Release|x64.Build.0 = Release|Any CPU
 		{4B973597-BCE0-4791-967F-3E81B1DA3F80}.Release|x86.ActiveCfg = Release|Any CPU
 		{4B973597-BCE0-4791-967F-3E81B1DA3F80}.Release|x86.Build.0 = Release|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Debug|x64.Build.0 = Debug|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Debug|x86.Build.0 = Debug|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Release|x64.ActiveCfg = Release|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Release|x64.Build.0 = Release|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Release|x86.ActiveCfg = Release|Any CPU
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -84,5 +98,6 @@ Global
 		{FB4321CF-746D-49B4-BB68-45A0436F4C18} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{D19A5ADB-6E74-420E-9E45-5B7D4897F61B} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
 		{4B973597-BCE0-4791-967F-3E81B1DA3F80} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
+		{E9C183B7-3EE7-42F3-B609-999E1591E8E4} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal
