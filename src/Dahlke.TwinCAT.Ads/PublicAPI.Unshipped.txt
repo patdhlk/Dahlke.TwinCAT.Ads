@@ -31,6 +31,27 @@ Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs.PlcId.get -> string!
 Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs.PreviousState.get -> Dahlke.TwinCAT.Ads.ConnectionState
 Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs.State.get -> Dahlke.TwinCAT.Ads.ConnectionState
 Dahlke.TwinCAT.Ads.HealthChecksBuilderExtensions
+Dahlke.TwinCAT.Ads.Iec61131Converter
+Dahlke.TwinCAT.Ads.Iec61131Converter.Beckhoff
+const Dahlke.TwinCAT.Ads.Iec61131Converter.BOOL = "BOOL" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.BYTE = "BYTE" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.DINT = "DINT" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.DT = "DT" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.DWORD = "DWORD" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.INT = "INT" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.LINT = "LINT" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.LREAL = "LREAL" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.LWORD = "LWORD" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.REAL = "REAL" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.SINT = "SINT" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.STRING = "STRING" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.TIME = "TIME" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.UDINT = "UDINT" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.UINT = "UINT" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.ULINT = "ULINT" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.USINT = "USINT" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.WORD = "WORD" -> string!
+const Dahlke.TwinCAT.Ads.Iec61131Converter.WSTRING = "WSTRING" -> string!
 Dahlke.TwinCAT.Ads.IAdsConnection
 Dahlke.TwinCAT.Ads.IAdsConnection.ConnectionStateChanged -> System.EventHandler<Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs!>?
 Dahlke.TwinCAT.Ads.IAdsConnection.DisplayName.get -> string!
@@ -109,6 +130,16 @@ Dahlke.TwinCAT.Ads.UnknownPlcTargetException.UnknownPlcTargetException(string! p
 static Dahlke.TwinCAT.Ads.AdsValueResult.Failure(System.Exception! error) -> Dahlke.TwinCAT.Ads.AdsValueResult!
 static Dahlke.TwinCAT.Ads.AdsValueResult.Success(object? value) -> Dahlke.TwinCAT.Ads.AdsValueResult!
 static Dahlke.TwinCAT.Ads.HealthChecksBuilderExtensions.AddTwinCatAdsHealthCheck(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder! builder, string! name = "twincat_ads", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = null, System.Collections.Generic.IEnumerable<string!>? tags = null) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
+static Dahlke.TwinCAT.Ads.Iec61131Converter.Beckhoff.ConvertValue(string! typeName, object? rawValue) -> object?
+static Dahlke.TwinCAT.Ads.Iec61131Converter.Beckhoff.GetDefaultValue(string! typeName) -> object?
+static Dahlke.TwinCAT.Ads.Iec61131Converter.Beckhoff.GetDotNetType(string! typeName) -> System.Type!
+static Dahlke.TwinCAT.Ads.Iec61131Converter.Beckhoff.Normalize(string! typeName) -> string!
+static Dahlke.TwinCAT.Ads.Iec61131Converter.Beckhoff.TryGetDotNetType(string! typeName, out System.Type? dotNetType) -> bool
+static Dahlke.TwinCAT.Ads.Iec61131Converter.ConvertValue(string! iecTypeName, object? rawValue) -> object?
+static Dahlke.TwinCAT.Ads.Iec61131Converter.GetDefaultValue(string! iecTypeName) -> object?
+static Dahlke.TwinCAT.Ads.Iec61131Converter.GetDotNetType(string! iecTypeName) -> System.Type!
+static Dahlke.TwinCAT.Ads.Iec61131Converter.GetIecTypeName(System.Type! dotNetType) -> string!
+static Dahlke.TwinCAT.Ads.Iec61131Converter.TryGetDotNetType(string! iecTypeName, out System.Type? dotNetType) -> bool
 static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAds(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAds(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration, System.Action<Dahlke.TwinCAT.Ads.TwinCatAdsOptions!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static Dahlke.TwinCAT.Ads.ServiceCollectionExtensions.AddTwinCatAds(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Dahlke.TwinCAT.Ads.TwinCatAdsOptions!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

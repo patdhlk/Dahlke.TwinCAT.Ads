@@ -29,31 +29,43 @@ internal static class AdsValueConverter
     /// <summary>
     /// Converts <paramref name="value"/> to <typeparamref name="T"/> for a typed READ,
     /// throwing an actionable <see cref="InvalidCastException"/> when the value cannot be
-    /// converted. Mirrors the rules previously inlined in
+    /// converted. Thin generic wrapper over the non-generic
+    /// <see cref="ConvertForRead(object?, Type, string)"/> core; see that overload for the
+    /// full conversion rules.
+    /// </summary>
+    public static T ConvertForRead<T>(object? value, string symbolPath)
+        => (T)ConvertForRead(value, typeof(T), symbolPath)!;
+
+    /// <summary>
+    /// Converts <paramref name="value"/> to <paramref name="targetType"/> for a typed READ,
+    /// throwing an actionable <see cref="InvalidCastException"/> when the value cannot be
+    /// converted. This is the non-generic conversion core shared by the generic
+    /// <see cref="ConvertForRead{T}"/> and by internal callers that only know the target type
+    /// at runtime. Mirrors the rules previously inlined in
     /// <see cref="SimulatedAdsConnection.ReadValueAsync{T}"/> exactly (no behaviour change):
-    /// null + non-nullable value type throws; null + reference/nullable returns default;
-    /// exact/assignable returns by cast; <see cref="IConvertible"/> uses
+    /// null + non-nullable value type throws; null + reference/nullable returns
+    /// <see langword="null"/>; exact/assignable returns the value as-is;
+    /// <see cref="IConvertible"/> uses
     /// <see cref="System.Convert.ChangeType(object, Type, IFormatProvider)"/> with
     /// <see cref="CultureInfo.InvariantCulture"/>; anything else throws.
     /// </summary>
-    public static T ConvertForRead<T>(object? value, string symbolPath)
+    public static object? ConvertForRead(object? value, Type targetType, string context)
     {
         if (value is null)
         {
-            var targetType = typeof(T);
             // For non-nullable value types null is illegal: there's nothing to return.
             if (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) is null)
                 throw new InvalidCastException(
-                    $"Symbol '{symbolPath}' has a null stored value; " +
+                    $"Symbol '{context}' has a null stored value; " +
                     $"cannot convert null to non-nullable value type '{targetType.Name}'.");
 
             // Reference type or Nullable<T>: null is a valid result.
-            return default!;
+            return null;
         }
 
         // Exact type or assignable — fast path, no conversion needed.
-        if (value is T directResult)
-            return directResult;
+        if (targetType.IsInstanceOfType(value))
+            return value;
 
         // IConvertible covers all primitives and string; supports numeric widening and
         // string-seeded values ("42"→int, "true"→bool, "3.14"→double).
@@ -61,22 +73,22 @@ internal static class AdsValueConverter
         {
             try
             {
-                var targetType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
-                return (T)System.Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
+                return System.Convert.ChangeType(
+                    value, Nullable.GetUnderlyingType(targetType) ?? targetType, CultureInfo.InvariantCulture);
             }
             catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
             {
                 throw new InvalidCastException(
-                    $"Symbol '{symbolPath}': cannot convert stored value " +
-                    $"'{value}' (type: {value.GetType().Name}) to '{typeof(T).Name}'. {ex.Message}",
+                    $"Symbol '{context}': cannot convert stored value " +
+                    $"'{value}' (type: {value.GetType().Name}) to '{targetType.Name}'. {ex.Message}",
                     ex);
             }
         }
 
         // Non-IConvertible, not assignable: fail with an actionable message.
         throw new InvalidCastException(
-            $"Symbol '{symbolPath}': stored value has type '{value.GetType().Name}' " +
-            $"which cannot be converted to requested type '{typeof(T).Name}'.");
+            $"Symbol '{context}': stored value has type '{value.GetType().Name}' " +
+            $"which cannot be converted to requested type '{targetType.Name}'.");
     }
 
     /// <summary>

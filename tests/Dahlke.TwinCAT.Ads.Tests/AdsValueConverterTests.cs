@@ -97,4 +97,31 @@ public class AdsValueConverterTests
         Assert.Contains("Symbol 'X.y'", ex.Message);
         Assert.DoesNotContain("Simulated symbol", ex.Message);
     }
+
+    // ---- Non-generic entry point: ConvertForRead(object?, Type, string) ----
+    // Callers that only know the target type at runtime convert via this core;
+    // the generic ConvertForRead<T> is now a thin wrapper over it.
+
+    [Fact]
+    public void ConvertForRead_NonGeneric_StringToInt_ReturnsBoxedInt()
+    {
+        var result = AdsValueConverter.ConvertForRead("42", typeof(int), "A.x");
+        Assert.Equal(42, result);
+        Assert.IsType<int>(result);
+    }
+
+    [Fact]
+    public void ConvertForRead_NonGeneric_NullWithValueType_ThrowsWithSymbolContext()
+    {
+        var ex = Assert.Throws<InvalidCastException>(
+            () => AdsValueConverter.ConvertForRead(null, typeof(int), "A.x"));
+        Assert.Contains("Symbol 'A.x'", ex.Message);
+    }
+
+    [Fact]
+    public void ConvertForRead_NonGeneric_NullWithReferenceType_ReturnsNull()
+    {
+        var result = AdsValueConverter.ConvertForRead(null, typeof(string), "A.x");
+        Assert.Null(result);
+    }
 }
