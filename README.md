@@ -325,6 +325,31 @@ Each key is a PLC identifier used with `GetConnection(plcId)`.
 
 The legacy `AdsSymbolTreeDump: true` key is still honoured; `AdsSymbolDump` takes precedence when both are present.
 
+## IEC 61131-3 Type Mapping
+
+`Iec61131Converter` is a table-driven utility that maps IEC 61131-3 elementary type names to and from .NET types, supplies typed default values, and converts boxed values — reusing the same invariant-culture conversion core as typed reads. It exposes two tiers:
+
+- **`Iec61131Converter` (strict core)** — recognises only the canonical uppercase IEC names (`BOOL`, `DINT`, `LREAL`, …), matched case-sensitively. Use this when you require strict, standard names.
+- **`Iec61131Converter.Beckhoff` (lenient tier)** — case-insensitive and alias-aware. It recognises mixed-case names and Beckhoff/non-standard aliases (`dtSystemTime` → `DT`, `T_UD` → `TIME`, `BIT`/`BIT8` → `BOOL`), normalises them to a canonical name, then delegates to the strict core.
+
+```csharp
+// Forward: IEC name -> .NET Type (strict, case-sensitive)
+Type t = Iec61131Converter.GetDotNetType("DINT");        // typeof(int)
+
+// Reverse: .NET Type -> canonical IEC name (deterministic)
+string n = Iec61131Converter.GetIecTypeName(typeof(int)); // "DINT"
+
+// Default value and conversion (invariant culture)
+object? d = Iec61131Converter.GetDefaultValue("STRING");   // "" (never null)
+object? v = Iec61131Converter.ConvertValue("LREAL", "3.14"); // 3.14 (double)
+
+// Lenient tier: case-insensitive + Beckhoff aliases
+Type b = Iec61131Converter.Beckhoff.GetDotNetType("dint");        // typeof(int)
+Type s = Iec61131Converter.Beckhoff.GetDotNetType("dtSystemTime"); // typeof(DateTime)
+```
+
+The forward map is many-to-one: the bit-string types and unsigned-integer types share a .NET type (`BYTE` and `USINT` both → `byte`; `STRING` and `WSTRING` both → `string`). The reverse map is deterministic — an unsigned .NET integer resolves to the unsigned-integer IEC type (`byte` → `USINT`, never `BYTE`), and `string` resolves to `STRING`.
+
 ## Examples
 
 Runnable projects live in [`examples/`](examples/) — both work out of the box in simulation mode, no PLC required:
