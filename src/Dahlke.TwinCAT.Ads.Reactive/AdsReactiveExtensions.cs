@@ -73,4 +73,38 @@ public static class AdsReactiveExtensions
                 h => connection.ConnectionStateChanged -= h)
             .Select(ep => ep.EventArgs);
     }
+
+    /// <summary>
+    /// Resolves the facade for <paramref name="plcId"/> via the pool and observes
+    /// typed value changes for <paramref name="symbolPath"/>. An unknown target id
+    /// surfaces as <see cref="UnknownPlcTargetException"/> on the observable's
+    /// <c>OnError</c> when subscribed.
+    /// </summary>
+    public static IObservable<AdsValueChange<T>> ObserveValue<T>(
+        this IAdsConnectionPool pool, string plcId, string symbolPath, int cycleTimeMs = 200)
+    {
+        ArgumentNullException.ThrowIfNull(pool);
+        ArgumentNullException.ThrowIfNull(plcId);
+        ArgumentNullException.ThrowIfNull(symbolPath);
+
+        // Defer so a GetConnection throw (unknown id) becomes OnError, not a throw
+        // from this call.
+        return Observable.Defer(() =>
+            pool.GetConnection(plcId).ObserveValue<T>(symbolPath, cycleTimeMs));
+    }
+
+    /// <summary>
+    /// Merges the <see cref="ConnectionStateChangedEventArgs"/> streams of every
+    /// configured target into one observable. Each event carries its originating
+    /// target via <see cref="ConnectionStateChangedEventArgs.PlcId"/>.
+    /// </summary>
+    public static IObservable<ConnectionStateChangedEventArgs> ObserveAllConnectionStates(
+        this IAdsConnectionPool pool)
+    {
+        ArgumentNullException.ThrowIfNull(pool);
+
+        return pool.GetAllConnections().Values
+            .Select(connection => connection.ObserveConnectionState())
+            .Merge();
+    }
 }

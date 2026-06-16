@@ -106,4 +106,60 @@ public class ReactiveExtensionsTests
 
         Assert.Equal(1, count);
     }
+
+    [Fact]
+    public async Task PoolObserveValue_ResolvesTargetAndStreams()
+    {
+        using var sim = NewSim(); // "plc1"
+        var pool = new FakeConnectionPool(
+            new Dictionary<string, IAdsConnection>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plc1"] = sim,
+            });
+
+        var received = new List<AdsValueChange<int>>();
+        using var sub = pool.ObserveValue<int>("plc1", "GVL.N", cycleTimeMs: 100)
+            .Subscribe(received.Add);
+
+        await sim.WriteValueAsync("GVL.N", 5, CancellationToken.None);
+
+        var change = Assert.Single(received);
+        Assert.Equal(new AdsValueChange<int>("GVL.N", 5), change);
+    }
+
+    [Fact]
+    public void PoolObserveValue_UnknownTarget_SurfacesOnError()
+    {
+        var pool = new FakeConnectionPool(
+            new Dictionary<string, IAdsConnection>(StringComparer.OrdinalIgnoreCase));
+
+        Exception? error = null;
+        using var sub = pool.ObserveValue<int>("nope", "GVL.N")
+            .Subscribe(_ => { }, ex => error = ex);
+
+        Assert.IsType<UnknownPlcTargetException>(error);
+    }
+
+    [Fact]
+    public void ObserveAllConnectionStates_MergesEveryTarget()
+    {
+        var plc1 = new FakeManagedConnection("plc1");
+        var plc2 = new FakeManagedConnection("plc2");
+        var pool = new FakeConnectionPool(
+            new Dictionary<string, IAdsConnection>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plc1"] = plc1,
+                ["plc2"] = plc2,
+            });
+
+        var received = new List<ConnectionStateChangedEventArgs>();
+        using var sub = pool.ObserveAllConnectionStates().Subscribe(received.Add);
+
+        plc1.RaiseConnectionStateChanged(ConnectionState.Disconnected, ConnectionState.Connecting);
+        plc2.RaiseConnectionStateChanged(ConnectionState.Disconnected, ConnectionState.Connected);
+
+        Assert.Equal(2, received.Count);
+        Assert.Contains(received, e => e.PlcId == "plc1" && e.State == ConnectionState.Connecting);
+        Assert.Contains(received, e => e.PlcId == "plc2" && e.State == ConnectionState.Connected);
+    }
 }
