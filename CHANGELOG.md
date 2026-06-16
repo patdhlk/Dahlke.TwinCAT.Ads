@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-16
+
+### Added
+
+- **`Dahlke.TwinCAT.Ads.Reactive` companion package** — a separate, optional NuGet package exposing the callback-based subscription and connection-state APIs as `System.Reactive` `IObservable<T>` streams: `ObserveValue<T>`/`ObserveValue` and `ObserveConnectionState` on `IAdsConnection`, plus pool-level `ObserveValue<T>`/`ObserveValue` and `ObserveAllConnectionStates` on `IAdsConnectionPool`. Value streams are cold (each subscribe opens its own ADS notification, disposed on unsubscribe); connection-state streams are hot. The core package takes no dependency on `System.Reactive`. Includes the `Dahlke.TwinCAT.Ads.Examples.Reactive` example.
+
 ## [0.2.0] - Unreleased
 
 ### Breaking Changes
@@ -113,7 +119,6 @@ Single-symbol reads (`ReadValueAsync`) were previously executed synchronously on
 
 ### Added
 
-- **`Dahlke.TwinCAT.Ads.Reactive` companion package** — `ObserveValue<T>`/`ObserveValue` and `ObserveConnectionState` on `IAdsConnection`, plus pool-level `ObserveValue<T>` and `ObserveAllConnectionStates` on `IAdsConnectionPool`, returning `System.Reactive` `IObservable<T>` streams. Includes the `Dahlke.TwinCAT.Ads.Examples.Reactive` example.
 - **`Iec61131Converter`** — table-driven mapping between IEC 61131-3 elementary type names and .NET types, with default-value lookup and value conversion. A strict standard core (canonical uppercase names, case-sensitive) plus a lenient, case-insensitive `Iec61131Converter.Beckhoff` tier that recognises Beckhoff aliases (`dtSystemTime`, `T_UD`, `BIT`, `BIT8`) and delegates to the core. Conversion reuses the shared invariant-culture conversion core.
 - **Stable per-target connection facade** — `GetConnection` returns one object whose identity never changes for the pool's lifetime. Reconnects are invisible to callers; cached references never go stale. Operations during an outage wait up to `TimeoutMs` for reconnection and then throw `AdsConnectionUnavailableException`; operations fail fast after the pool stops.
 - **`TryGetConnection`** — non-throwing lookup that returns `false` when the id is not configured.
