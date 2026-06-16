@@ -30,7 +30,9 @@ jobs:
         run: dotnet test --no-build --configuration Release --verbosity normal
 
       - name: Pack
-        run: dotnet pack src/Dahlke.TwinCAT.Ads/Dahlke.TwinCAT.Ads.csproj --configuration Release --no-build -p:Version=${{ steps.version.outputs.VERSION }} --output ./nupkg
+        run: |
+          dotnet pack src/Dahlke.TwinCAT.Ads/Dahlke.TwinCAT.Ads.csproj --configuration Release --no-build -p:Version=${{ steps.version.outputs.VERSION }} --output ./nupkg
+          dotnet pack src/Dahlke.TwinCAT.Ads.Reactive/Dahlke.TwinCAT.Ads.Reactive.csproj --configuration Release --no-build -p:Version=${{ steps.version.outputs.VERSION }} --output ./nupkg
 
       - name: Push to NuGet
         run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
