@@ -26,6 +26,12 @@ A .NET library for TwinCAT ADS with durable connections, typed symbol access, si
 dotnet add package Dahlke.TwinCAT.Ads
 ```
 
+Optionally add the Rx companion for `IObservable<T>` streams (see [Reactive (Rx) companion](#reactive-rx-companion)). It depends on the core package, so this pulls both:
+
+```bash
+dotnet add package Dahlke.TwinCAT.Ads.Reactive
+```
+
 ## Quick Start
 
 ### Configuration-first (recommended for server applications)
