@@ -64,8 +64,8 @@ public static class AdsReactiveExtensions
     /// </summary>
     /// <remarks>
     /// Hot, event-backed: all subscribers share the underlying event. Emissions
-    /// arrive on the pool's background thread — add <c>.ObserveOn(...)</c> before
-    /// updating UI.
+    /// arrive on a background thread (the one that raises the event) — add
+    /// <c>.ObserveOn(...)</c> before updating UI.
     /// </remarks>
     public static IObservable<ConnectionStateChangedEventArgs> ObserveConnectionState(
         this IAdsConnection connection)
