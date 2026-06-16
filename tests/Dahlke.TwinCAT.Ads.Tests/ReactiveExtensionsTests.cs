@@ -75,4 +75,35 @@ public class ReactiveExtensionsTests
         Assert.IsType<InvalidOperationException>(error);
         Assert.Equal("symbol not found", error!.Message);
     }
+
+    [Fact]
+    public void ObserveConnectionState_EmitsRaisedEvents()
+    {
+        var conn = new FakeManagedConnection("plc1");
+        var received = new List<ConnectionStateChangedEventArgs>();
+
+        using var sub = conn.ObserveConnectionState().Subscribe(received.Add);
+
+        conn.RaiseConnectionStateChanged(ConnectionState.Disconnected, ConnectionState.Connecting);
+        conn.RaiseConnectionStateChanged(ConnectionState.Connecting, ConnectionState.Connected);
+
+        Assert.Equal(2, received.Count);
+        Assert.Equal("plc1", received[0].PlcId);
+        Assert.Equal(ConnectionState.Connecting, received[0].State);
+        Assert.Equal(ConnectionState.Connected, received[1].State);
+    }
+
+    [Fact]
+    public void ObserveConnectionState_Dispose_Unsubscribes()
+    {
+        var conn = new FakeManagedConnection("plc1");
+        var count = 0;
+
+        var sub = conn.ObserveConnectionState().Subscribe(_ => count++);
+        conn.RaiseConnectionStateChanged(ConnectionState.Disconnected, ConnectionState.Connecting);
+        sub.Dispose();
+        conn.RaiseConnectionStateChanged(ConnectionState.Connecting, ConnectionState.Connected);
+
+        Assert.Equal(1, count);
+    }
 }

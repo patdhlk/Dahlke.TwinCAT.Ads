@@ -55,4 +55,22 @@ public static class AdsReactiveExtensions
                 (symbol, value) => observer.OnNext(new AdsValueChange<object?>(symbol, value)),
                 ct));
     }
+
+    /// <summary>
+    /// Observes connection-state transitions for <paramref name="connection"/> by
+    /// wrapping its <see cref="IAdsConnection.ConnectionStateChanged"/> event. Each
+    /// emitted <see cref="ConnectionStateChangedEventArgs"/> carries the target id,
+    /// the new state, and the previous state.
+    /// </summary>
+    public static IObservable<ConnectionStateChangedEventArgs> ObserveConnectionState(
+        this IAdsConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        return Observable
+            .FromEventPattern<EventHandler<ConnectionStateChangedEventArgs>, ConnectionStateChangedEventArgs>(
+                h => connection.ConnectionStateChanged += h,
+                h => connection.ConnectionStateChanged -= h)
+            .Select(ep => ep.EventArgs);
+    }
 }

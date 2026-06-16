@@ -78,9 +78,12 @@ internal sealed class FakeManagedConnection : IManagedConnection
 
     // Not exercised by the pool; no-op implementations to satisfy IAdsConnection.
     public ConnectionState State => ConnectionState.Disconnected;
-#pragma warning disable CS0067
     public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
-#pragma warning restore CS0067
+
+    /// <summary>Test helper: raises <see cref="ConnectionStateChanged"/>.</summary>
+    public void RaiseConnectionStateChanged(ConnectionState previous, ConnectionState next)
+        => ConnectionStateChanged?.Invoke(
+            this, new ConnectionStateChangedEventArgs(PlcId, next, previous));
 
     // ---- Synchronisation hooks ------------------------------------------
 
