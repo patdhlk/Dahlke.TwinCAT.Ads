@@ -128,6 +128,27 @@ public class ReactiveExtensionsTests
     }
 
     [Fact]
+    public async Task PoolObserveValue_Untyped_ResolvesTargetAndStreams()
+    {
+        using var sim = NewSim(); // "plc1"
+        var pool = new FakeConnectionPool(
+            new Dictionary<string, IAdsConnection>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plc1"] = sim,
+            });
+
+        var received = new List<AdsValueChange<object?>>();
+        using var sub = pool.ObserveValue("plc1", "GVL.N", cycleTimeMs: 100)
+            .Subscribe(received.Add);
+
+        await sim.WriteValueAsync("GVL.N", (short)5, CancellationToken.None);
+
+        var change = Assert.Single(received);
+        Assert.Equal("GVL.N", change.Symbol);
+        Assert.Equal((short)5, change.Value);
+    }
+
+    [Fact]
     public void PoolObserveValue_UnknownTarget_SurfacesOnError()
     {
         var pool = new FakeConnectionPool(
