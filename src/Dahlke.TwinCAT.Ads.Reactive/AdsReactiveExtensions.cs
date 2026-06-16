@@ -1,3 +1,4 @@
+using System.Reactive.Linq;
 using Dahlke.TwinCAT.Ads;
 
 namespace Dahlke.TwinCAT.Ads.Reactive;
@@ -15,5 +16,43 @@ namespace Dahlke.TwinCAT.Ads.Reactive;
 /// </remarks>
 public static class AdsReactiveExtensions
 {
-    // Members added in later tasks.
+    /// <summary>
+    /// Observes typed value changes for <paramref name="symbolPath"/> as a cold
+    /// <see cref="IObservable{T}"/>. Each subscription opens its own ADS device
+    /// notification; disposing the subscription deletes it. The stream is durable
+    /// across reconnects (inherited from the underlying facade subscription).
+    /// </summary>
+    /// <typeparam name="T">The type each notification value is converted to. Values
+    /// that cannot be converted (e.g. null into a non-nullable value type) are not
+    /// emitted, matching <c>SubscribeAsync&lt;T&gt;</c>.</typeparam>
+    public static IObservable<AdsValueChange<T>> ObserveValue<T>(
+        this IAdsConnection connection, string symbolPath, int cycleTimeMs = 200)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(symbolPath);
+
+        return Observable.Create<AdsValueChange<T>>((observer, ct) =>
+            connection.SubscribeAsync<T>(
+                symbolPath, cycleTimeMs,
+                (symbol, value) => observer.OnNext(new AdsValueChange<T>(symbol, value)),
+                ct));
+    }
+
+    /// <summary>
+    /// Observes untyped (boxed) value changes for <paramref name="symbolPath"/> as a
+    /// cold <see cref="IObservable{T}"/>. See <see cref="ObserveValue{T}"/> for the
+    /// cold/durable/threading semantics.
+    /// </summary>
+    public static IObservable<AdsValueChange<object?>> ObserveValue(
+        this IAdsConnection connection, string symbolPath, int cycleTimeMs = 200)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(symbolPath);
+
+        return Observable.Create<AdsValueChange<object?>>((observer, ct) =>
+            connection.SubscribeAsync(
+                symbolPath, cycleTimeMs,
+                (symbol, value) => observer.OnNext(new AdsValueChange<object?>(symbol, value)),
+                ct));
+    }
 }
