@@ -40,7 +40,7 @@ public static class AdsReactiveExtensions
 
     /// <summary>
     /// Observes untyped (boxed) value changes for <paramref name="symbolPath"/> as a
-    /// cold <see cref="IObservable{T}"/>. See <see cref="ObserveValue{T}"/> for the
+    /// cold <see cref="IObservable{T}"/>. See <see cref="ObserveValue{T}(Dahlke.TwinCAT.Ads.IAdsConnection, string, int)"/> for the
     /// cold/durable/threading semantics.
     /// </summary>
     public static IObservable<AdsValueChange<object?>> ObserveValue(
@@ -62,6 +62,11 @@ public static class AdsReactiveExtensions
     /// emitted <see cref="ConnectionStateChangedEventArgs"/> carries the target id,
     /// the new state, and the previous state.
     /// </summary>
+    /// <remarks>
+    /// Hot, event-backed: all subscribers share the underlying event. Emissions
+    /// arrive on the pool's background thread — add <c>.ObserveOn(...)</c> before
+    /// updating UI.
+    /// </remarks>
     public static IObservable<ConnectionStateChangedEventArgs> ObserveConnectionState(
         this IAdsConnection connection)
     {
@@ -98,6 +103,10 @@ public static class AdsReactiveExtensions
     /// configured target into one observable. Each event carries its originating
     /// target via <see cref="ConnectionStateChangedEventArgs.PlcId"/>.
     /// </summary>
+    /// <remarks>
+    /// Captures the configured facades at subscribe time; the set is fixed for the
+    /// pool's lifetime, so the merged stream covers every target.
+    /// </remarks>
     public static IObservable<ConnectionStateChangedEventArgs> ObserveAllConnectionStates(
         this IAdsConnectionPool pool)
     {
