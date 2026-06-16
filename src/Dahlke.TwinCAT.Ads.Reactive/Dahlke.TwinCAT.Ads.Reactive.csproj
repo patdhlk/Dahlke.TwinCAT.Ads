@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- NuGet Package Metadata -->
+    <PackageId>Dahlke.TwinCAT.Ads.Reactive</PackageId>
+    <Version>0.0.0-dev</Version>
+    <Authors>Patrick Dahlke</Authors>
+    <Description>Reactive (Rx) companion for Dahlke.TwinCAT.Ads — exposes ADS value-change and connection-state notifications as IObservable streams.</Description>
+    <PackageTags>TwinCAT;ADS;Beckhoff;PLC;Automation;Reactive;Rx</PackageTags>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/patdhlk/Dahlke.TwinCAT.Ads</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/patdhlk/Dahlke.TwinCAT.Ads.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Dahlke.TwinCAT.Ads/Dahlke.TwinCAT.Ads.csproj" />
+    <PackageReference Include="System.Reactive" Version="6.*" />
+  </ItemGroup>
+
+</Project>

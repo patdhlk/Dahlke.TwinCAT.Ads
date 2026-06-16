@@ -12,6 +12,7 @@ A .NET library for TwinCAT ADS with durable connections, typed symbol access, si
 - **Stable connection facades** — `GetConnection` returns one object per target whose identity never changes; reconnects are invisible; cached references never go stale
 - **Wait-then-throw semantics** — operations wait up to the configured `TimeoutMs` for a connection, then throw `AdsConnectionUnavailableException`; `TimeoutException` for hardware/network stalls; `OperationCanceledException` only for caller cancellation
 - **Durable subscriptions** — survive reconnects automatically; the returned `IDisposable` stays valid through outages; simulated subscriptions fire on changed writes
+- **Reactive (Rx) companion** — optional `Dahlke.TwinCAT.Ads.Reactive` package surfaces value-change and connection-state notifications as `IObservable<T>` streams
 - **ADS sum commands** — batch read and write execute as a single round-trip on real connections; per-symbol `AdsValueResult` for granular success/failure
 - **Connection state observability** — `State` property (tri-state), `IsConnected` snapshot, `ConnectionStateChanged` event
 - **Per-target simulation** — `ConnectionMode.Real | Simulated` per target; mixed fleets supported; `InitialValues` seeding; `AddTwinCatAdsSimulation` forces all targets to simulated
@@ -178,6 +179,31 @@ using var sub = await conn.SubscribeAsync(
 
 Subscriptions are durable: owned by the stable facade, not the underlying connection. When a reconnect occurs the subscription is automatically re-registered against the new connection. Callbacks fire on a background thread — they must be thread-safe and must not block. A `null` notification value with a value-type `T` is dropped (Warning logged). Dispose is idempotent and thread-safe.
 
+## Reactive (Rx) companion
+
+The optional **`Dahlke.TwinCAT.Ads.Reactive`** package exposes subscriptions and connection state as `IObservable<T>` streams (built on `System.Reactive`). Install it alongside the core package only if you want Rx — the core package never depends on `System.Reactive`.
+
+```csharp
+using Dahlke.TwinCAT.Ads.Reactive;
+using System.Reactive.Linq;
+
+var conn = pool.GetConnection("plc1");
+
+// Typed value stream — cold: each Subscribe opens its own ADS notification,
+// disposing it deletes the notification. Durable across reconnects.
+using var sub = conn.ObserveValue<float>("GVL.Temp", cycleTimeMs: 200)
+    .Select(change => change.Value)
+    .Where(t => t > 50f)
+    .DistinctUntilChanged()
+    .Subscribe(t => Console.WriteLine($"Hot: {t} °C"));
+
+// Connection state across every configured target (each event carries its PlcId).
+using var states = pool.ObserveAllConnectionStates()
+    .Subscribe(e => Console.WriteLine($"{e.PlcId}: {e.PreviousState} -> {e.State}"));
+```
+
+Each notification is an `AdsValueChange<T>` record (`Symbol`, `Value`). Notifications arrive on a background thread — add `.ObserveOn(...)` before updating UI. To share one underlying ADS notification among multiple subscribers, add `.Publish().RefCount()`. See [`examples/Dahlke.TwinCAT.Ads.Examples.Reactive`](examples/Dahlke.TwinCAT.Ads.Examples.Reactive/) for a runnable demo.
+
 ## Connection Lookup
 
 ```csharp
@@ -330,6 +356,7 @@ Runnable projects live in [`examples/`](examples/) — both work out of the box 
 
 - [`Dahlke.TwinCAT.Ads.Examples.Cli`](examples/Dahlke.TwinCAT.Ads.Examples.Cli/) — console app demonstrating typed reads, writes, batch operations, ADS state, and subscriptions
 - [`Dahlke.TwinCAT.Ads.Examples.MinimalApi`](examples/Dahlke.TwinCAT.Ads.Examples.MinimalApi/) — ASP.NET Core minimal API exposing PLC symbols over HTTP with a health endpoint
+- [`Dahlke.TwinCAT.Ads.Examples.Reactive`](examples/Dahlke.TwinCAT.Ads.Examples.Reactive/) — console app demonstrating Rx `IObservable` streams: typed/untyped value changes with operator composition, and merged connection-state across targets
 
 ## License
 
