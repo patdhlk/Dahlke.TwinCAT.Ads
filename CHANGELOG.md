@@ -113,6 +113,7 @@ Single-symbol reads (`ReadValueAsync`) were previously executed synchronously on
 
 ### Added
 
+- **`Dahlke.TwinCAT.Ads.Reactive` companion package** — `ObserveValue<T>`/`ObserveValue` and `ObserveConnectionState` on `IAdsConnection`, plus pool-level `ObserveValue<T>` and `ObserveAllConnectionStates` on `IAdsConnectionPool`, returning `System.Reactive` `IObservable<T>` streams. Includes the `Dahlke.TwinCAT.Ads.Examples.Reactive` example.
 - **Stable per-target connection facade** — `GetConnection` returns one object whose identity never changes for the pool's lifetime. Reconnects are invisible to callers; cached references never go stale. Operations during an outage wait up to `TimeoutMs` for reconnection and then throw `AdsConnectionUnavailableException`; operations fail fast after the pool stops.
 - **`TryGetConnection`** — non-throwing lookup that returns `false` when the id is not configured.
 - **`TryGetSimulatedConnection`** — test-support escape hatch to retrieve the live `SimulatedAdsConnection` for seeding initial values in code-first tests.
