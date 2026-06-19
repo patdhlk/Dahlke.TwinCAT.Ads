@@ -14,7 +14,7 @@ using ErrorHandler.Service;
 if (args.Contains("--help") || args.Contains("-h"))
 {
     ShowHelp();
-    return; 
+    return;
 }
 
 // Locate the '--path' argument and extract the subsequent value if available.
@@ -65,9 +65,9 @@ else
 // =======================================================================
 
 // Register the monitoring background service using a factory delegate to pass the validated CLI path.
-builder.Services.AddHostedService<ErrorHandlerService>(sp => 
+builder.Services.AddHostedService<ErrorHandlerService>(sp =>
     new ErrorHandlerService(
-        sp.GetRequiredService<IAdsConnectionPool>(), 
+        sp.GetRequiredService<IAdsConnectionPool>(),
         sp.GetRequiredService<ILogger<ErrorHandlerService>>(),
         path
     ));
@@ -136,7 +136,7 @@ namespace ErrorHandler.Service
 
             // Target the specific pre-configured primary target identifier within the pool.
             var connection = pool.GetConnection("plc1");
-            
+
             // Limit connection acquisition time to 10 seconds to prevent indefinite application hangs.
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
@@ -165,7 +165,7 @@ namespace ErrorHandler.Service
             // =======================================================================
             // Reactive Notification Subscription Engine
             // =======================================================================
-            
+
             // Create the cold observable data stream listening to the requested variable array.
             var alarmObservable = ObserveValue(connection, path, cycleTimeMs: 200);
 
@@ -180,11 +180,11 @@ namespace ErrorHandler.Service
                         if (changes.Count <= 0) return; // Optimize out execution early if no new state shifts occur
 
                         // Log structural header block via system logger infrastructure.
-                        logger.LogInformation("--- Update Received ---");
-                        
+                        Console.WriteLine("--- Update Received ---");
+
                         foreach (var logLine in changes)
                         {
-                            logger.LogInformation("{logLine}", logLine);
+                            Console.WriteLine(logLine);
                         }
                     },
                     ex => logger.LogError(ex, "ADS Subscription encountered an error."), // Handles streaming, network, or type marshal drops
@@ -195,7 +195,7 @@ namespace ErrorHandler.Service
         }
 
         /// <summary>
-        /// Triggered when the application host is performing a graceful shutdown. 
+        /// Triggered when the application host is performing a graceful shutdown.
         /// Disposes active reactive handles to prevent memory leaks and clear active network callbacks.
         /// </summary>
         /// <param name="cancellationToken">Indicates that the shutdown process should no longer be graceful.</param>
@@ -203,10 +203,10 @@ namespace ErrorHandler.Service
         public Task StopAsync(CancellationToken cancellationToken)
         {
             logger.LogInformation("PLC Monitor Service is stopping...");
-            
+
             // Explicitly tear down active notification listeners.
             _subscription?.Dispose();
-            
+
             return Task.CompletedTask;
         }
 
