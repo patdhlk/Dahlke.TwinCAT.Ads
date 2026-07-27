@@ -27,6 +27,17 @@ public sealed class PlcTargetOptions
     public int TimeoutMs { get; set; } = 5000;
 
     /// <summary>
+    /// Timeout in milliseconds for symbol-browsing operations
+    /// (<see cref="IAdsConnection.GetSymbolsAsync"/> and
+    /// <see cref="IAdsConnection.SearchSymbolsAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="TimeoutMs"/> because browsing uploads the PLC's symbol
+    /// table, which takes far longer than reading a single value. Defaults to 30 seconds.
+    /// </remarks>
+    public int SymbolBrowseTimeoutMs { get; set; } = 30000;
+
+    /// <summary>
     /// How this target connects: <see cref="ConnectionMode.Real"/> (over ADS/AMS,
     /// the default) or <see cref="ConnectionMode.Simulated"/> (in-memory store).
     /// </summary>

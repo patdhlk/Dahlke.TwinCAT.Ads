@@ -85,6 +85,8 @@ Dahlke.TwinCAT.Ads.PlcTargetOptions.Mode.set -> void
 Dahlke.TwinCAT.Ads.PlcTargetOptions.PlcTargetOptions() -> void
 Dahlke.TwinCAT.Ads.PlcTargetOptions.Port.get -> int
 Dahlke.TwinCAT.Ads.PlcTargetOptions.Port.set -> void
+Dahlke.TwinCAT.Ads.PlcTargetOptions.SymbolBrowseTimeoutMs.get -> int
+Dahlke.TwinCAT.Ads.PlcTargetOptions.SymbolBrowseTimeoutMs.set -> void
 Dahlke.TwinCAT.Ads.PlcTargetOptions.TimeoutMs.get -> int
 Dahlke.TwinCAT.Ads.PlcTargetOptions.TimeoutMs.set -> void
 Dahlke.TwinCAT.Ads.ServiceCollectionExtensions
