@@ -392,6 +392,13 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     }
 
     /// <inheritdoc />
+    public async Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+    {
+        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
+        return await conn.ReadValueWithMetadataAsync(symbolPath, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
     {
         var conn = await SnapshotAsync(ct).ConfigureAwait(false);

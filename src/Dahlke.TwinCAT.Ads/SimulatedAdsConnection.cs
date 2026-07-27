@@ -196,6 +196,66 @@ public sealed class SimulatedAdsConnection : IManagedConnection
         return Task.FromResult(value);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The simulated store holds CLR values with no PLC type information, so
+    /// <see cref="AdsValueResult.TypeName"/> and <see cref="AdsValueResult.Category"/> are
+    /// inferred from the stored value's runtime type via <see cref="InferPlcType"/>. They are
+    /// therefore indicative, not authoritative — a real connection reports the PLC's own
+    /// declared type.
+    /// <para>
+    /// <b>Divergence from <see cref="ReadValueAsync(string, CancellationToken)"/>.</b> The
+    /// untyped overload returns <see langword="null"/> for a missing symbol. This method throws
+    /// <see cref="AdsErrorException"/> with <see cref="AdsErrorCode.DeviceSymbolNotFound"/>
+    /// instead, matching a real connection and matching the simulated typed
+    /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>, which throws for the same
+    /// reason (a missing symbol has no metadata to report).
+    /// </para>
+    /// </remarks>
+    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (!_symbols.TryGetValue(symbolPath, out var value))
+            throw new AdsErrorException(
+                $"Simulated symbol '{symbolPath}' has no stored value; cannot read its metadata.",
+                AdsErrorCode.DeviceSymbolNotFound);
+
+        var (typeName, category) = InferPlcType(value);
+        return Task.FromResult(AdsValueResult.Success(value, symbolPath, typeName, category));
+    }
+
+    /// <summary>
+    /// Maps a stored CLR value to a plausible PLC type name and category, so a simulated
+    /// metadata read reports the same shape of metadata a real connection would.
+    /// </summary>
+    /// <remarks>
+    /// Internal (rather than private) so other simulated-connection surfaces added later in this
+    /// library (for example symbol browsing or notification metadata) and the test project (via
+    /// <c>InternalsVisibleTo</c>) can reuse the same inference instead of re-deriving it.
+    /// </remarks>
+    internal static (string TypeName, string Category) InferPlcType(object? value) => value switch
+    {
+        null => ("UNKNOWN", "Unknown"),
+        bool => ("BOOL", "Primitive"),
+        sbyte => ("SINT", "Primitive"),
+        byte => ("USINT", "Primitive"),
+        short => ("INT", "Primitive"),
+        ushort => ("UINT", "Primitive"),
+        int => ("DINT", "Primitive"),
+        uint => ("UDINT", "Primitive"),
+        long => ("LINT", "Primitive"),
+        ulong => ("ULINT", "Primitive"),
+        float => ("REAL", "Primitive"),
+        double => ("LREAL", "Primitive"),
+        string => ("STRING", "String"),
+        DateTime or DateTimeOffset => ("DT", "Primitive"),
+        TimeSpan => ("TIME", "Primitive"),
+        System.Collections.IDictionary => ("STRUCT", "Struct"),
+        Array => ("ARRAY", "Array"),
+        _ => (value.GetType().Name.ToUpperInvariant(), "Unknown"),
+    };
+
     /// <summary>
     /// Writes a typed value. The value is stored boxed; subsequent typed reads will
     /// apply the conversion rules documented on

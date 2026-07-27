@@ -230,6 +230,48 @@ public abstract class AdsConnectionContractTests
     }
 
     // =====================================================================
+    // Metadata read.
+    // =====================================================================
+
+    [Fact]
+    public async Task ReadValueWithMetadataAsync_ReturnsValueAndSucceeds()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+
+        var result = await h.Connection.ReadValueWithMetadataAsync("MAIN.Speed", CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1500, result.Value);
+        Assert.Equal("MAIN.Speed", result.SymbolPath);
+    }
+
+    [Fact]
+    public async Task ReadValueWithMetadataAsync_ReportsANonNullTypeName()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+
+        var result = await h.Connection.ReadValueWithMetadataAsync("MAIN.Speed", CancellationToken.None);
+
+        Assert.False(string.IsNullOrEmpty(result.TypeName));
+    }
+
+    [Fact]
+    public async Task ReadValueWithMetadataAsync_ThrowsForAnUnknownSymbol()
+    {
+        // Deliberately diverges from the untyped ReadValueAsync (which returns null for a
+        // never-written path in both harnesses) — matching a real connection and the simulated
+        // *typed* ReadValueAsync<T>, both of which throw for an unknown symbol.
+        await using var h = await CreateHarnessAsync();
+
+        var ex = await Assert.ThrowsAsync<AdsErrorException>(
+            () => h.Connection.ReadValueWithMetadataAsync("MAIN.NoSuchSymbol", CancellationToken.None));
+
+        Assert.Equal(AdsErrorCode.DeviceSymbolNotFound, ex.ErrorCode);
+    }
+
+    // =====================================================================
     // Subscriptions.
     // =====================================================================
 

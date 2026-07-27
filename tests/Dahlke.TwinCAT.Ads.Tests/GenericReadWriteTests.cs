@@ -447,6 +447,9 @@ public class GenericReadWriteTests
         public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
             => Task.FromResult(_typedReadResult);
 
+        public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+            => throw new NotSupportedException();
+
         public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
         {
             LastTypedWrite = (symbolPath, value);

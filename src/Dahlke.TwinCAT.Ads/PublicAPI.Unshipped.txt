@@ -62,6 +62,7 @@ Dahlke.TwinCAT.Ads.IAdsConnection.IsConnected.get -> bool
 Dahlke.TwinCAT.Ads.IAdsConnection.PlcId.get -> string!
 Dahlke.TwinCAT.Ads.IAdsConnection.ReadValueAsync(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<object?>!
 Dahlke.TwinCAT.Ads.IAdsConnection.ReadValueAsync<T>(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<T>!
+Dahlke.TwinCAT.Ads.IAdsConnection.ReadValueWithMetadataAsync(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.AdsValueResult!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.ReadValuesAsync(System.Collections.Generic.IEnumerable<string!>! symbolPaths, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string!, Dahlke.TwinCAT.Ads.AdsValueResult!>!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.State.get -> Dahlke.TwinCAT.Ads.ConnectionState
 Dahlke.TwinCAT.Ads.IAdsConnection.SubscribeAsync(string! symbolPath, int cycleTimeMs, System.Action<string!, object?>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
@@ -101,6 +102,7 @@ Dahlke.TwinCAT.Ads.SimulatedAdsConnection.IsConnected.get -> bool
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.PlcId.get -> string!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.ReadValueAsync(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<object?>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.ReadValueAsync<T>(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<T>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.ReadValueWithMetadataAsync(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.AdsValueResult!>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.ReadValuesAsync(System.Collections.Generic.IEnumerable<string!>! symbolPaths, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string!, Dahlke.TwinCAT.Ads.AdsValueResult!>!>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SetInitialValues(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! values) -> void
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SimulatedAdsConnection(string! plcId, string! displayName, Microsoft.Extensions.Logging.ILoggerFactory! loggerFactory) -> void

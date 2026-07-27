@@ -154,6 +154,73 @@ internal sealed class AdsConnection : IManagedConnection
         return result.Value;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>Same skip-the-read condition as <see cref="ReadValuesAsync"/>.</b> Reuses
+    /// <see cref="PlcValueDecoder.DecodesFromSubSymbolsOnly"/> — the exact predicate the batch
+    /// container branch uses — to decide whether the top-level <c>_client.ReadValueAsync(symbol,
+    /// ct)</c> is needed at all. Structs/function blocks with sub-symbols decode purely from
+    /// their own members, so the top-level read is skipped entirely; arrays (which need
+    /// <c>Array.Length</c> and element access) and opaque structs/function blocks with no
+    /// sub-symbols (which pass their raw value straight through) still need it. Reusing the
+    /// shared predicate — rather than re-deriving the condition here — keeps a single struct
+    /// read the same shape whether it goes through this method or through a one-symbol
+    /// <see cref="ReadValuesAsync"/> batch.
+    /// </para>
+    /// <para>
+    /// <b>Timeout/cancellation.</b> One linked <see cref="CancellationTokenSource"/> bounds the
+    /// top-level read (when performed) AND every recursive struct member / array element read
+    /// <see cref="PlcValueDecoder"/> performs, exactly as in <see cref="ReadValuesAsync"/>.
+    /// Caller cancellation throws <see cref="OperationCanceledException"/>; the per-target
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> elapsing throws <see cref="TimeoutException"/> —
+    /// both via <see cref="CancellationDisambiguator"/>.
+    /// </para>
+    /// </remarks>
+    public async Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+    {
+        using var cts = CreateTimeoutCts(ct);
+        var symbolLoader = GetSymbolLoader();
+
+        if (!symbolLoader.Symbols.TryGetInstance(symbolPath, out var symbol) || symbol is not IValueSymbol)
+            throw new AdsErrorException($"Symbol '{symbolPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+
+        try
+        {
+            object? decoded;
+
+            if (PlcValueDecoder.DecodesFromSubSymbolsOnly(symbol))
+            {
+                // Struct/function-block with sub-symbols: the decoder reads every member itself
+                // and never consults the value passed in beyond a null check, so the top-level
+                // read is fetched-and-discarded if performed — skip it. See
+                // PlcValueDecoder.DecodesFromSubSymbolsOnly's remarks and ReadValuesAsync's
+                // container branch, which this mirrors.
+                decoded = await PlcValueDecoder.DecodeAsync(SkippedReadPlaceholder, symbol, cts.Token)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                // Arrays need the raw value itself (Array.Length + element access); opaque
+                // structs/function blocks with no sub-symbols pass their raw value through
+                // unchanged. Both genuinely need this read.
+                var read = await _client.ReadValueAsync(symbol, cts.Token).ConfigureAwait(false);
+                if (read.Failed)
+                    throw new AdsErrorException(
+                        $"Read of symbol '{symbolPath}' on PLC '{PlcId}' failed: {read.ErrorCode}",
+                        read.ErrorCode);
+
+                decoded = await PlcValueDecoder.DecodeAsync(read.Value, symbol, cts.Token).ConfigureAwait(false);
+            }
+
+            return AdsValueResult.Success(decoded, symbolPath, symbol.TypeName, symbol.Category.ToString());
+        }
+        catch (OperationCanceledException)
+        {
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
+        }
+    }
+
     public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
         => WriteValueAsync(symbolPath, (object)value!, ct);
 

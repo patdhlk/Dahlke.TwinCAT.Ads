@@ -168,6 +168,36 @@ public interface IAdsConnection
     Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct);
 
     /// <summary>
+    /// Reads a PLC symbol and returns its decoded value together with the symbol's PLC type
+    /// metadata.
+    /// </summary>
+    /// <param name="symbolPath">The fully-qualified PLC symbol path.</param>
+    /// <param name="ct">Cancels the operation; per-target timeout applies as elsewhere.</param>
+    /// <returns>
+    /// A successful <see cref="AdsValueResult"/> whose <see cref="AdsValueResult.Value"/> is a
+    /// neutral tree — a boxed primitive for scalars, an
+    /// <c>IReadOnlyDictionary&lt;string, object?&gt;</c> for structs and function blocks, and an
+    /// <c>object?[]</c> for arrays — with <see cref="AdsValueResult.TypeName"/> and
+    /// <see cref="AdsValueResult.Category"/> populated.
+    /// </returns>
+    /// <exception cref="AdsErrorException">
+    /// Thrown when the symbol is not found (<see cref="AdsErrorCode.DeviceSymbolNotFound"/>) or
+    /// the read reports a non-success error code. Unlike the batch
+    /// <see cref="ReadValuesAsync"/>, a single failed read throws rather than returning a
+    /// failed result.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when <see cref="PlcTargetOptions.TimeoutMs"/> elapses first.
+    /// </exception>
+    /// <remarks>
+    /// Prefer this over <see cref="ReadValueAsync(string, CancellationToken)"/> when the caller
+    /// needs to report the PLC type alongside the value, or needs struct and array values as a
+    /// serializer-friendly tree rather than a TwinCAT dynamic object.
+    /// </remarks>
+    Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct);
+
+    /// <summary>
     /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
     /// </summary>
     /// <typeparam name="T">The compile-time type of the value to write.</typeparam>

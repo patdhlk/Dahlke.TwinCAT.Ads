@@ -111,6 +111,27 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
         return Task.FromResult(value);
     }
 
+    /// <summary>
+    /// Mirrors <see cref="SimulatedAdsConnection.ReadValueWithMetadataAsync"/>'s documented
+    /// semantics: throws for a missing symbol (unlike the untyped <see cref="ReadValueAsync(string, CancellationToken)"/>
+    /// above), and infers <see cref="AdsValueResult.TypeName"/>/<see cref="AdsValueResult.Category"/>
+    /// via <see cref="SimulatedAdsConnection.InferPlcType"/> — the same inference the sim uses, reused
+    /// directly (like <see cref="AdsValueConverter"/> above) because it IS the documented mapping
+    /// spec, not something to re-implement and risk drifting from.
+    /// </summary>
+    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (!_symbols.TryGetValue(symbolPath, out var value))
+            throw new AdsErrorException(
+                $"In-memory symbol '{symbolPath}' has no stored value; cannot read its metadata.",
+                AdsErrorCode.DeviceSymbolNotFound);
+
+        var (typeName, category) = SimulatedAdsConnection.InferPlcType(value);
+        return Task.FromResult(AdsValueResult.Success(value, symbolPath, typeName, category));
+    }
+
     // ---- Writes ----------------------------------------------------------
 
     public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
