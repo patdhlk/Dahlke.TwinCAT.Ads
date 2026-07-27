@@ -68,10 +68,18 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
     public object ReadValue() => _value!;
 
     // --- Not consumed by PlcValueDecoder -------------------------------------
-#pragma warning disable CS0067 // Never raised — this stub has no notification lifecycle.
-    public event EventHandler<ValueChangedEventArgs>? ValueChanged;
-    public event EventHandler<RawValueChangedEventArgs>? RawValueChanged;
-#pragma warning restore CS0067
+    public event EventHandler<ValueChangedEventArgs>? ValueChanged
+    {
+        add => throw new NotSupportedException();
+        remove => throw new NotSupportedException();
+    }
+
+    public event EventHandler<RawValueChangedEventArgs>? RawValueChanged
+    {
+        add => throw new NotSupportedException();
+        remove => throw new NotSupportedException();
+    }
+
     public SymbolAccessRights AccessRights => throw new NotSupportedException();
     public IConnection Connection => throw new NotSupportedException();
 
