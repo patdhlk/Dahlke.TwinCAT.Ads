@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using TwinCAT.TypeSystem;
 
 namespace Dahlke.TwinCAT.Ads.Tests;
 
@@ -250,5 +251,63 @@ public class BatchValueResultTests
         Assert.False(task.IsCompleted);
         time.Advance(TimeSpan.FromMilliseconds(1000));
         await Assert.ThrowsAsync<AdsConnectionUnavailableException>(() => task);
+    }
+
+    // ---- TypeName / Category metadata ------------------------------------
+
+    [Fact]
+    public void Success_without_metadata_leaves_TypeName_and_Category_null()
+    {
+        var result = AdsValueResult.Success(42);
+
+        Assert.True(result.Succeeded);
+        Assert.Null(result.TypeName);
+        Assert.Null(result.Category);
+    }
+
+    [Fact]
+    public void Failure_leaves_TypeName_and_Category_null()
+    {
+        var result = AdsValueResult.Failure(new InvalidOperationException("nope"));
+
+        Assert.False(result.Succeeded);
+        Assert.Null(result.TypeName);
+        Assert.Null(result.Category);
+    }
+
+    [Fact]
+    public void Success_with_metadata_exposes_TypeName_and_Category()
+    {
+        var result = AdsValueResult.Success(1500, "MAIN.Speed", "INT", "Primitive");
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1500, result.Value);
+        Assert.Equal("MAIN.Speed", result.SymbolPath);
+        Assert.Equal("INT", result.TypeName);
+        Assert.Equal("Primitive", result.Category);
+    }
+
+    [Fact]
+    public void Success_with_metadata_wraps_decoded_struct_tree_preserving_type_metadata()
+    {
+        // Pins the container-path composition ReadValuesAsync relies on: PlcValueDecoder.Decode
+        // produces the nested tree, and the four-arg Success factory attaches TypeName/Category
+        // to that already-decoded tree (not to the raw symbol value). AdsConnection.ReadValuesAsync
+        // itself cannot be unit-tested without a live PLC connection (see AdsConnectionContractTests
+        // remarks — it only has a hardware-backed implementation), so this test pins the two
+        // composed pieces that ARE hardware-free instead.
+        var motor = new StubSymbol(DataTypeCategory.Struct, "ST_Motor",
+            new StubValueSymbol("Speed", DataTypeCategory.Primitive, "INT", 1500),
+            new StubValueSymbol("Running", DataTypeCategory.Primitive, "BOOL", true));
+
+        var decoded = PlcValueDecoder.Decode(new object(), motor);
+        var result = AdsValueResult.Success(decoded, "MAIN.Motor", motor.TypeName, motor.Category.ToString());
+
+        Assert.True(result.Succeeded);
+        var tree = Assert.IsType<Dictionary<string, object?>>(result.Value);
+        Assert.Equal(1500, tree["Speed"]);
+        Assert.Equal(true, tree["Running"]);
+        Assert.Equal("ST_Motor", result.TypeName);
+        Assert.Equal("Struct", result.Category);
     }
 }

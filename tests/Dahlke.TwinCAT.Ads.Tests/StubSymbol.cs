@@ -8,29 +8,28 @@ using TwinCAT.ValueAccess;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// Minimal <see cref="ISymbol"/> stub exposing only what <see cref="PlcValueDecoder"/>
-/// genuinely reads: <see cref="Category"/>, <see cref="InstanceName"/> and
+/// Minimal <see cref="ISymbol"/> stub exposing what <see cref="PlcValueDecoder"/> and the
+/// batch-read partition in <c>AdsConnection.ReadValuesAsync</c> genuinely read:
+/// <see cref="Category"/>, <see cref="TypeName"/>, <see cref="InstanceName"/> and
 /// <see cref="SubSymbols"/> (its <c>Count</c> and enumeration). Everything else throws so
-/// that any new dependency the decoder grows fails loudly rather than silently passing on
-/// a default.
+/// that any new dependency either consumer grows fails loudly rather than silently passing
+/// on a default.
 /// </summary>
 internal class StubSymbol : ISymbol
 {
-    // typeName is accepted (tests pass a descriptive type name for readability, e.g.
-    // "STRING(80)") but deliberately not stored: PlcValueDecoder never reads TypeName, so
-    // the property below throws rather than echo back a value nothing consumes.
     public StubSymbol(DataTypeCategory category, string typeName, params ISymbol[] subSymbols)
     {
         Category = category;
+        TypeName = typeName;
         SubSymbols = new StubSymbolCollection(subSymbols);
     }
 
     public DataTypeCategory Category { get; }
+    public string TypeName { get; }
     public string InstanceName { get; set; } = "Stub";
     public ISymbolCollection<ISymbol> SubSymbols { get; }
 
     // --- Not consumed by PlcValueDecoder -------------------------------------
-    public string TypeName => throw new NotSupportedException();
     public string InstancePath => throw new NotSupportedException();
     public int ByteSize => throw new NotSupportedException();
     public string Comment => throw new NotSupportedException();

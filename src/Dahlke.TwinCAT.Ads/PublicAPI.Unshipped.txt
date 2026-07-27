@@ -9,10 +9,12 @@ Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.AdsDiagnosticsOptions() -> void
 Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.SymbolDump.get -> Dahlke.TwinCAT.Ads.SymbolDumpOptions!
 Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.SymbolDump.set -> void
 Dahlke.TwinCAT.Ads.AdsValueResult
+Dahlke.TwinCAT.Ads.AdsValueResult.Category.get -> string?
 Dahlke.TwinCAT.Ads.AdsValueResult.Error.get -> System.Exception?
 Dahlke.TwinCAT.Ads.AdsValueResult.GetValue<T>() -> T
 Dahlke.TwinCAT.Ads.AdsValueResult.Succeeded.get -> bool
 Dahlke.TwinCAT.Ads.AdsValueResult.SymbolPath.get -> string?
+Dahlke.TwinCAT.Ads.AdsValueResult.TypeName.get -> string?
 Dahlke.TwinCAT.Ads.AdsValueResult.Value.get -> object?
 Dahlke.TwinCAT.Ads.AmsRouterOptions
 Dahlke.TwinCAT.Ads.AmsRouterOptions.AmsRouterOptions() -> void

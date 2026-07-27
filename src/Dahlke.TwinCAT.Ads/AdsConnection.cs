@@ -181,21 +181,28 @@ internal sealed class AdsConnection : IManagedConnection
     /// <inheritdoc />
     /// <remarks>
     /// <para>
-    /// <b>One round-trip.</b> All resolvable symbols are read in a single ADS sum command
-    /// (<see cref="SumSymbolRead"/>) rather than one read per symbol. Per-symbol granularity is
-    /// preserved: each symbol's outcome is reported independently via its
-    /// <see cref="AdsValueResult"/>.
+    /// <b>Partitioned: sum command for scalars, individual decode for containers.</b> Resolved
+    /// symbols are split by <see cref="ISymbol.Category"/>. Scalars, strings and enums share a
+    /// single ADS sum command (<see cref="SumSymbolRead"/>) — one round-trip for the whole
+    /// scalar subset. Structs, function blocks and arrays are read and decoded individually via
+    /// <see cref="PlcValueDecoder"/> so their full nested tree survives (a bare sum command would
+    /// return only an opaque flat value for these, silently losing fidelity). Per-symbol
+    /// granularity is preserved either way: each symbol's outcome is reported independently via
+    /// its <see cref="AdsValueResult"/>, which also carries the symbol's
+    /// <see cref="AdsValueResult.TypeName"/> and <see cref="AdsValueResult.Category"/>.
     /// </para>
     /// <para>
     /// <b>Symbol resolution.</b> Symbols that cannot be resolved on the PLC are recorded — before
-    /// the sum command is issued — as a per-symbol <see cref="AdsValueResult.Failure(Exception, string?)"/> carrying an
+    /// either read path runs — as a per-symbol <see cref="AdsValueResult.Failure(Exception, string?)"/> carrying an
     /// <see cref="AdsErrorException"/> with <see cref="AdsErrorCode.DeviceSymbolNotFound"/>; they
-    /// are excluded from the sum command. Duplicate paths are de-duplicated.
+    /// are excluded from both the sum command and the container reads. Duplicate paths are
+    /// de-duplicated. Resolution happens exactly once per path — the partition classifies the
+    /// already-resolved <see cref="ISymbol"/>, it never re-resolves.
     /// </para>
     /// <para>
     /// <b>Whole-batch timeout/cancellation.</b> The timeout and cancellation apply to the entire
-    /// batch as a single operation. Caller cancellation throws
-    /// <see cref="OperationCanceledException"/>; the per-target
+    /// batch — sum command AND container reads together — as a single operation. Caller
+    /// cancellation throws <see cref="OperationCanceledException"/>; the per-target
     /// <see cref="PlcTargetOptions.TimeoutMs"/> elapsing throws a <see cref="TimeoutException"/> for
     /// the whole batch — neither is recorded as a per-symbol failure.
     /// </para>
@@ -215,16 +222,15 @@ internal sealed class AdsConnection : IManagedConnection
         var symbolLoader = GetSymbolLoader();
 
         // Resolve symbols; unresolvable ones become per-symbol failures immediately and are
-        // excluded from the sum command.
-        var foundSymbols = new List<ISymbol>(paths.Length);
-        var foundPaths = new List<string>(paths.Length);
+        // excluded from both read paths below. This is the ONLY resolution pass — the partition
+        // that follows classifies these already-resolved symbols, it never resolves again.
+        var resolved = new Dictionary<string, ISymbol>(paths.Length);
 
         foreach (var path in paths)
         {
             if (symbolLoader.Symbols.TryGetInstance(path, out var symbol) && symbol is IValueSymbol)
             {
-                foundSymbols.Add(symbol);
-                foundPaths.Add(path);
+                resolved[path] = symbol;
             }
             else
             {
@@ -236,38 +242,103 @@ internal sealed class AdsConnection : IManagedConnection
             }
         }
 
-        // If nothing to read after filtering, return early — no sum command.
-        if (foundSymbols.Count == 0)
+        // If nothing to read after filtering, return early — no sum command, no container reads.
+        if (resolved.Count == 0)
             return results;
 
-        // One sum-read round-trip for all found symbols.
+        // Partition: containers need PlcValueDecoder to preserve their nested tree; everything
+        // else (scalars, strings, enums) can share one sum command.
+        var containers = resolved.Where(kvp => IsContainer(kvp.Value)).ToList();
+        var scalars = resolved.Where(kvp => !IsContainer(kvp.Value)).ToList();
+
+        // One timeout/cancellation budget for the whole batch, whether that means one sum
+        // command, one container loop, or both.
         using var cts = CreateTimeoutCts(ct);
-        ResultSumValues sumResult;
-        try
+
+        // Scalars: one sum-read round-trip for all of them.
+        if (scalars.Count > 0)
         {
-            var sumRead = new SumSymbolRead(_client, foundSymbols);
-            sumResult = await sumRead.ReadAsync(cts.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Whole-batch: caller cancellation → OCE; timeout → TimeoutException.
-            var ex = CancellationDisambiguator.CreateException(ct, $"batch({foundSymbols.Count} symbols)", PlcId, _options.TimeoutMs);
-            if (ex is OperationCanceledException oce)
-                throw oce;
-            throw (TimeoutException)ex;
+            var scalarSymbols = new List<ISymbol>(scalars.Count);
+            var scalarPaths = new string[scalars.Count];
+            for (var i = 0; i < scalars.Count; i++)
+            {
+                scalarSymbols.Add(scalars[i].Value);
+                scalarPaths[i] = scalars[i].Key;
+            }
+
+            ResultSumValues sumResult;
+            try
+            {
+                var sumRead = new SumSymbolRead(_client, scalarSymbols);
+                sumResult = await sumRead.ReadAsync(cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Whole-batch: caller cancellation → OCE; timeout → TimeoutException.
+                var ex = CancellationDisambiguator.CreateException(ct, $"batch({scalarSymbols.Count} symbols)", PlcId, _options.TimeoutMs);
+                if (ex is OperationCanceledException oce)
+                    throw oce;
+                throw (TimeoutException)ex;
+            }
+
+            (string? TypeName, string? Category) ScalarMetadata(string path) =>
+                resolved.TryGetValue(path, out var sym) ? (sym.TypeName, sym.Category.ToString()) : (null, null);
+
+            // Map per-symbol results, carrying each symbol's type metadata along.
+            var mapped = SumResultMapper.MapReadResults(
+                scalarPaths,
+                sumResult.Values ?? Array.Empty<object?>(),
+                sumResult.SubErrors ?? Array.Empty<AdsErrorCode>(),
+                ScalarMetadata);
+
+            foreach (var kvp in mapped)
+                results[kvp.Key] = kvp.Value;
         }
 
-        // Map per-symbol results.
-        var mapped = SumResultMapper.MapReadResults(
-            [.. foundPaths],
-            sumResult.Values ?? Array.Empty<object?>(),
-            sumResult.SubErrors ?? Array.Empty<AdsErrorCode>());
+        // Containers: read and decode individually so the full nested tree survives.
+        foreach (var (path, symbol) in containers)
+        {
+            try
+            {
+                var read = await _client.ReadValueAsync(symbol, cts.Token).ConfigureAwait(false);
+                if (read.Failed)
+                {
+                    results[path] = AdsValueResult.Failure(
+                        new AdsErrorException(
+                            $"Read of symbol '{path}' on PLC '{PlcId}' failed: {read.ErrorCode}",
+                            read.ErrorCode),
+                        path);
+                    continue;
+                }
 
-        foreach (var kvp in mapped)
-            results[kvp.Key] = kvp.Value;
+                results[path] = AdsValueResult.Success(
+                    PlcValueDecoder.Decode(read.Value, symbol),
+                    path, symbol.TypeName, symbol.Category.ToString());
+            }
+            catch (OperationCanceledException)
+            {
+                // Whole-batch cancellation/timeout is NOT a per-symbol failure — rethrow.
+                var ex = CancellationDisambiguator.CreateException(ct, path, PlcId, _options.TimeoutMs);
+                if (ex is OperationCanceledException oce)
+                    throw oce;
+                throw (TimeoutException)ex;
+            }
+            catch (Exception ex)
+            {
+                results[path] = AdsValueResult.Failure(ex, path);
+            }
+        }
 
         return results;
     }
+
+    /// <summary>
+    /// Classifies a resolved symbol as a container (struct, function block or array) whose value
+    /// must be decoded individually via <see cref="PlcValueDecoder"/> to preserve its nested tree,
+    /// as opposed to a scalar/string/enum that can share a sum command with other symbols.
+    /// </summary>
+    private static bool IsContainer(ISymbol symbol) =>
+        symbol.Category is DataTypeCategory.Struct or DataTypeCategory.FunctionBlock or DataTypeCategory.Array;
 
     /// <inheritdoc />
     /// <remarks>

@@ -21,12 +21,15 @@ namespace Dahlke.TwinCAT.Ads;
 /// </remarks>
 public sealed class AdsValueResult
 {
-    private AdsValueResult(bool succeeded, object? value, Exception? error, string? symbolPath)
+    private AdsValueResult(bool succeeded, object? value, Exception? error, string? symbolPath,
+        string? typeName = null, string? category = null)
     {
         Succeeded = succeeded;
         Value = value;
         Error = error;
         SymbolPath = symbolPath;
+        TypeName = typeName;
+        Category = category;
     }
 
     /// <summary>
@@ -58,6 +61,20 @@ public sealed class AdsValueResult
     public string? SymbolPath { get; }
 
     /// <summary>
+    /// The PLC type name of the symbol this result came from (for example <c>ST_Motor</c>,
+    /// <c>INT</c>), or <see langword="null"/> when the producing call did not resolve type
+    /// metadata.
+    /// </summary>
+    public string? TypeName { get; }
+
+    /// <summary>
+    /// The symbol's type category (for example <c>Primitive</c>, <c>Struct</c>, <c>Array</c>,
+    /// <c>Enum</c>), or <see langword="null"/> when the producing call did not resolve type
+    /// metadata.
+    /// </summary>
+    public string? Category { get; }
+
+    /// <summary>
     /// Creates a successful result carrying <paramref name="value"/> (which may be
     /// <see langword="null"/>) without an associated symbol path.
     /// </summary>
@@ -72,6 +89,13 @@ public sealed class AdsValueResult
     /// </summary>
     internal static AdsValueResult Success(object? value, string? symbolPath)
         => new(succeeded: true, value, error: null, symbolPath);
+
+    /// <summary>
+    /// Creates a successful result carrying the decoded value together with the symbol's
+    /// PLC type metadata.
+    /// </summary>
+    internal static AdsValueResult Success(object? value, string? symbolPath, string? typeName, string? category)
+        => new(succeeded: true, value, error: null, symbolPath, typeName, category);
 
     /// <summary>
     /// Creates a failed result carrying <paramref name="error"/> without an associated symbol path.

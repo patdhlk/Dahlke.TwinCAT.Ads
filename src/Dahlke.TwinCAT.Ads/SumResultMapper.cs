@@ -36,16 +36,24 @@ internal static class SumResultMapper
     /// <param name="symbolPaths">The symbol paths, ordered by symbol index.</param>
     /// <param name="values">The read values, ordered by symbol index. May contain null entries.</param>
     /// <param name="subErrors">The per-symbol ADS error codes, ordered by symbol index.</param>
+    /// <param name="metadataLookup">
+    /// Optional per-path lookup for the symbol's PLC type metadata (type name and category),
+    /// attached to successful results. Defaults to <see langword="null"/>, in which case
+    /// successful results carry no type metadata (<see cref="AdsValueResult.TypeName"/> and
+    /// <see cref="AdsValueResult.Category"/> both null) — existing callers are unaffected.
+    /// </param>
     /// <returns>
     /// A dictionary keyed by symbol path. A symbol whose sub-error is
     /// <see cref="AdsErrorCode.NoError"/> yields <see cref="AdsValueResult.Success(object?, string?)"/>
-    /// carrying its value; any other code yields <see cref="AdsValueResult.Failure(System.Exception, string?)"/>
+    /// carrying its value (and, when <paramref name="metadataLookup"/> is supplied, its type
+    /// metadata); any other code yields <see cref="AdsValueResult.Failure(System.Exception, string?)"/>
     /// carrying an <see cref="AdsErrorException"/>.
     /// </returns>
     internal static IReadOnlyDictionary<string, AdsValueResult> MapReadResults(
         string[] symbolPaths,
         object?[] values,
-        AdsErrorCode[] subErrors)
+        AdsErrorCode[] subErrors,
+        Func<string, (string? TypeName, string? Category)>? metadataLookup = null)
     {
         var results = new Dictionary<string, AdsValueResult>(symbolPaths.Length);
 
@@ -57,7 +65,8 @@ internal static class SumResultMapper
             if (errorCode == AdsErrorCode.NoError)
             {
                 var value = i < values.Length ? values[i] : null;
-                results[path] = AdsValueResult.Success(value, path);
+                var (typeName, category) = metadataLookup?.Invoke(path) ?? (null, null);
+                results[path] = AdsValueResult.Success(value, path, typeName, category);
             }
             else
             {
