@@ -9,28 +9,31 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
 /// Minimal <see cref="ISymbol"/> stub exposing only what <see cref="PlcValueDecoder"/>
-/// consumes: <see cref="Category"/>, <see cref="TypeName"/>, <see cref="InstanceName"/>
-/// and <see cref="SubSymbols"/>. Everything else throws so that any new dependency the
-/// decoder grows fails loudly rather than silently returning a default.
+/// genuinely reads: <see cref="Category"/>, <see cref="InstanceName"/> and
+/// <see cref="SubSymbols"/> (its <c>Count</c> and enumeration). Everything else throws so
+/// that any new dependency the decoder grows fails loudly rather than silently passing on
+/// a default.
 /// </summary>
 internal class StubSymbol : ISymbol
 {
+    // typeName is accepted (tests pass a descriptive type name for readability, e.g.
+    // "STRING(80)") but deliberately not stored: PlcValueDecoder never reads TypeName, so
+    // the property below throws rather than echo back a value nothing consumes.
     public StubSymbol(DataTypeCategory category, string typeName, params ISymbol[] subSymbols)
     {
         Category = category;
-        TypeName = typeName;
         SubSymbols = new StubSymbolCollection(subSymbols);
     }
 
     public DataTypeCategory Category { get; }
-    public string TypeName { get; }
     public string InstanceName { get; set; } = "Stub";
-    public string InstancePath => InstanceName;
     public ISymbolCollection<ISymbol> SubSymbols { get; }
-    public int ByteSize => 0;
-    public string Comment => string.Empty;
 
     // --- Not consumed by PlcValueDecoder -------------------------------------
+    public string TypeName => throw new NotSupportedException();
+    public string InstancePath => throw new NotSupportedException();
+    public int ByteSize => throw new NotSupportedException();
+    public string Comment => throw new NotSupportedException();
     public IDataType? DataType => throw new NotSupportedException();
     public ISymbol? Parent => throw new NotSupportedException();
     public bool IsContainerType => throw new NotSupportedException();
@@ -111,9 +114,12 @@ internal sealed class StubSymbolCollection(IReadOnlyList<ISymbol> symbols) : ISy
     public int Count => symbols.Count;
 
     public IEnumerator<ISymbol> GetEnumerator() => symbols.GetEnumerator();
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     // --- Not consumed by PlcValueDecoder -------------------------------------
+    // foreach binds to the generic GetEnumerator() above via IEnumerable<ISymbol>; this
+    // non-generic overload is never invoked by the decoder or any test.
+    IEnumerator IEnumerable.GetEnumerator() => throw new NotSupportedException();
+
     public ISymbol this[int index]
     {
         get => throw new NotSupportedException();
