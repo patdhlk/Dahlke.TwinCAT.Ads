@@ -11,9 +11,11 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// Minimal <see cref="ISymbol"/> stub exposing what <see cref="PlcValueDecoder"/> and the
 /// batch-read partition in <c>AdsConnection.ReadValuesAsync</c> genuinely read:
 /// <see cref="Category"/>, <see cref="TypeName"/>, <see cref="InstanceName"/> and
-/// <see cref="SubSymbols"/> (its <c>Count</c> and enumeration). Everything else throws so
-/// that any new dependency either consumer grows fails loudly rather than silently passing
-/// on a default.
+/// <see cref="SubSymbols"/> (its <c>Count</c> and enumeration), plus (on
+/// <see cref="StubValueSymbol"/>) the async <c>ReadValueAsync(CancellationToken)</c>
+/// <see cref="PlcValueDecoder"/> now uses to read struct members / array elements. Everything
+/// else throws so that any new dependency either consumer grows fails loudly rather than
+/// silently passing on a default.
 /// </summary>
 internal class StubSymbol : ISymbol
 {
@@ -55,6 +57,8 @@ internal class StubSymbol : ISymbol
 internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
 {
     private readonly object? _value;
+    private readonly bool _failRead;
+    private readonly bool _neverCompletesRead;
 
     public StubValueSymbol(string instanceName, DataTypeCategory category, string typeName,
         object? value, params ISymbol[] subSymbols)
@@ -64,7 +68,52 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
         _value = value;
     }
 
-    public object ReadValue() => _value!;
+    private StubValueSymbol(string instanceName, DataTypeCategory category, string typeName,
+        bool failRead, bool neverCompletesRead)
+        : base(category, typeName)
+    {
+        InstanceName = instanceName;
+        _failRead = failRead;
+        _neverCompletesRead = neverCompletesRead;
+    }
+
+    /// <summary>
+    /// A member whose read fails with <see cref="AdsErrorCode.DeviceError"/> — used to pin that
+    /// <see cref="PlcValueDecoder"/> surfaces a failed member read as an
+    /// <see cref="AdsErrorException"/>, the same way the old synchronous, throwing
+    /// <c>ReadValue()</c> used to.
+    /// </summary>
+    public static StubValueSymbol ThatFailsToRead(string instanceName, DataTypeCategory category, string typeName) =>
+        new(instanceName, category, typeName, failRead: true, neverCompletesRead: false);
+
+    /// <summary>
+    /// A member whose read never completes unless its <see cref="CancellationToken"/> is
+    /// cancelled — used to pin that <see cref="PlcValueDecoder"/>'s member reads are genuinely
+    /// cancellable/bounded (Finding 1: the old synchronous <c>ReadValue()</c> could not be
+    /// interrupted and let a slow struct block past the configured batch timeout).
+    /// </summary>
+    public static StubValueSymbol ThatNeverCompletesRead(string instanceName, DataTypeCategory category, string typeName) =>
+        new(instanceName, category, typeName, failRead: false, neverCompletesRead: true);
+
+    // ReadValue() (the synchronous, non-cancellable overload) is no longer called by
+    // PlcValueDecoder — it reads struct members / array elements via ReadValueAsync instead
+    // (see PlcValueDecoder's remarks on being "async and cancellable, all the way down"), so
+    // per this stub's strict policy (throw for anything not genuinely read), this now throws.
+    public object ReadValue() => throw new NotSupportedException();
+
+    // PlcValueDecoder.ReadMemberAsync calls this for every struct member / array element; a
+    // successful ResultReadValueAccess wraps the constructor-provided value (errorCode 0 ==
+    // AdsErrorCode.NoError). This is the one genuinely-real member added for Task 4's fix round.
+    public async Task<ResultReadValueAccess> ReadValueAsync(CancellationToken cancellationToken)
+    {
+        if (_neverCompletesRead)
+            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+
+        if (_failRead)
+            return new ResultReadValueAccess((int)AdsErrorCode.DeviceError, invokeId: 0);
+
+        return new ResultReadValueAccess(_value!, (int)AdsErrorCode.NoError, invokeId: 0);
+    }
 
     // --- Not consumed by PlcValueDecoder -------------------------------------
     public event EventHandler<ValueChangedEventArgs>? ValueChanged
@@ -99,8 +148,6 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
     public int TryWriteValue(object value, int size) => throw new NotSupportedException();
 
     public object ReadValue(int size) => throw new NotSupportedException();
-    public Task<ResultReadValueAccess> ReadValueAsync(CancellationToken cancellationToken) =>
-        throw new NotSupportedException();
     public ResultReadValueAccess ReadValueAsResult() => throw new NotSupportedException();
     public int TryReadValue(int size, out object value) => throw new NotSupportedException();
 

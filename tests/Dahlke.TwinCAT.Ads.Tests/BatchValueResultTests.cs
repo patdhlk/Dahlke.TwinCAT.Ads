@@ -288,19 +288,19 @@ public class BatchValueResultTests
     }
 
     [Fact]
-    public void Success_with_metadata_wraps_decoded_struct_tree_preserving_type_metadata()
+    public async Task Success_with_metadata_wraps_decoded_struct_tree_preserving_type_metadata()
     {
-        // Pins the container-path composition ReadValuesAsync relies on: PlcValueDecoder.Decode
+        // Pins the container-path composition ReadValuesAsync relies on: PlcValueDecoder.DecodeAsync
         // produces the nested tree, and the four-arg Success factory attaches TypeName/Category
-        // to that already-decoded tree (not to the raw symbol value). AdsConnection.ReadValuesAsync
-        // itself cannot be unit-tested without a live PLC connection (see AdsConnectionContractTests
-        // remarks — it only has a hardware-backed implementation), so this test pins the two
-        // composed pieces that ARE hardware-free instead.
+        // to that already-decoded tree (not to the raw symbol value). The full end-to-end
+        // orchestration through the real AdsConnection.ReadValuesAsync (partition, symbol-loader
+        // seam, merge) is covered separately by ReadValuesAsyncPartitionTests; this test isolates
+        // just the decode-and-wrap composition itself.
         var motor = new StubSymbol(DataTypeCategory.Struct, "ST_Motor",
             new StubValueSymbol("Speed", DataTypeCategory.Primitive, "INT", 1500),
             new StubValueSymbol("Running", DataTypeCategory.Primitive, "BOOL", true));
 
-        var decoded = PlcValueDecoder.Decode(new object(), motor);
+        var decoded = await PlcValueDecoder.DecodeAsync(new object(), motor, CancellationToken.None);
         var result = AdsValueResult.Success(decoded, "MAIN.Motor", motor.TypeName, motor.Category.ToString());
 
         Assert.True(result.Succeeded);

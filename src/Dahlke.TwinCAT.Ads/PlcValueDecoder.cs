@@ -1,3 +1,4 @@
+using TwinCAT.Ads;
 using TwinCAT.TypeSystem;
 
 namespace Dahlke.TwinCAT.Ads;
@@ -24,11 +25,27 @@ namespace Dahlke.TwinCAT.Ads;
 /// raw bytes, so PLC struct packing, string encoding and enum backing types are handled by
 /// the TwinCAT symbol layer instead of being reimplemented here.
 /// </para>
+/// <para>
+/// <b>Async and cancellable, all the way down.</b> Every struct member / array element read
+/// goes through <see cref="IValueSymbol.ReadValueAsync(System.Threading.CancellationToken)"/>,
+/// threading the SAME <see cref="System.Threading.CancellationToken"/> passed to the top-level
+/// <see cref="DecodeAsync"/> call down through every recursive call. A caller's timeout budget
+/// (for example <c>AdsConnection.ReadValuesAsync</c>'s whole-batch
+/// <see cref="System.Threading.CancellationTokenSource"/>) therefore bounds every member/element
+/// read, not just the first one — an earlier version of this decoder used the synchronous,
+/// non-cancellable <c>ISymbol.ReadValue()</c> internally, which let a struct with many members
+/// block past the configured timeout with no way to cancel. <c>ReadValue()</c> is no longer
+/// called anywhere in this type.
+/// </para>
 /// </remarks>
 internal static class PlcValueDecoder
 {
-    /// <summary>Decodes <paramref name="value"/> using <paramref name="symbol"/>'s metadata.</summary>
-    public static object? Decode(object? value, ISymbol symbol)
+    /// <summary>
+    /// Decodes <paramref name="value"/> using <paramref name="symbol"/>'s metadata, reading any
+    /// struct/function-block members or array elements via <paramref name="ct"/>-bound async
+    /// reads on their own sub-symbols.
+    /// </summary>
+    public static async Task<object?> DecodeAsync(object? value, ISymbol symbol, CancellationToken ct)
     {
         if (value is null)
             return null;
@@ -39,20 +56,36 @@ internal static class PlcValueDecoder
         if (category is DataTypeCategory.Struct or DataTypeCategory.FunctionBlock
             && symbol.SubSymbols.Count > 0)
         {
-            return DecodeStruct(symbol);
+            return await DecodeStructAsync(symbol, ct).ConfigureAwait(false);
         }
 
         // Arrays: map each element, using sub-symbols when available.
         if (category is DataTypeCategory.Array && value is Array array)
         {
-            return DecodeArray(array, symbol);
+            return await DecodeArrayAsync(array, symbol, ct).ConfigureAwait(false);
         }
 
         // Primitives, strings, enums, and everything else: pass through.
         return value;
     }
 
-    private static Dictionary<string, object?> DecodeStruct(ISymbol symbol)
+    /// <summary>
+    /// True when decoding <paramref name="symbol"/> reads entirely from its own sub-symbols and
+    /// never consumes an externally supplied <c>value</c> — this holds for structs and function
+    /// blocks that expose at least one sub-symbol. A caller may use this to skip fetching its own
+    /// top-level raw value for <paramref name="symbol"/> before calling <see cref="DecodeAsync"/>:
+    /// <see cref="DecodeAsync"/>'s <c>value</c> parameter is only ever consulted for a null check
+    /// in that case, never returned or inspected further, so any non-null placeholder satisfies
+    /// it. Arrays (which need the raw value for <c>Array.Length</c> and element access) and
+    /// opaque structs/function blocks with no sub-symbols (which pass the raw value through
+    /// unchanged) both still need a genuine externally supplied value, so this returns
+    /// <see langword="false"/> for them.
+    /// </summary>
+    public static bool DecodesFromSubSymbolsOnly(ISymbol symbol) =>
+        symbol.Category is DataTypeCategory.Struct or DataTypeCategory.FunctionBlock
+        && symbol.SubSymbols.Count > 0;
+
+    private static async Task<Dictionary<string, object?>> DecodeStructAsync(ISymbol symbol, CancellationToken ct)
     {
         var dict = new Dictionary<string, object?>(symbol.SubSymbols.Count);
 
@@ -60,15 +93,15 @@ internal static class PlcValueDecoder
         {
             if (sub is IValueSymbol valueSub)
             {
-                var subValue = valueSub.ReadValue();
-                dict[sub.InstanceName] = Decode(subValue, sub);
+                var subValue = await ReadMemberAsync(valueSub, sub, ct).ConfigureAwait(false);
+                dict[sub.InstanceName] = await DecodeAsync(subValue, sub, ct).ConfigureAwait(false);
             }
         }
 
         return dict;
     }
 
-    private static object?[] DecodeArray(Array array, ISymbol symbol)
+    private static async Task<object?[]> DecodeArrayAsync(Array array, ISymbol symbol, CancellationToken ct)
     {
         var result = new object?[array.Length];
         var subSymbols = symbol.SubSymbols;
@@ -79,9 +112,15 @@ internal static class PlcValueDecoder
             var index = 0;
             foreach (var sub in subSymbols)
             {
-                result[index] = sub is IValueSymbol valueSub
-                    ? Decode(valueSub.ReadValue(), sub)
-                    : array.GetValue(index);
+                if (sub is IValueSymbol valueSub)
+                {
+                    var subValue = await ReadMemberAsync(valueSub, sub, ct).ConfigureAwait(false);
+                    result[index] = await DecodeAsync(subValue, sub, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    result[index] = array.GetValue(index);
+                }
                 index++;
             }
         }
@@ -93,5 +132,24 @@ internal static class PlcValueDecoder
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Reads one struct member or array element via the cancellable, async
+    /// <see cref="IValueSymbol.ReadValueAsync(CancellationToken)"/> and throws
+    /// <see cref="AdsErrorException"/> if the read failed — matching the throwing convention the
+    /// old synchronous <c>ReadValue()</c> provided implicitly (Beckhoff's simple/throwing
+    /// overload), now made explicit because <c>ReadValueAsync</c> uses the non-throwing
+    /// Result pattern instead.
+    /// </summary>
+    private static async Task<object?> ReadMemberAsync(IValueSymbol valueSub, ISymbol sub, CancellationToken ct)
+    {
+        var result = await valueSub.ReadValueAsync(ct).ConfigureAwait(false);
+        if (result.Failed)
+            throw new AdsErrorException(
+                $"Read of PLC member '{sub.InstanceName}' failed: {(AdsErrorCode)result.ErrorCode}",
+                (AdsErrorCode)result.ErrorCode);
+
+        return result.Value;
     }
 }

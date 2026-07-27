@@ -201,8 +201,13 @@ internal sealed class AdsConnection : IManagedConnection
     /// </para>
     /// <para>
     /// <b>Whole-batch timeout/cancellation.</b> The timeout and cancellation apply to the entire
-    /// batch — sum command AND container reads together — as a single operation. Caller
-    /// cancellation throws <see cref="OperationCanceledException"/>; the per-target
+    /// batch — the sum command, any top-level container read, AND every recursive struct
+    /// member / array element read <see cref="PlcValueDecoder"/> performs — as a single
+    /// operation: the same linked <see cref="System.Threading.CancellationTokenSource"/> token is
+    /// threaded through <see cref="PlcValueDecoder.DecodeAsync"/> down to each
+    /// <see cref="IValueSymbol.ReadValueAsync(CancellationToken)"/> call, so a struct with many
+    /// members cannot run past the configured timeout. Caller cancellation throws
+    /// <see cref="OperationCanceledException"/>; the per-target
     /// <see cref="PlcTargetOptions.TimeoutMs"/> elapsing throws a <see cref="TimeoutException"/> for
     /// the whole batch — neither is recorded as a per-symbol failure.
     /// </para>
@@ -300,20 +305,40 @@ internal sealed class AdsConnection : IManagedConnection
         {
             try
             {
-                var read = await _client.ReadValueAsync(symbol, cts.Token).ConfigureAwait(false);
-                if (read.Failed)
+                object? decoded;
+
+                if (PlcValueDecoder.DecodesFromSubSymbolsOnly(symbol))
                 {
-                    results[path] = AdsValueResult.Failure(
-                        new AdsErrorException(
-                            $"Read of symbol '{path}' on PLC '{PlcId}' failed: {read.ErrorCode}",
-                            read.ErrorCode),
-                        path);
-                    continue;
+                    // Structs/function blocks with sub-symbols decode purely by reading each
+                    // member individually inside PlcValueDecoder — the top-level read this branch
+                    // would otherwise perform is fetched and immediately discarded by the
+                    // decoder, so it is skipped entirely (one fewer round-trip per such symbol).
+                    // DecodeAsync's `value` argument is consulted only for a null guard on this
+                    // path, never returned or inspected further, so any non-null placeholder
+                    // satisfies it — see PlcValueDecoder.DecodesFromSubSymbolsOnly's remarks.
+                    decoded = await PlcValueDecoder.DecodeAsync(SkippedReadPlaceholder, symbol, cts.Token)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    // Arrays need the raw value itself (Array.Length + element access); opaque
+                    // structs/function blocks with no sub-symbols pass their raw value through
+                    // unchanged. Both genuinely need this read.
+                    var read = await _client.ReadValueAsync(symbol, cts.Token).ConfigureAwait(false);
+                    if (read.Failed)
+                    {
+                        results[path] = AdsValueResult.Failure(
+                            new AdsErrorException(
+                                $"Read of symbol '{path}' on PLC '{PlcId}' failed: {read.ErrorCode}",
+                                read.ErrorCode),
+                            path);
+                        continue;
+                    }
+
+                    decoded = await PlcValueDecoder.DecodeAsync(read.Value, symbol, cts.Token).ConfigureAwait(false);
                 }
 
-                results[path] = AdsValueResult.Success(
-                    PlcValueDecoder.Decode(read.Value, symbol),
-                    path, symbol.TypeName, symbol.Category.ToString());
+                results[path] = AdsValueResult.Success(decoded, path, symbol.TypeName, symbol.Category.ToString());
             }
             catch (OperationCanceledException)
             {
@@ -333,11 +358,23 @@ internal sealed class AdsConnection : IManagedConnection
     }
 
     /// <summary>
+    /// Passed as the <c>value</c> argument to <see cref="PlcValueDecoder.DecodeAsync"/> when the
+    /// top-level read was skipped for a symbol where
+    /// <see cref="PlcValueDecoder.DecodesFromSubSymbolsOnly"/> is <see langword="true"/>: the
+    /// decoder only ever checks this argument for null before switching to reading its own
+    /// sub-symbols on that path, so any non-null instance works. Never inspected beyond that
+    /// null check.
+    /// </summary>
+    private static readonly object SkippedReadPlaceholder = new();
+
+    /// <summary>
     /// Classifies a resolved symbol as a container (struct, function block or array) whose value
     /// must be decoded individually via <see cref="PlcValueDecoder"/> to preserve its nested tree,
     /// as opposed to a scalar/string/enum that can share a sum command with other symbols.
+    /// Internal (rather than private) so the classification itself — independent of any ADS
+    /// round-trip — is directly unit-testable.
     /// </summary>
-    private static bool IsContainer(ISymbol symbol) =>
+    internal static bool IsContainer(ISymbol symbol) =>
         symbol.Category is DataTypeCategory.Struct or DataTypeCategory.FunctionBlock or DataTypeCategory.Array;
 
     /// <inheritdoc />
@@ -577,6 +614,17 @@ internal sealed class AdsConnection : IManagedConnection
             return loader;
         }
     }
+
+    /// <summary>
+    /// Test-only seam: overrides the lazily-created symbol loader with a caller-supplied one,
+    /// bypassing <see cref="GetSymbolLoader"/>'s <see cref="SymbolLoaderFactory.Create"/> call
+    /// (which requires a live, connected <see cref="AdsClient"/>). Internal — reachable only from
+    /// <c>Dahlke.TwinCAT.Ads.Tests</c> via <c>InternalsVisibleTo</c>. Production code never calls
+    /// this; it exists solely so batch-read partition tests can inject a fake
+    /// <see cref="IDynamicSymbolLoader"/> and exercise <see cref="ReadValuesAsync"/>'s container
+    /// branch without hardware.
+    /// </summary>
+    internal void SetSymbolLoaderForTesting(IDynamicSymbolLoader loader) => _symbolLoader = loader;
 
     private CancellationTokenSource CreateTimeoutCts(CancellationToken ct)
     {
