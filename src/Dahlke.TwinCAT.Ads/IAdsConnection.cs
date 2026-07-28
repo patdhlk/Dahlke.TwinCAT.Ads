@@ -479,15 +479,20 @@ public interface IAdsConnection
     /// <returns>A handle whose disposal removes the subscription permanently.</returns>
     /// <remarks>
     /// <para>
-    /// Durability and threading are identical to
+    /// <b>Durability is identical</b> to
     /// <see cref="SubscribeAsync(string,int,System.Action{string,object?},CancellationToken)"/>:
     /// subscriptions registered through the durable facade survive reconnects and are
     /// re-registered automatically (the returned <see cref="IDisposable"/> stays valid across a
-    /// reconnect, and disposing it removes the subscription for good), registration during an
-    /// outage follows the same wait-then-throw contract, callbacks arrive on a background thread
-    /// — never the caller's — and a throwing callback is logged at Warning without tearing down
-    /// the subscription. Prefer this overload when the consumer needs to report the value's PLC
-    /// type or the change's timestamp.
+    /// reconnect, and disposing it removes the subscription for good), and registration during an
+    /// outage follows the same wait-then-throw contract. Callbacks likewise arrive on a background
+    /// thread — never the caller's — and a throwing callback is logged at Warning without tearing
+    /// down the subscription. Prefer this overload when the consumer needs to report the value's
+    /// PLC type or the change's timestamp.
+    /// </para>
+    /// <para>
+    /// <b>Threading is identical for scalar symbols only</b> — see the container paragraph below,
+    /// which is the one place this overload's delivery behaviour deliberately differs from the
+    /// untyped one.
     /// </para>
     /// <para>
     /// <b><see cref="AdsNotification.TypeName"/></b> is the symbol's own PLC type, resolved once
@@ -509,6 +514,16 @@ public interface IAdsConnection
     /// Notifications for a container may therefore arrive slightly later — and, under a burst
     /// faster than the decode, out of order. Each notification still carries the timestamp of the
     /// change it describes.
+    /// </para>
+    /// <para>
+    /// <b>Disposal versus an in-flight container decode.</b> The untyped overload promises a
+    /// callback may fire concurrently with, but never after, disposal COMPLETES. That promise holds
+    /// here too, and disposing the handle additionally ABORTS an in-flight container decode — its
+    /// remaining member reads are cancelled and the notification is dropped rather than delivered
+    /// to a subscriber that has already torn its sink down. Note the promise is, for both
+    /// overloads, "never after disposal completes" and not "never concurrently with disposal":
+    /// detaching from the notification source does not wait for a callback that is already running,
+    /// so a subscriber whose sink cannot tolerate a concurrent late write must guard it itself.
     /// </para>
     /// </remarks>
     Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct);

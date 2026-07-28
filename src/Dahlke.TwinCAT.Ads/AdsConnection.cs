@@ -680,11 +680,24 @@ internal sealed class AdsConnection : IManagedConnection
     ///     notification thread, exactly like the untyped overload.
     ///   </description></item>
     ///   <item><description>
-    ///     Structs, function blocks and arrays hand the already-read raw value to
-    ///     <see cref="PlcValueDecoder.DecodeAsync"/> on the thread pool and deliver when it
-    ///     completes — see <see cref="DeliverDecodedContainerInBackground"/>.
+    ///     Structs, function blocks and arrays are decoded by
+    ///     <see cref="PlcValueDecoder.DecodeAsync"/> on the thread pool and delivered when it
+    ///     completes — see <see cref="DeliverDecodedContainerInBackground"/>. A struct or function
+    ///     block with sub-symbols skips the top-level re-read altogether (see
+    ///     <see cref="PlcValueDecoder.DecodesFromSubSymbolsOnly"/>), so the notification thread is
+    ///     never blocked on a full-struct round-trip whose value the decoder would discard —
+    ///     the same skip <see cref="ReadValueWithMetadataAsync"/> and <see cref="ReadValuesAsync"/>
+    ///     already perform. Arrays still need their raw value (length + elements) and so are read
+    ///     inline before the hand-off.
     ///   </description></item>
     /// </list>
+    /// <para>
+    /// <b>Disposal.</b> Disposing the returned handle cancels a token the offloaded decode
+    /// observes, so an in-flight container decode aborts its remaining member reads and does NOT
+    /// deliver. See <see cref="DeliverDecodedContainerInBackground"/> for the one residual window
+    /// this leaves — the same instruction-level window the inline path (and the untyped overload)
+    /// already has.
+    /// </para>
     /// </remarks>
     public async Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs,
         Action<AdsNotification> callback, CancellationToken ct)
@@ -695,6 +708,13 @@ internal sealed class AdsConnection : IManagedConnection
         var settings = new NotificationSettings(AdsTransMode.OnChange, cycleTimeMs, 0);
         var notificationHandle = await _client.AddDeviceNotificationAsync(
             symbolPath, symbol.ByteSize, settings, null, cts.Token).ConfigureAwait(false);
+
+        // Cancelled by the returned handle's disposal. This is what lets an offloaded container
+        // decode — which can outlive the notification handler by many member reads — learn that
+        // its subscriber is gone, abort its remaining reads, and skip delivery. Captured as a
+        // token (a struct) below so the delivery path never touches the source itself.
+        var disposal = new CancellationTokenSource();
+        var disposalToken = disposal.Token;
 
         var handler = new EventHandler<AdsNotificationEventArgs>((_, e) =>
         {
@@ -710,6 +730,18 @@ internal sealed class AdsConnection : IManagedConnection
                     return;
                 }
 
+                if (PlcValueDecoder.DecodesFromSubSymbolsOnly(sym))
+                {
+                    // A struct/function block with sub-symbols: the decoder reads every member
+                    // itself and only null-checks the value passed in, so a top-level read here
+                    // would block the ADS notification thread on a whole-struct round-trip and
+                    // then be discarded. Skip it and hand over the placeholder — the same skip
+                    // ReadValueWithMetadataAsync and ReadValuesAsync's container branch perform.
+                    DeliverDecodedContainerInBackground(
+                        symbolPath, SkippedReadPlaceholder, sym, typeName, e.TimeStamp, callback, disposalToken);
+                    return;
+                }
+
                 // The same per-notification re-read the untyped overload performs. Task 10
                 // replaces it by decoding e.Data directly.
                 var raw = vs.ReadValue();
@@ -720,13 +752,15 @@ internal sealed class AdsConnection : IManagedConnection
                     return;
                 }
 
-                // A container: decoding reads one member/element at a time, so it must not run on
+                // An array (or an opaque container): its raw value is genuinely needed, but
+                // rebuilding it reads one element at a time, so the decode itself must not run on
                 // the ADS notification thread.
-                DeliverDecodedContainerInBackground(symbolPath, raw, sym, typeName, e.TimeStamp, callback);
+                DeliverDecodedContainerInBackground(
+                    symbolPath, raw, sym, typeName, e.TimeStamp, callback, disposalToken);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Notification error for {Symbol}", symbolPath);
+                LogBestEffort(() => _logger.LogWarning(ex, "Notification error for {Symbol}", symbolPath));
             }
         });
 
@@ -734,9 +768,24 @@ internal sealed class AdsConnection : IManagedConnection
 
         return new NotificationSubscription(() =>
         {
+            // Signal first: an in-flight offloaded decode should stop reading members as early as
+            // possible, and must not deliver once we return from here.
+            disposal.Cancel();
+
             _client.AdsNotification -= handler;
             try { _client.DeleteDeviceNotification(notificationHandle.Handle); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Error deleting notification for {Symbol}", symbolPath); }
+            catch (Exception ex)
+            {
+                LogBestEffort(() => _logger.LogWarning(ex, "Error deleting notification for {Symbol}", symbolPath));
+            }
+
+            // `disposal` is deliberately NOT disposed. An offloaded decode may still hold a
+            // CancellationTokenSource linked to it, and disposing a source whose token others
+            // have linked from is exactly the shape that throws ObjectDisposedException on the
+            // delivery path. Once cancelled it holds no timer and — after its linked children
+            // dispose — no registrations, so leaving it to the GC costs one small object per
+            // disposed subscription and removes a race. NotificationSubscription guarantees this
+            // whole action runs at most once.
         });
     }
 
@@ -747,29 +796,88 @@ internal sealed class AdsConnection : IManagedConnection
     /// hand-off, NOT the time the decode finished.
     /// </summary>
     /// <remarks>
-    /// The work runs as a <see cref="Task"/> (never <c>async void</c>) whose body catches
-    /// everything and logs at Warning, matching the notification handler's own contract that a
-    /// failure must not tear down the subscription. Because nothing can escape that body the task
-    /// can never fault, so discarding it cannot leave an unobserved task exception behind. The
-    /// decode is bounded by the target's <see cref="PlcTargetOptions.TimeoutMs"/>, like every other
-    /// multi-read decode in this type.
+    /// <para>
+    /// <b>Disposal wins.</b> <paramref name="disposed"/> is cancelled when the subscription handle
+    /// is disposed. It is linked into the decode's own timeout source, so disposal aborts the
+    /// remaining member/element reads instead of letting them run to completion for a value nobody
+    /// will receive, and it is re-checked before <paramref name="callback"/> is invoked. This keeps
+    /// the untyped overload's promise that a callback never fires after disposal COMPLETES from
+    /// being weakened by a decode that can span many round-trips. One residual window remains — a
+    /// dispose landing between that check and the invocation — which is the same instruction-level
+    /// window the inline path already has, since detaching an event handler does not wait for a
+    /// handler already running.
+    /// </para>
+    /// <para>
+    /// <b>Never faults.</b> The work runs as a <see cref="Task"/> (never <c>async void</c>) whose
+    /// body catches everything, matching the notification handler's contract that a failure must
+    /// not tear down the subscription. Logging goes through <see cref="LogBestEffort"/>,
+    /// which cannot itself throw — a logging provider failing mid-teardown would otherwise fault
+    /// this discarded task and surface as an unobserved task exception. The decode is bounded by
+    /// the target's <see cref="PlcTargetOptions.TimeoutMs"/>, like every other multi-read decode
+    /// in this type.
+    /// </para>
+    /// <para>
+    /// Internal rather than private so the disposal and delivery behaviour above is directly
+    /// unit-testable without a connected <see cref="AdsClient"/> — the same reasoning as
+    /// <see cref="IsContainer"/> and <see cref="SetSymbolLoaderForTesting"/>. Production code
+    /// reaches it only from the notification handler in
+    /// <see cref="SubscribeAsync(string, int, Action{AdsNotification}, CancellationToken)"/>.
+    /// </para>
     /// </remarks>
-    private void DeliverDecodedContainerInBackground(string symbolPath, object? raw, ISymbol symbol,
-        string typeName, DateTimeOffset timestamp, Action<AdsNotification> callback)
+    internal void DeliverDecodedContainerInBackground(string symbolPath, object? raw, ISymbol symbol,
+        string typeName, DateTimeOffset timestamp, Action<AdsNotification> callback,
+        CancellationToken disposed)
     {
         _ = Task.Run(async () =>
         {
             try
             {
-                using var cts = CreateTimeoutCts(CancellationToken.None);
+                using var cts = CreateTimeoutCts(disposed);
                 var value = await PlcValueDecoder.DecodeAsync(raw, symbol, cts.Token).ConfigureAwait(false);
+
+                // The handle may have been disposed while we decoded. Delivering now would push a
+                // value into a subscriber that has already torn its sink down — and the failure
+                // would be swallowed and logged in here, invisible to that subscriber.
+                if (disposed.IsCancellationRequested)
+                    return;
+
                 callback(new AdsNotification(symbolPath, value, typeName, timestamp));
+            }
+            catch (OperationCanceledException) when (disposed.IsCancellationRequested)
+            {
+                // Disposed mid-decode: the expected outcome of the cancellation above, not a fault.
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Notification error for {Symbol}", symbolPath);
+                LogBestEffort(() => _logger.LogWarning(ex, "Notification error for {Symbol}", symbolPath));
             }
         });
+    }
+
+    /// <summary>
+    /// Runs <paramref name="log"/>, swallowing anything the logging provider itself throws.
+    /// </summary>
+    /// <remarks>
+    /// A provider can throw while the host is tearing down (disposed sinks, closed files). On the
+    /// offloaded notification-delivery path that exception would escape the <c>catch</c> that is
+    /// supposed to contain failures, fault a deliberately-discarded <see cref="Task"/>, and
+    /// resurface as an unobserved task exception — which on a host configured with
+    /// <c>ThrowUnobservedTaskExceptions</c> crashes the process for something this library cannot
+    /// control (the same hazard <see cref="LogIfAbandonedBrowseFails"/> exists to avoid).
+    /// Diagnostics on the notification path are strictly best-effort; delivery correctness is not.
+    /// The callback takes the log statement rather than a message template so each call site keeps
+    /// a compile-time-constant template.
+    /// </remarks>
+    private static void LogBestEffort(Action log)
+    {
+        try
+        {
+            log();
+        }
+        catch
+        {
+            // Nothing safe left to report it to.
+        }
     }
 
     /// <summary>

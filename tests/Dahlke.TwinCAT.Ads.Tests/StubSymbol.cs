@@ -111,13 +111,33 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
     // per this stub's strict policy (throw for anything not genuinely read), this now throws.
     public object ReadValue() => throw new NotSupportedException();
 
+    private readonly TaskCompletionSource _readCancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Completes when this member's read observes cancellation. Only meaningful for a
+    /// <see cref="ThatNeverCompletesRead"/> member, whose read ends no other way. Lets a test
+    /// assert POSITIVELY that a caller's token reached the member read — without it, "the read was
+    /// aborted" and "the read is still hanging" look identical from outside.
+    /// </summary>
+    public Task ReadCancelled => _readCancelled.Task;
+
     // PlcValueDecoder.ReadMemberAsync calls this for every struct member / array element; a
     // successful ResultReadValueAccess wraps the constructor-provided value (errorCode 0 ==
     // AdsErrorCode.NoError). This is the one genuinely-real member added for Task 4's fix round.
     public async Task<ResultReadValueAccess> ReadValueAsync(CancellationToken cancellationToken)
     {
         if (_neverCompletesRead)
-            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+        {
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _readCancelled.TrySetResult();
+                throw;
+            }
+        }
 
         if (_failRead)
             return new ResultReadValueAccess((int)AdsErrorCode.DeviceError, invokeId: 0);
