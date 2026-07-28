@@ -543,6 +543,15 @@ internal sealed class AdsConnection : IManagedConnection
         return results;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// A failed read throws rather than returning <c>result.State.AdsState</c>. Beckhoff's
+    /// <c>ReadStateAsync</c> uses the non-throwing Result pattern, so a failure yields a result
+    /// whose <c>State</c> is <c>default</c> — and <c>default(AdsState)</c> is
+    /// <see cref="AdsState.Invalid"/>, a perfectly ordinary-looking enum member. Returning it would
+    /// hand a consumer rendering PLC state a value indistinguishable from one the device actually
+    /// reported. This mirrors <see cref="GetDeviceInfoAsync"/>.
+    /// </remarks>
     public async Task<AdsState> GetAdsStateAsync(CancellationToken ct)
     {
         using var cts = CreateTimeoutCts(ct);
@@ -555,6 +564,12 @@ internal sealed class AdsConnection : IManagedConnection
         {
             throw CancellationDisambiguator.CreateException(ct, "AdsState", PlcId, _options.TimeoutMs);
         }
+
+        if (result.Failed)
+            throw new AdsErrorException(
+                $"Read of ADS state on PLC '{PlcId}' failed: {result.ErrorCode}",
+                result.ErrorCode);
+
         return result.State.AdsState;
     }
 
@@ -603,15 +618,41 @@ internal sealed class AdsConnection : IManagedConnection
 
     /// <summary>
     /// Checks whether the connection is actually functional (not just IsConnected).
-    /// Returns false if ReadState fails.
+    /// Returns <see langword="false"/> if ReadState fails.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A failed read is reported as "not alive", never thrown.</b> This is a liveness probe: the
+    /// pool's health loop treats <see langword="false"/> as "reconnect this target" and logs it as
+    /// such, so a failure has a defined, quiet home. Throwing would push the same condition into
+    /// the loop's generic connection-error handler, where it reads as an unexpected fault rather
+    /// than the routine outcome it is. It would also contradict this method's own summary.
+    /// </para>
+    /// <para>
+    /// Beckhoff's <c>ReadStateAsync</c> uses the non-throwing Result pattern, so a device that
+    /// answers with an error code completes the task normally — the <c>catch</c> alone never sees
+    /// it, and every unreachable-but-connected PLC was reported alive. <c>result.Failed</c> is
+    /// therefore checked explicitly.
+    /// </para>
+    /// </remarks>
     public async Task<bool> IsAliveAsync(CancellationToken ct)
     {
         if (!_client.IsConnected) return false;
         try
         {
             using var cts = CreateTimeoutCts(ct);
-            await _client.ReadStateAsync(cts.Token).ConfigureAwait(false);
+            var result = await _client.ReadStateAsync(cts.Token).ConfigureAwait(false);
+
+            if (result.Failed)
+            {
+                // The pool logs the health-check failure itself; this names the error code behind
+                // it, which is the part that would otherwise be lost.
+                _logger.LogDebug(
+                    "Liveness read on PLC {PlcId} reported {ErrorCode}; treating the connection as not alive.",
+                    PlcId, result.ErrorCode);
+                return false;
+            }
+
             return true;
         }
         catch
