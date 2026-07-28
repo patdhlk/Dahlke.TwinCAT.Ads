@@ -93,6 +93,46 @@ public class SumResultMapperTests
         Assert.Equal("MAIN.Sensor", results["MAIN.Sensor"].SymbolPath);
     }
 
+    [Fact]
+    public void MapReadResults_NoMetadataLookup_LeavesTypeNameAndCategoryNull()
+    {
+        string[] paths = ["A.x"];
+        object?[] values = [10];
+        AdsErrorCode[] subErrors = [AdsErrorCode.NoError];
+
+        var results = SumResultMapper.MapReadResults(paths, values, subErrors);
+
+        Assert.True(results["A.x"].Succeeded);
+        Assert.Null(results["A.x"].TypeName);
+        Assert.Null(results["A.x"].Category);
+    }
+
+    [Fact]
+    public void MapReadResults_WithMetadataLookup_PopulatesTypeNameAndCategory_OnSuccessOnly()
+    {
+        string[] paths = ["A.x", "A.y"];
+        object?[] values = [10, null];
+        AdsErrorCode[] subErrors = [AdsErrorCode.NoError, AdsErrorCode.DeviceSymbolNotFound];
+
+        (string?, string?) Lookup(string path) => path switch
+        {
+            "A.x" => ("INT", "Primitive"),
+            "A.y" => ("BOOL", "Primitive"),
+            _ => (null, null),
+        };
+
+        var results = SumResultMapper.MapReadResults(paths, values, subErrors, Lookup);
+
+        Assert.True(results["A.x"].Succeeded);
+        Assert.Equal("INT", results["A.x"].TypeName);
+        Assert.Equal("Primitive", results["A.x"].Category);
+
+        // A failed slot carries no metadata — the lookup is only consulted for successes.
+        Assert.False(results["A.y"].Succeeded);
+        Assert.Null(results["A.y"].TypeName);
+        Assert.Null(results["A.y"].Category);
+    }
+
     // ---- MapWriteResults --------------------------------------------------
 
     [Fact]

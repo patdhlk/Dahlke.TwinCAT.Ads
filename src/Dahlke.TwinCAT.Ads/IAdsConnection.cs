@@ -168,6 +168,46 @@ public interface IAdsConnection
     Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct);
 
     /// <summary>
+    /// Reads a PLC symbol and returns its decoded value together with the symbol's PLC type
+    /// metadata.
+    /// </summary>
+    /// <param name="symbolPath">The fully-qualified PLC symbol path.</param>
+    /// <param name="ct">Cancels the operation; per-target timeout applies as elsewhere.</param>
+    /// <returns>
+    /// A successful <see cref="AdsValueResult"/> whose <see cref="AdsValueResult.Value"/> is a
+    /// neutral tree — a boxed primitive for scalars, an
+    /// <c>IReadOnlyDictionary&lt;string, object?&gt;</c> for structs, function blocks and unions,
+    /// and an <c>object?[]</c> for arrays — with <see cref="AdsValueResult.TypeName"/> and
+    /// <see cref="AdsValueResult.Category"/> populated.
+    /// </returns>
+    /// <exception cref="AdsErrorException">
+    /// Thrown when the symbol is not found (<see cref="AdsErrorCode.DeviceSymbolNotFound"/>) or
+    /// the read reports a non-success error code. Unlike the batch
+    /// <see cref="ReadValuesAsync"/>, a single failed read throws rather than returning a
+    /// failed result.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when <see cref="PlcTargetOptions.TimeoutMs"/> elapses first.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Prefer this over <see cref="ReadValueAsync(string, CancellationToken)"/> when the caller
+    /// needs to report the PLC type alongside the value, or needs struct and array values as a
+    /// serializer-friendly tree rather than a TwinCAT dynamic object.
+    /// </para>
+    /// <para>
+    /// <b>Four categories are NOT decoded into a neutral tree</b> and reach the caller as whatever
+    /// Beckhoff's value factory produced: <c>Alias</c> (when it aliases a struct or array),
+    /// <c>Program</c>, <c>Pointer</c> and <c>Reference</c>. A caller serialising values generically
+    /// should treat a result whose <see cref="AdsValueResult.Category"/> is one of those as opaque
+    /// rather than assuming a primitive. Every other category — primitives, strings, enums,
+    /// sub-ranges, structs, function blocks, unions and arrays — decodes as described above.
+    /// </para>
+    /// </remarks>
+    Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct);
+
+    /// <summary>
     /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
     /// </summary>
     /// <typeparam name="T">The compile-time type of the value to write.</typeparam>
@@ -253,15 +293,26 @@ public interface IAdsConnection
     /// still gets its own result. Inspect each entry's <see cref="AdsValueResult.Succeeded"/>.
     /// </para>
     /// <para>
-    /// <b>One round-trip (sum command).</b> All resolvable symbols are read in a single ADS sum
-    /// command — one round-trip for the whole batch, not one read per symbol. Duplicate paths are
-    /// de-duplicated before the command is issued.
+    /// <b>Partitioned: one sum command for scalars, an individual read per container.</b> Resolved
+    /// symbols are split by category. Scalars, strings and enums share a SINGLE ADS sum command —
+    /// one round-trip for that whole subset. Structs, function blocks and arrays are read and
+    /// decoded individually so their full nested tree survives, which a bare sum command would
+    /// flatten to an opaque value; decoding one costs a further read PER MEMBER (or per element).
+    /// So the batch is not one round-trip: budget it as one round-trip for all scalars plus the
+    /// full member/element cost of every container in the request. Duplicate paths are
+    /// de-duplicated before any of this.
+    /// </para>
+    /// <para>
+    /// <b>Type metadata.</b> Every successful result also carries the symbol's
+    /// <see cref="AdsValueResult.TypeName"/> and <see cref="AdsValueResult.Category"/>, on both the
+    /// scalar and the container path — the same metadata
+    /// <see cref="ReadValueWithMetadataAsync"/> reports for a single symbol.
     /// </para>
     /// <para>
     /// <b>Symbol not found.</b> A symbol that cannot be resolved on the PLC is recorded as a
     /// per-symbol <see cref="AdsValueResult.Failure(Exception, string?)"/> carrying an <see cref="AdsErrorException"/>
-    /// with <see cref="AdsErrorCode.DeviceSymbolNotFound"/>, before the sum command, and is excluded
-    /// from it.
+    /// with <see cref="AdsErrorCode.DeviceSymbolNotFound"/> before either read path runs, and is
+    /// excluded from both. Resolution happens exactly once per path.
     /// </para>
     /// <para>
     /// <b>Whole-batch timeout/cancellation.</b> Timeout and cancellation apply to the entire batch
@@ -338,6 +389,34 @@ public interface IAdsConnection
     /// </exception>
     Task<AdsState> GetAdsStateAsync(CancellationToken ct);
 
+    /// <summary>Reads the target device's name and version.</summary>
+    /// <param name="ct">Cancels the operation; <see cref="PlcTargetOptions.TimeoutMs"/> applies.</param>
+    /// <returns>The device's <see cref="AdsDeviceInfo"/>.</returns>
+    /// <exception cref="AdsErrorException">Thrown when the read reports a non-success error code.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">Thrown when the per-target timeout elapses first.</exception>
+    Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Issues an ADS WriteControl request, asking the device to transition to
+    /// <paramref name="state"/>.
+    /// </summary>
+    /// <param name="state">The requested ADS state, for example <see cref="AdsState.Run"/> or <see cref="AdsState.Stop"/>.</param>
+    /// <param name="deviceState">
+    /// The device-specific state word accompanying the request. Pass <c>0</c> unless the target
+    /// documents a meaning for it.
+    /// </param>
+    /// <param name="ct">Cancels the operation; <see cref="PlcTargetOptions.TimeoutMs"/> applies.</param>
+    /// <exception cref="AdsErrorException">Thrown when the device rejects the transition.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">Thrown when the per-target timeout elapses first.</exception>
+    /// <remarks>
+    /// The request is asynchronous at the protocol level: a completed call means the device
+    /// ACCEPTED the request, not that it has finished transitioning. Poll
+    /// <see cref="GetAdsStateAsync"/> to observe the settled state.
+    /// </remarks>
+    Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct);
+
     /// <summary>
     /// Subscribes to value-change notifications for <paramref name="symbolPath"/>,
     /// invoking <paramref name="callback"/> with the symbol path and latest value
@@ -409,4 +488,192 @@ public interface IAdsConnection
     /// <see langword="null"/>.
     /// </remarks>
     Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct);
+
+    /// <summary>
+    /// Subscribes to value-change notifications for <paramref name="symbolPath"/>, delivering the
+    /// symbol path, value, PLC type name and PLC-reported timestamp on each change.
+    /// </summary>
+    /// <param name="symbolPath">The fully-qualified PLC symbol to watch.</param>
+    /// <param name="cycleTimeMs">Minimum interval, in milliseconds, between notifications.</param>
+    /// <param name="callback">Invoked on each notification.</param>
+    /// <param name="ct">Cancels the initial registration, not the subscription itself.</param>
+    /// <returns>A handle whose disposal removes the subscription permanently.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Durability is identical</b> to
+    /// <see cref="SubscribeAsync(string,int,System.Action{string,object?},CancellationToken)"/>:
+    /// subscriptions registered through the durable facade survive reconnects and are
+    /// re-registered automatically (the returned <see cref="IDisposable"/> stays valid across a
+    /// reconnect, and disposing it removes the subscription for good), and registration during an
+    /// outage follows the same wait-then-throw contract. Callbacks likewise arrive on a background
+    /// thread — never the caller's — and a throwing callback is logged at Warning without tearing
+    /// down the subscription. Prefer this overload when the consumer needs to report the value's
+    /// PLC type or the change's timestamp.
+    /// </para>
+    /// <para>
+    /// <b>Threading is identical for scalar symbols only</b> — see the container paragraph below,
+    /// which is the one place this overload's delivery behaviour deliberately differs from the
+    /// untyped one.
+    /// </para>
+    /// <para>
+    /// <b><see cref="AdsNotification.TypeName"/></b> is the symbol's own PLC type, resolved once
+    /// when the subscription is registered — the same name a
+    /// <see cref="ReadValueWithMetadataAsync"/> of that symbol reports. A simulated connection has
+    /// no declared PLC types and infers it from the written value's runtime type instead.
+    /// </para>
+    /// <para>
+    /// <b><see cref="AdsNotification.Timestamp"/></b> is the time the ADS notification itself
+    /// carries — recorded by the PLC, not measured on arrival, so it is unaffected by delivery
+    /// latency. A simulated connection has no PLC clock and reports the moment of the simulated
+    /// write.
+    /// </para>
+    /// <para>
+    /// <b>Most container symbols deliver slightly later.</b> Scalars, strings, enums AND opaque
+    /// structs or function blocks (those exposing no sub-symbols) decode with no ADS I/O and fire
+    /// directly from the notification thread. Decoding a struct or function block WITH sub-symbols,
+    /// or an array, performs one ADS read per member/element, which cannot run on that thread, so
+    /// for those the decode is moved onto the thread pool and the callback fires when it completes.
+    /// Notifications for such a symbol may therefore arrive slightly later — and, under a burst
+    /// faster than the decode, out of order.
+    /// </para>
+    /// <para>
+    /// <b>For those symbols the value and the timestamp do not describe the same instant.</b>
+    /// <see cref="AdsNotification.Timestamp"/> is the PLC's time for the change that triggered the
+    /// notification, but the member/element reads that build the value run later, on the thread
+    /// pool, and read whatever the PLC holds AT THAT MOMENT. Under a burst the pair is therefore
+    /// incoherent: the value may reflect a change newer than the timestamp beside it, and two
+    /// notifications can carry values from the same underlying state under two different
+    /// timestamps. Treat a container notification as "this symbol changed at T, here is a recent
+    /// value" — not as a snapshot taken at T. Consumers republishing the pair verbatim (an SSE or
+    /// websocket feed, say) are passing that incoherence on to their own subscribers. A scalar has
+    /// no such gap: its value is decoded from the notification's own payload, so value and
+    /// timestamp genuinely describe the same instant.
+    /// </para>
+    /// <para>
+    /// <b>Disposal versus an in-flight container decode.</b> The untyped overload promises a
+    /// callback may fire concurrently with, but never after, disposal COMPLETES. That promise holds
+    /// here too, and disposing the handle additionally ABORTS an in-flight container decode — its
+    /// remaining member reads are cancelled and the notification is dropped rather than delivered
+    /// to a subscriber that has already torn its sink down. Note the promise is, for both
+    /// overloads, "never after disposal completes" and not "never concurrently with disposal":
+    /// detaching from the notification source does not wait for a callback that is already running,
+    /// so a subscriber whose sink cannot tolerate a concurrent late write must guard it itself.
+    /// </para>
+    /// </remarks>
+    Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct);
+
+    /// <summary>
+    /// Enumerates the symbols directly under <paramref name="parentPath"/>, each with its ENTIRE
+    /// nested subtree populated. Equivalent to
+    /// <see cref="GetSymbolsAsync(string?, bool, CancellationToken)"/> with
+    /// <c>includeChildren: true</c>.
+    /// </summary>
+    /// <param name="parentPath">
+    /// The container to enumerate, or <see langword="null"/>/empty for the root symbols.
+    /// </param>
+    /// <param name="ct">Cancels the wait for the browse (see remarks) — it cannot interrupt the browse itself.</param>
+    /// <returns>
+    /// The immediate symbols under <paramref name="parentPath"/>, each carrying its full recursive
+    /// subtree in <see cref="AdsSymbolInfo.Children"/>.
+    /// </returns>
+    /// <exception cref="AdsErrorException">
+    /// Thrown with <see cref="AdsErrorCode.DeviceSymbolNotFound"/> when
+    /// <paramref name="parentPath"/> does not resolve.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> elapses first — note this
+    /// is the browse timeout, NOT <see cref="PlcTargetOptions.TimeoutMs"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>This is NOT a one-level browse.</b> Children are populated recursively all the way down,
+    /// so a call with a <see langword="null"/> parent projects EVERY symbol on the PLC into
+    /// <see cref="AdsSymbolInfo"/> objects — on a large program, tens of thousands of them. For
+    /// interactive drill-down, pass <c>includeChildren: false</c> to
+    /// <see cref="GetSymbolsAsync(string?, bool, CancellationToken)"/> and call again per level;
+    /// that is the cheap shape this overload is not.
+    /// </para>
+    /// <para>
+    /// Browsing uploads the PLC's symbol table, a blocking call with no cancellable overload. The
+    /// implementation runs it on the thread pool and races it against
+    /// <paramref name="ct"/>/<see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> so the CALLER
+    /// stops waiting either way; a browse that loses that race is abandoned — it keeps running to
+    /// completion on its thread-pool thread, but its result is discarded. The browse itself is
+    /// never interrupted, only the caller's wait for it. Note the abandoned browse keeps
+    /// allocating the projection above on a thread-pool thread after the caller has given up.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct);
+
+    /// <summary>
+    /// Enumerates the symbols directly under <paramref name="parentPath"/>, choosing whether each
+    /// one carries its nested subtree.
+    /// </summary>
+    /// <param name="parentPath">
+    /// The container to enumerate, or <see langword="null"/>/empty for the root symbols.
+    /// </param>
+    /// <param name="includeChildren">
+    /// When <see langword="true"/> each returned symbol carries its FULL recursive subtree in
+    /// <see cref="AdsSymbolInfo.Children"/>. When <see langword="false"/> every returned symbol has
+    /// a <see langword="null"/> <see cref="AdsSymbolInfo.Children"/> — one level only, which is what
+    /// interactive drill-down wants and what keeps a root browse from projecting the whole PLC.
+    /// The flag has the same meaning as on <see cref="SearchSymbolsAsync"/>.
+    /// </param>
+    /// <param name="ct">Cancels the wait for the browse — it cannot interrupt the browse itself.</param>
+    /// <returns>The immediate symbols under <paramref name="parentPath"/>.</returns>
+    /// <exception cref="AdsErrorException">
+    /// Thrown with <see cref="AdsErrorCode.DeviceSymbolNotFound"/> when
+    /// <paramref name="parentPath"/> does not resolve.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> elapses first.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b><paramref name="includeChildren"/> bounds the projection, not the upload.</b> The symbol
+    /// table upload is the same either way — it is what
+    /// <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> exists to bound. What the flag controls
+    /// is how much of the resulting tree is walked and turned into
+    /// <see cref="AdsSymbolInfo"/> objects, which for a root browse of a large program is the
+    /// difference between one level and every symbol on the PLC.
+    /// </para>
+    /// <para>
+    /// Same thread-pool/timeout-race and abandon-on-timeout semantics as
+    /// <see cref="GetSymbolsAsync(string?, CancellationToken)"/>; see its remarks.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct);
+
+    /// <summary>
+    /// Searches the whole symbol tree for symbols whose instance path contains
+    /// <paramref name="pattern"/>, compared case-insensitively.
+    /// </summary>
+    /// <param name="pattern">Substring to match against each symbol's instance path.</param>
+    /// <param name="includeChildren">
+    /// When <see langword="true"/> each match carries its nested children; when
+    /// <see langword="false"/> every match has a <see langword="null"/>
+    /// <see cref="AdsSymbolInfo.Children"/>, which keeps large result sets flat and cheap.
+    /// </param>
+    /// <param name="ct">Cancels the wait for the search (see remarks) — it cannot interrupt the search itself.</param>
+    /// <returns>All matching symbols, or an empty list when nothing matches.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> elapses first.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// This walks the ENTIRE symbol tree, so its cost is proportional to the PLC's total symbol
+    /// count — prefer
+    /// <see cref="GetSymbolsAsync(string?, bool, CancellationToken)"/> with
+    /// <c>includeChildren: false</c> for interactive drill-down of one level at a time.
+    /// </para>
+    /// <para>
+    /// Same thread-pool/timeout-race semantics as
+    /// <see cref="GetSymbolsAsync(string?, CancellationToken)"/>: the underlying
+    /// walk cannot itself be interrupted, only the caller's wait for it (see its remarks).
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct);
 }

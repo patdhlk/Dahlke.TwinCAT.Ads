@@ -182,6 +182,35 @@ public abstract class AdsConnectionContractTests
         Assert.Equal(2, results["MAIN.b"].Value);
     }
 
+    /// <summary>
+    /// A real connection populates <see cref="AdsValueResult.TypeName"/> and
+    /// <see cref="AdsValueResult.Category"/> on every successful batch result. Both simulated
+    /// implementations left them null, so a consumer developing against simulation saw nulls and
+    /// either coded around a case that does not exist on hardware or shipped a bug that only
+    /// appears once it meets a real PLC. The inferred names are indicative rather than
+    /// authoritative — the point is that the FIELDS are populated, matching the single-symbol
+    /// metadata read, which has always inferred them here.
+    /// </summary>
+    [Fact]
+    public async Task BatchRead_CarriesTypeMetadata_LikeTheSingleSymbolMetadataRead()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.a", (short)1);
+        await h.WriteRawAsync("MAIN.b", "hello");
+
+        var results = await h.Connection.ReadValuesAsync(["MAIN.a", "MAIN.b"], CancellationToken.None);
+
+        Assert.NotNull(results["MAIN.a"].TypeName);
+        Assert.NotNull(results["MAIN.a"].Category);
+        Assert.NotNull(results["MAIN.b"].TypeName);
+        Assert.NotNull(results["MAIN.b"].Category);
+
+        // ...and agrees with what a single-symbol metadata read of the same symbol reports.
+        var single = await h.Connection.ReadValueWithMetadataAsync("MAIN.a", CancellationToken.None);
+        Assert.Equal(single.TypeName, results["MAIN.a"].TypeName);
+        Assert.Equal(single.Category, results["MAIN.a"].Category);
+    }
+
     [Fact]
     public async Task BatchRead_MissingSymbol_YieldsSuccessNull()
     {
@@ -227,6 +256,48 @@ public abstract class AdsConnectionContractTests
         Assert.IsType<ArgumentNullException>(results["MAIN.bad"].Error);
         // The null was rejected and NOT stored.
         Assert.Null(await h.Connection.ReadValueAsync("MAIN.bad", CancellationToken.None));
+    }
+
+    // =====================================================================
+    // Metadata read.
+    // =====================================================================
+
+    [Fact]
+    public async Task ReadValueWithMetadataAsync_ReturnsValueAndSucceeds()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+
+        var result = await h.Connection.ReadValueWithMetadataAsync("MAIN.Speed", CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1500, result.Value);
+        Assert.Equal("MAIN.Speed", result.SymbolPath);
+    }
+
+    [Fact]
+    public async Task ReadValueWithMetadataAsync_ReportsANonNullTypeName()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+
+        var result = await h.Connection.ReadValueWithMetadataAsync("MAIN.Speed", CancellationToken.None);
+
+        Assert.False(string.IsNullOrEmpty(result.TypeName));
+    }
+
+    [Fact]
+    public async Task ReadValueWithMetadataAsync_ThrowsForAnUnknownSymbol()
+    {
+        // Deliberately diverges from the untyped ReadValueAsync (which returns null for a
+        // never-written path in both harnesses) — matching a real connection and the simulated
+        // *typed* ReadValueAsync<T>, both of which throw for an unknown symbol.
+        await using var h = await CreateHarnessAsync();
+
+        var ex = await Assert.ThrowsAsync<AdsErrorException>(
+            () => h.Connection.ReadValueWithMetadataAsync("MAIN.NoSuchSymbol", CancellationToken.None));
+
+        Assert.Equal(AdsErrorCode.DeviceSymbolNotFound, ex.ErrorCode);
     }
 
     // =====================================================================
@@ -337,6 +408,52 @@ public abstract class AdsConnectionContractTests
     }
 
     [Fact]
+    public async Task Subscribe_Notification_DeliversPath_Value_TypeName_And_Timestamp()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1000);
+
+        var received = new TaskCompletionSource<AdsNotification>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var sub = await h.Connection.SubscribeAsync(
+            "MAIN.Speed", 100, n => received.TrySetResult(n), CancellationToken.None);
+
+        await h.WriteRawAsync("MAIN.Speed", 2000);
+
+        var notification = await received.Task.WaitAsync(Timeout);
+
+        Assert.Equal("MAIN.Speed", notification.SymbolPath);
+        Assert.Equal(2000, notification.Value);
+
+        // The notification reports the SAME PLC type name a metadata read of the same symbol
+        // reports — both come from the symbol's own type, so this holds for every
+        // implementation without hard-coding one implementation's inference table here.
+        var metadata = await h.Connection.ReadValueWithMetadataAsync("MAIN.Speed", CancellationToken.None);
+        Assert.False(string.IsNullOrEmpty(notification.TypeName));
+        Assert.Equal(metadata.TypeName, notification.TypeName);
+
+        Assert.NotEqual(default, notification.Timestamp);
+    }
+
+    [Fact]
+    public async Task Subscribe_Notification_Dispose_StopsDelivery()
+    {
+        await using var h = await CreateHarnessAsync();
+
+        var count = 0;
+        var sub = await h.Connection.SubscribeAsync(
+            "MAIN.x", 100, _ => Interlocked.Increment(ref count), CancellationToken.None);
+
+        await h.WriteRawAsync("MAIN.x", 1);
+        await WaitUntil(() => Volatile.Read(ref count) == 1);
+
+        sub.Dispose();
+
+        await h.WriteRawAsync("MAIN.x", 2);
+        await Task.Delay(SettleDelay);
+        Assert.Equal(1, Volatile.Read(ref count));
+    }
+
+    [Fact]
     public async Task Subscribe_Typed_MismatchedNotification_Dropped_OthersUnaffected()
     {
         await using var h = await CreateHarnessAsync();
@@ -378,6 +495,36 @@ public abstract class AdsConnectionContractTests
         await using var h = await CreateHarnessAsync();
         var connected = h.Connection.IsConnected;
         Assert.True(connected);
+    }
+
+    // =====================================================================
+    // Device info.
+    // =====================================================================
+
+    [Fact]
+    public async Task GetDeviceInfoAsync_returns_a_non_empty_name_and_version()
+    {
+        await using var h = await CreateHarnessAsync();
+
+        var info = await h.Connection.GetDeviceInfoAsync(CancellationToken.None);
+
+        Assert.False(string.IsNullOrWhiteSpace(info.Name));
+        Assert.False(string.IsNullOrWhiteSpace(info.Version));
+    }
+
+    // =====================================================================
+    // WriteControl.
+    // =====================================================================
+
+    [Fact]
+    public async Task WriteControlAsync_then_GetAdsStateAsync_reflects_the_requested_state()
+    {
+        await using var h = await CreateHarnessAsync();
+
+        await h.Connection.WriteControlAsync(AdsState.Stop, deviceState: 0, CancellationToken.None);
+        var state = await h.Connection.GetAdsStateAsync(CancellationToken.None);
+
+        Assert.Equal(AdsState.Stop, state);
     }
 
     // =====================================================================
@@ -433,6 +580,211 @@ public abstract class AdsConnectionContractTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => h.Connection.SubscribeAsync("MAIN.x", 100, (_, _) => { }, cts.Token));
+    }
+
+    /// <summary>
+    /// The section heading says "every operation", but the cases above cover only the members that
+    /// existed before the capability work — read, write, batch and the untyped subscribe. Every
+    /// member added since must honour the token too, and nothing was checking that: the omission
+    /// hid a real divergence, with one implementation observing its token on
+    /// <c>GetAdsStateAsync</c> and the other ignoring it entirely.
+    /// </summary>
+    [Fact]
+    public async Task PreCancelledToken_MetadataRead_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.x", 1);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.ReadValueWithMetadataAsync("MAIN.x", cts.Token));
+    }
+
+    [Fact]
+    public async Task PreCancelledToken_AdsState_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.GetAdsStateAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task PreCancelledToken_DeviceInfo_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.GetDeviceInfoAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task PreCancelledToken_WriteControl_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.WriteControlAsync(AdsState.Stop, deviceState: 0, cts.Token));
+    }
+
+    [Fact]
+    public async Task PreCancelledToken_SymbolBrowsing_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.x", 1);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.GetSymbolsAsync(null, cts.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.GetSymbolsAsync(null, includeChildren: false, cts.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.SearchSymbolsAsync("MAIN", includeChildren: false, cts.Token));
+    }
+
+    [Fact]
+    public async Task PreCancelledToken_SubscribeNotification_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.SubscribeAsync("MAIN.x", 100, (AdsNotification _) => { }, cts.Token));
+    }
+
+    // =====================================================================
+    // Symbol browsing.
+    // =====================================================================
+
+    [Fact]
+    public async Task GetSymbolsAsync_with_null_parent_returns_root_symbols()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+        await h.WriteRawAsync("MAIN.Running", true);
+
+        var symbols = await h.Connection.GetSymbolsAsync(null, CancellationToken.None);
+
+        Assert.NotEmpty(symbols);
+    }
+
+    /// <summary>
+    /// Both halves of the <c>includeChildren</c> flag, pinned across every implementation. The
+    /// two-argument overload is documented as equivalent to <c>includeChildren: true</c>; passing
+    /// <see langword="false"/> must return the same nodes with a <see langword="null"/>
+    /// <see cref="AdsSymbolInfo.Children"/> — never an empty list, and never a different set of
+    /// nodes.
+    /// </summary>
+    [Fact]
+    public async Task GetSymbolsAsync_includeChildren_controls_only_the_subtree_not_the_nodes()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Motor.Speed", 1500);
+
+        var withChildren = await h.Connection.GetSymbolsAsync(null, includeChildren: true, CancellationToken.None);
+        var withoutChildren = await h.Connection.GetSymbolsAsync(null, includeChildren: false, CancellationToken.None);
+        var byDefault = await h.Connection.GetSymbolsAsync(null, CancellationToken.None);
+
+        // Same nodes at this level regardless of the flag.
+        Assert.Equal(
+            withChildren.Select(s => s.InstancePath),
+            withoutChildren.Select(s => s.InstancePath));
+        Assert.Equal(
+            withChildren.Select(s => s.InstancePath),
+            byDefault.Select(s => s.InstancePath));
+
+        // The flag decides only whether the subtree comes with them.
+        Assert.NotNull(Assert.Single(withChildren).Children);
+        Assert.Null(Assert.Single(withoutChildren).Children);
+
+        // The two-argument overload is the includeChildren: true shorthand.
+        Assert.NotNull(Assert.Single(byDefault).Children);
+    }
+
+    [Fact]
+    public async Task GetSymbolsAsync_throws_for_an_unknown_parent()
+    {
+        await using var h = await CreateHarnessAsync();
+
+        var ex = await Assert.ThrowsAsync<AdsErrorException>(
+            () => h.Connection.GetSymbolsAsync("MAIN.NoSuchParent", CancellationToken.None));
+
+        Assert.Equal(AdsErrorCode.DeviceSymbolNotFound, ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GetSymbolsAsync_DerivesContainerChain_FromDottedPath_CaseInsensitively()
+    {
+        // Pins the plan's container-derivation contract end to end — MAIN.Motor.Speed implies a
+        // MAIN container holding a MAIN.Motor container holding the leaf — AND guards a real bug
+        // found in review: parent lookups must resolve case-insensitively (real ADS symbol paths
+        // are case-insensitive) while still reporting each InstancePath in the AS-SEEDED casing,
+        // not whatever casing the caller happened to type.
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Motor.Speed", 1500);
+
+        var rootSymbols = await h.Connection.GetSymbolsAsync(null, CancellationToken.None);
+        var main = Assert.Single(rootSymbols, s => s.InstancePath.Equals("MAIN", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("MAIN", main.InstancePath);
+        Assert.Equal("STRUCT", main.TypeName);
+        Assert.Equal("Struct", main.Category);
+        Assert.Equal(0, main.ByteSize);
+
+        // Mis-cased parent lookup for a synthetic container that is never itself a stored key.
+        var motorSymbols = await h.Connection.GetSymbolsAsync("main", CancellationToken.None);
+        var motor = Assert.Single(motorSymbols);
+        Assert.Equal("MAIN.Motor", motor.InstancePath); // stored casing, not the caller's "main"
+        Assert.Equal("STRUCT", motor.TypeName);
+        Assert.Equal("Struct", motor.Category);
+
+        // Mis-cased multi-segment parent lookup down to the leaf.
+        var leafSymbols = await h.Connection.GetSymbolsAsync("MAIN.MOTOR", CancellationToken.None);
+        var leaf = Assert.Single(leafSymbols);
+        Assert.Equal("MAIN.Motor.Speed", leaf.InstancePath); // stored casing throughout
+        Assert.Equal("Primitive", leaf.Category);
+        Assert.NotEqual("STRUCT", leaf.TypeName); // a real leaf, not mis-detected as a container
+    }
+
+    [Fact]
+    public async Task SearchSymbolsAsync_matches_case_insensitively_on_instance_path()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+
+        var matches = await h.Connection.SearchSymbolsAsync("speed", includeChildren: false, CancellationToken.None);
+
+        Assert.Contains(matches, s => s.InstancePath.Contains("Speed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task SearchSymbolsAsync_returns_empty_when_nothing_matches()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+
+        var matches = await h.Connection.SearchSymbolsAsync("zzz-no-match", includeChildren: false, CancellationToken.None);
+
+        Assert.Empty(matches);
+    }
+
+    [Fact]
+    public async Task SearchSymbolsAsync_omits_children_when_includeChildren_is_false()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+
+        var matches = await h.Connection.SearchSymbolsAsync("MAIN", includeChildren: false, CancellationToken.None);
+
+        Assert.All(matches, s => Assert.Null(s.Children));
     }
 
     // =====================================================================

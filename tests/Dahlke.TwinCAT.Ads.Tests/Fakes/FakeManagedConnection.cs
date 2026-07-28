@@ -190,6 +190,9 @@ internal sealed class FakeManagedConnection : IManagedConnection
     public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
         => throw new NotSupportedException();
 
+    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+        => throw new NotSupportedException();
+
     public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
         => throw new NotSupportedException();
 
@@ -203,6 +206,21 @@ internal sealed class FakeManagedConnection : IManagedConnection
         => throw new NotSupportedException();
 
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
+        => throw new NotSupportedException();
+
+    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+        => throw new NotSupportedException();
+
+    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
         => throw new NotSupportedException();
 
     // ---- Subscription support (durable-subscription tests) ---------------
@@ -297,6 +315,32 @@ internal sealed class FakeManagedConnection : IManagedConnection
         _subscriptions.Enqueue(record);
         return record.Disposable;
     }
+
+    /// <summary>
+    /// Adapts the <see cref="AdsNotification"/> callback into the untyped shape and delegates to
+    /// the untyped <see cref="SubscribeAsync"/>, so a notification-shaped durable subscription is
+    /// recorded in <see cref="Subscriptions"/> exactly like an untyped one and
+    /// <see cref="SubscriptionRecord.FireNotification"/> drives it. Genuinely implemented (not a
+    /// throwing stub) because the facade's durable-subscription tests re-register a
+    /// notification-shaped subscription against this double across a reconnect.
+    /// </summary>
+    /// <remarks>
+    /// The type name is inferred from the fired value via
+    /// <see cref="SimulatedAdsConnection.InferPlcType"/> and the timestamp is the moment of the
+    /// fire: this double has no PLC, and the facade tests assert re-registration and delivery, not
+    /// metadata fidelity (the shared contract suite pins that against
+    /// <see cref="InMemoryManagedConnection"/>).
+    /// </remarks>
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+        => SubscribeAsync(
+            symbolPath,
+            cycleTimeMs,
+            (path, value) =>
+            {
+                var (typeName, _) = SimulatedAdsConnection.InferPlcType(value);
+                callback(new AdsNotification(path, value, typeName, DateTimeOffset.UtcNow));
+            },
+            ct);
 
     /// <summary>
     /// The typed overload is never exercised against the underlying connection: the

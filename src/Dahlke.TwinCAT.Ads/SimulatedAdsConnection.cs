@@ -10,7 +10,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Subscriptions.</b> Callbacks registered via <see cref="SubscribeAsync"/> fire
+/// <b>Subscriptions.</b> Callbacks registered via <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/> fire
 /// synchronously on the writer's thread, immediately after the value is stored, whenever the
 /// written value differs from the previously stored value (<c>!Equals(oldValue, newValue)</c>,
 /// using <see cref="object.Equals(object, object)"/>).
@@ -49,7 +49,12 @@ namespace Dahlke.TwinCAT.Ads;
 public sealed class SimulatedAdsConnection : IManagedConnection
 {
     private readonly ILogger<SimulatedAdsConnection> _logger;
-    private readonly ConcurrentDictionary<string, object?> _symbols = new();
+    private readonly ConcurrentDictionary<string, object?> _symbols = new(StringComparer.OrdinalIgnoreCase);
+
+    // Written by WriteControlAsync, read by GetAdsStateAsync; volatile gives lock-free
+    // cross-thread visibility for this simple flag-like field (same rationale as the
+    // facade's _stopped/_state fields).
+    private volatile AdsState _adsState = AdsState.Run;
 
     // Per-path subscriber list. Each entry is a list of (unique id → callback) pairs.
     // ConcurrentDictionary provides thread-safe path lookup; the inner lock guards
@@ -196,6 +201,66 @@ public sealed class SimulatedAdsConnection : IManagedConnection
         return Task.FromResult(value);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The simulated store holds CLR values with no PLC type information, so
+    /// <see cref="AdsValueResult.TypeName"/> and <see cref="AdsValueResult.Category"/> are
+    /// inferred from the stored value's runtime type via <see cref="InferPlcType"/>. They are
+    /// therefore indicative, not authoritative — a real connection reports the PLC's own
+    /// declared type.
+    /// <para>
+    /// <b>Divergence from <see cref="ReadValueAsync(string, CancellationToken)"/>.</b> The
+    /// untyped overload returns <see langword="null"/> for a missing symbol. This method throws
+    /// <see cref="AdsErrorException"/> with <see cref="AdsErrorCode.DeviceSymbolNotFound"/>
+    /// instead, matching a real connection and matching the simulated typed
+    /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>, which throws for the same
+    /// reason (a missing symbol has no metadata to report).
+    /// </para>
+    /// </remarks>
+    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (!_symbols.TryGetValue(symbolPath, out var value))
+            throw new AdsErrorException(
+                $"Simulated symbol '{symbolPath}' has no stored value; cannot read its metadata.",
+                AdsErrorCode.DeviceSymbolNotFound);
+
+        var (typeName, category) = InferPlcType(value);
+        return Task.FromResult(AdsValueResult.Success(value, symbolPath, typeName, category));
+    }
+
+    /// <summary>
+    /// Maps a stored CLR value to a plausible PLC type name and category, so a simulated
+    /// metadata read reports the same shape of metadata a real connection would.
+    /// </summary>
+    /// <remarks>
+    /// Internal (rather than private) so other simulated-connection surfaces added later in this
+    /// library (for example symbol browsing or notification metadata) and the test project (via
+    /// <c>InternalsVisibleTo</c>) can reuse the same inference instead of re-deriving it.
+    /// </remarks>
+    internal static (string TypeName, string Category) InferPlcType(object? value) => value switch
+    {
+        null => ("UNKNOWN", "Unknown"),
+        bool => ("BOOL", "Primitive"),
+        sbyte => ("SINT", "Primitive"),
+        byte => ("USINT", "Primitive"),
+        short => ("INT", "Primitive"),
+        ushort => ("UINT", "Primitive"),
+        int => ("DINT", "Primitive"),
+        uint => ("UDINT", "Primitive"),
+        long => ("LINT", "Primitive"),
+        ulong => ("ULINT", "Primitive"),
+        float => ("REAL", "Primitive"),
+        double => ("LREAL", "Primitive"),
+        string => ("STRING", "String"),
+        DateTime or DateTimeOffset => ("DT", "Primitive"),
+        TimeSpan => ("TIME", "Primitive"),
+        System.Collections.IDictionary => ("STRUCT", "Struct"),
+        Array => ("ARRAY", "Array"),
+        _ => (value.GetType().Name.ToUpperInvariant(), "Unknown"),
+    };
+
     /// <summary>
     /// Writes a typed value. The value is stored boxed; subsequent typed reads will
     /// apply the conversion rules documented on
@@ -276,7 +341,13 @@ public sealed class SimulatedAdsConnection : IManagedConnection
             try
             {
                 var value = await ReadValueAsync(path, ct).ConfigureAwait(false);
-                results[path] = AdsValueResult.Success(value, path);
+
+                // Carry the same inferred metadata ReadValueWithMetadataAsync reports. A real
+                // connection populates TypeName/Category on every successful batch result, so
+                // leaving them null here would show a consumer developing against simulation a
+                // case that does not exist on hardware.
+                var (typeName, category) = InferPlcType(value);
+                results[path] = AdsValueResult.Success(value, path, typeName, category);
             }
             catch (OperationCanceledException)
             {
@@ -344,9 +415,41 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     }
 
     /// <inheritdoc />
-    /// <remarks>A simulated device is always in <see cref="AdsState.Run"/>.</remarks>
+    /// <remarks>
+    /// Starts at <see cref="AdsState.Run"/> and reflects the most recent
+    /// <see cref="WriteControlAsync"/> call immediately.
+    /// </remarks>
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
-        => Task.FromResult(AdsState.Run);
+    {
+        // Honours the token like every other member here. It previously did not, which made this
+        // the one operation whose cancellation behaviour differed from the in-memory double the
+        // contract suite runs the facade against.
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(_adsState);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Records the requested state so <see cref="GetAdsStateAsync"/> reflects it immediately.</remarks>
+    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        _adsState = state;
+        _logger.LogInformation(
+            "Simulated WriteControl on {PlcId}: state={State}, deviceState={DeviceState}",
+            PlcId, state, deviceState);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Reports a synthetic identity so simulated consumers get a well-formed response. The name
+    /// is deliberately recognisable as simulated rather than imitating a real runtime.
+    /// </remarks>
+    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(new AdsDeviceInfo("Simulated ADS Device", "0.0.0"));
+    }
 
     /// <summary>
     /// Registers a callback that fires each time <paramref name="symbolPath"/> is written
@@ -400,7 +503,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// <inheritdoc />
     /// <remarks>
     /// Wraps <paramref name="callback"/> with <see cref="TypedCallbackAdapter.Wrap{T}"/>
-    /// and delegates to the untyped <see cref="SubscribeAsync"/>. Each notification value
+    /// and delegates to the untyped <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/>. Each notification value
     /// is converted to <typeparamref name="T"/> with the same rules as
     /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>; a value that fails
     /// conversion (or a null with a non-nullable value-type <typeparamref name="T"/>) is
@@ -409,12 +512,166 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Adapts <paramref name="callback"/> into the untyped shape and delegates to the untyped
+    /// <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/>, so it goes through the same subscriber list, the same
+    /// on-change rule and the same exception handling as every other simulated subscription.
+    /// <para>
+    /// The simulated store holds CLR values with no PLC type information, so
+    /// <see cref="AdsNotification.TypeName"/> is inferred from the written value's runtime type via
+    /// <see cref="InferPlcType"/> — the same inference <see cref="ReadValueWithMetadataAsync"/>
+    /// uses, so a notification and a metadata read report the same type for the same value.
+    /// </para>
+    /// <para>
+    /// <see cref="AdsNotification.Timestamp"/> is <see cref="DateTimeOffset.UtcNow"/>: there is no
+    /// PLC-reported time to relay, and the simulated write that triggered this callback happened
+    /// immediately before it (callbacks fire synchronously on the writer's thread).
+    /// </para>
+    /// </remarks>
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs,
+        Action<AdsNotification> callback, CancellationToken ct)
+        => SubscribeAsync(
+            symbolPath,
+            cycleTimeMs,
+            (path, value) =>
+            {
+                var (typeName, _) = InferPlcType(value);
+                callback(new AdsNotification(path, value, typeName, DateTimeOffset.UtcNow));
+            },
+            ct);
+
     private void FireCallbacks(string symbolPath, object? newValue)
     {
         if (!_subscribers.TryGetValue(symbolPath, out var list))
             return;
 
         list.Fire(symbolPath, newValue, _logger);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The simulated store is a flat map of dotted paths, so the symbol tree is derived from the
+    /// seeded keys: <c>MAIN.Motor.Speed</c> yields a <c>MAIN</c> container holding a
+    /// <c>MAIN.Motor</c> container holding the <c>MAIN.Motor.Speed</c> leaf. Container nodes are
+    /// synthetic — they have no stored value — and report type <c>STRUCT</c>. There is no real
+    /// browse to bound, so — unlike <see cref="AdsConnection"/> — this completes synchronously and
+    /// never consults <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/>.
+    /// </remarks>
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+        => GetSymbolsAsync(parentPath, includeChildren: true, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Same synthetic-container derivation as
+    /// <see cref="GetSymbolsAsync(string?, CancellationToken)"/>; <paramref name="includeChildren"/>
+    /// selects whether each returned node carries its nested subtree, matching a real connection.
+    /// </remarks>
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var prefix = string.Empty;
+        if (!string.IsNullOrEmpty(parentPath))
+        {
+            var canonicalParent = ResolveStoredCasing(parentPath)
+                ?? throw new AdsErrorException($"Symbol '{parentPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+            prefix = canonicalParent + ".";
+        }
+
+        var childNames = _symbols.Keys
+            .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
+            .Select(k => k.Substring(prefix.Length).Split('.')[0])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var result = childNames
+            .Select(name => BuildSymbolInfo(prefix + name, includeChildren))
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Matches the same substring rule as a real connection, case-insensitively. Walks every
+    /// seeded leaf path plus every synthetic container path above it — see
+    /// <see cref="AllPaths"/> — so its cost is proportional to the number of seeded symbols.
+    /// </remarks>
+    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var result = AllPaths()
+            .Where(p => p.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .Select(p => BuildSymbolInfo(p, includeChildren))
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="path"/> to its as-seeded casing by locating a stored key at or
+    /// beneath it, or <see langword="null"/> when nothing is seeded there. PLC symbol paths are
+    /// case-insensitive, so a mis-cased caller lookup (e.g. <c>GetSymbolsAsync("main")</c> against
+    /// a symbol seeded as <c>MAIN.Speed</c>) must still report <see cref="AdsSymbolInfo.InstancePath"/>
+    /// in the casing the symbol was actually seeded with, not echo back whatever the caller typed.
+    /// </summary>
+    private string? ResolveStoredCasing(string path)
+    {
+        foreach (var key in _symbols.Keys)
+        {
+            if (key.Equals(path, StringComparison.OrdinalIgnoreCase))
+                return key;
+            if (key.Length > path.Length && key[path.Length] == '.' &&
+                key.AsSpan(0, path.Length).Equals(path, StringComparison.OrdinalIgnoreCase))
+                return key[..path.Length];
+        }
+        return null;
+    }
+
+    /// <summary>Every stored leaf path plus every synthetic container path above it.</summary>
+    private IEnumerable<string> AllPaths()
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in _symbols.Keys)
+        {
+            var segments = key.Split('.');
+            for (var i = 1; i <= segments.Length; i++)
+                paths.Add(string.Join('.', segments.Take(i)));
+        }
+        return paths;
+    }
+
+    /// <summary>
+    /// Builds symbol metadata for one simulated path, recursing into children on demand. A path
+    /// with a stored value is a leaf, mapped via <see cref="InferPlcType"/> (the same inference
+    /// <see cref="ReadValueWithMetadataAsync"/> uses); a path with no stored value is a synthetic
+    /// <c>STRUCT</c> container implied by deeper seeded paths.
+    /// </summary>
+    private AdsSymbolInfo BuildSymbolInfo(string path, bool includeChildren)
+    {
+        var isLeaf = _symbols.TryGetValue(path, out var value);
+        var (typeName, category) = isLeaf ? InferPlcType(value) : ("STRUCT", "Struct");
+
+        List<AdsSymbolInfo>? children = null;
+        if (includeChildren)
+        {
+            var prefix = path + ".";
+            var childNames = _symbols.Keys
+                .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
+                .Select(k => k.Substring(prefix.Length).Split('.')[0])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (childNames.Count > 0)
+                children = childNames.Select(n => BuildSymbolInfo(prefix + n, includeChildren: true)).ToList();
+        }
+
+        return new AdsSymbolInfo(path, typeName, category, ByteSize: 0, Comment: null, children);
     }
 
     void IManagedConnection.Connect() { }

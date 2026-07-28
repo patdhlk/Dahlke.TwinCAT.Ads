@@ -447,6 +447,9 @@ public class GenericReadWriteTests
         public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
             => Task.FromResult(_typedReadResult);
 
+        public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+            => throw new NotSupportedException();
+
         public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
         {
             LastTypedWrite = (symbolPath, value);
@@ -468,10 +471,36 @@ public class GenericReadWriteTests
         public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
             => Task.FromResult(default(AdsState));
 
+        // Never exercised: these facade-routing tests only assert typed/untyped read-write
+        // delegation, not device info (see the strict stub policy — real only where read).
+        public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+            => throw new NotSupportedException();
+
+        // Never exercised: these facade-routing tests only assert typed/untyped read-write
+        // delegation, not WriteControl (see the strict stub policy — real only where read).
+        public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+            => throw new NotSupportedException();
+
         public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
             => Task.FromResult<IDisposable>(new DummyDisposable());
 
         public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        // Never exercised: these facade-routing tests only assert typed/untyped read-write
+        // delegation, not notification-shaped subscriptions (see the strict stub policy).
+        public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        // Never exercised: these facade-routing tests only assert typed/untyped read-write
+        // delegation, not symbol browsing (see the strict stub policy — real only where read).
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
             => throw new NotSupportedException();
 
         public void Connect() => IsConnected = true;

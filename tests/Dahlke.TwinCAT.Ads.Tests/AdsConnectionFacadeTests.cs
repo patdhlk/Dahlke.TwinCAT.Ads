@@ -597,6 +597,9 @@ public class AdsConnectionFacadeTests
             return Task.FromResult(ReadResult);
         }
 
+        public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+            => throw new NotSupportedException();
+
         public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
         {
             LastWrite = (symbolPath, value!);
@@ -618,10 +621,36 @@ public class AdsConnectionFacadeTests
         public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
             => Task.FromResult(default(AdsState));
 
+        // Never exercised: these routing tests assert read/write delegation only (see the strict
+        // stub policy — real only where genuinely read).
+        public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+            => throw new NotSupportedException();
+
+        // Never exercised: these routing tests assert read/write delegation only (see the strict
+        // stub policy — real only where genuinely read).
+        public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+            => throw new NotSupportedException();
+
         public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
             => Task.FromResult<IDisposable>(new DummyDisposable());
 
         public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        // Never exercised: these routing tests assert read/write delegation only (see the strict
+        // stub policy — real only where genuinely read).
+        public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        // Never exercised: these routing tests assert read/write delegation only (see the strict
+        // stub policy — real only where genuinely read).
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
             => throw new NotSupportedException();
 
         public void Connect() => IsConnected = true;

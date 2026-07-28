@@ -13,7 +13,7 @@ A .NET library for TwinCAT ADS with durable connections, typed symbol access, si
 - **Wait-then-throw semantics** — operations wait up to the configured `TimeoutMs` for a connection, then throw `AdsConnectionUnavailableException`; `TimeoutException` for hardware/network stalls; `OperationCanceledException` only for caller cancellation
 - **Durable subscriptions** — survive reconnects automatically; the returned `IDisposable` stays valid through outages; simulated subscriptions fire on changed writes
 - **Reactive (Rx) companion** — optional `Dahlke.TwinCAT.Ads.Reactive` package surfaces value-change and connection-state notifications as `IObservable<T>` streams
-- **ADS sum commands** — batch read and write execute as a single round-trip on real connections; per-symbol `AdsValueResult` for granular success/failure
+- **ADS sum commands** — batch writes, and batch reads of scalars, execute as a single round-trip on real connections; per-symbol `AdsValueResult` for granular success/failure
 - **Connection state observability** — `State` property (tri-state), `IsConnected` snapshot, `ConnectionStateChanged` event
 - **Per-target simulation** — `ConnectionMode.Real | Simulated` per target; mixed fleets supported; `InitialValues` seeding; `AddTwinCatAdsSimulation` forces all targets to simulated
 - **Health check** — Healthy / Degraded / Unhealthy with per-target data via `AddTwinCatAdsHealthCheck()`
@@ -157,7 +157,30 @@ foreach (var (symbol, result) in results)
 float setpoint = results["GVL.Setpoint"].GetValue<float>();
 ```
 
-On real connections both operations use a single ADS sum command (one round-trip). A per-symbol failure is captured in `AdsValueResult.Error` and does not abort the batch. A whole-batch timeout throws `TimeoutException`; caller cancellation throws `OperationCanceledException`.
+On real connections a batch write is a single ADS sum command. A batch **read** partitions by category: scalars, strings and enums share one sum command, while structs, function blocks, unions and arrays are decoded individually so their members come back as a tree rather than an opaque value. So an all-scalar batch costs one round-trip, and a batch containing containers costs one plus the container decodes. Every result carries `TypeName` and `Category` either way.
+
+A per-symbol failure is captured in `AdsValueResult.Error` and does not abort the batch. A whole-batch timeout throws `TimeoutException`; caller cancellation throws `OperationCanceledException`.
+
+## Symbol Browsing and Metadata
+
+```csharp
+// Browse one level — pass includeChildren: false for interactive drill-down.
+// The two-argument overload defaults to true, which projects the ENTIRE subtree.
+var roots = await conn.GetSymbolsAsync(null, includeChildren: false, ct);
+foreach (var s in roots)
+    Console.WriteLine($"{s.InstancePath} : {s.TypeName} ({s.Category}, {s.ByteSize}B)");
+
+// Search across the whole tree by substring
+var motors = await conn.SearchSymbolsAsync("Motor", includeChildren: false, ct);
+
+// Read a value together with its PLC type
+var result = await conn.ReadValueWithMetadataAsync("MAIN.Motor", ct);
+Console.WriteLine($"{result.TypeName} = {result.Value}");   // ST_Motor = Dictionary<string, object?>
+```
+
+Browsing is bounded by `PlcTargetOptions.SymbolBrowseTimeoutMs` (default 30 s) rather than `TimeoutMs`, since uploading the symbol table can take longer than a typical read or write. That timeout bounds how long the *caller* waits — the underlying upload is a blocking Beckhoff call and continues in the background if abandoned.
+
+`ReadValueWithMetadataAsync` decodes structs, function blocks and unions to `Dictionary<string, object?>` keyed by member name, arrays to `object?[]`, and passes scalars through unchanged. `ALIAS`, `PROGRAM`, `POINTER` and `REFERENCE` categories are currently passed through as-is, so a value of one of those types may surface as a raw TwinCAT object rather than a neutral tree.
 
 ## Subscriptions
 
@@ -184,6 +207,16 @@ using var sub = await conn.SubscribeAsync(
 ```
 
 Subscriptions are durable: owned by the stable facade, not the underlying connection. When a reconnect occurs the subscription is automatically re-registered against the new connection. Callbacks fire on a background thread — they must be thread-safe and must not block. A `null` notification value with a value-type `T` is dropped (Warning logged). Dispose is idempotent and thread-safe.
+
+### Notification metadata
+
+```csharp
+using var sub = await conn.SubscribeAsync("GVL.Temp", cycleTimeMs: 200,
+    n => Console.WriteLine($"[{n.Timestamp:O}] {n.SymbolPath} ({n.TypeName}) = {n.Value}"),
+    CancellationToken.None);
+```
+
+Carries the same durability guarantees as the untyped overload, plus the symbol's PLC type name and the PLC-reported timestamp of the change. Struct, function block and array notifications are decoded off the notification thread and so may be delivered slightly later — and, under a fast burst, out of order relative to scalar notifications.
 
 ## Reactive (Rx) companion
 
