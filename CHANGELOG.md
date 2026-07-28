@@ -7,32 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - 2026-07-28
 
-> **⚠️ Hardware verification pending before publish.** The notification-payload decode described
-> under "Fixed" below was verified by decompiling `Beckhoff.TwinCAT.Ads 7.0.292` and confirming it
-> makes the identical internal call a read would make — **not** by running against a live PLC.
+> **Hardware verification — scalars and structs confirmed against a live PLC; arrays outstanding.**
+> The notification-payload decode described under "Fixed" was originally verified only by decompiling
+> `Beckhoff.TwinCAT.Ads 7.0.292`. It has since been exercised against a live TwinCAT runtime
+> (`Plc30 App 3.1.2141`, TwinCAT/Linux), using the shipped library:
 >
-> Before this package is pushed to NuGet, run `tests/Dahlke.TwinCAT.Ads.HardwareTests` against a
-> live PLC with **all three** symbol variables set — `TWINCAT_TEST_SYMBOL_INT` (writable INT),
-> `TWINCAT_TEST_SYMBOL_STRUCT` (a stable STRUCT or FUNCTION_BLOCK) and `TWINCAT_TEST_SYMBOL_ARRAY`
-> (a stable ARRAY). The facts that close this gate are:
+> - **Scalar path** — a subscription to a PLC-driven `INT` delivered notifications whose decoded
+>   values tracked the live variable, each carrying the correct `TypeName` and a PLC-reported
+>   `Timestamp`.
+> - **Container path** — for a `STRUCT` containing an enum, a nested `STRUCT` and a `REAL`, the
+>   decoded tree from `ReadValueWithMetadataAsync`, from a batch `ReadValuesAsync` (the
+>   container-partition branch), and from an `Action<AdsNotification>` subscription were all
+>   **identical**, with `TypeName`/`Category` populated on each.
 >
-> - `Subscribe_OnChange_DeliversTheValueThatWasWritten` — the untyped path delivers the value that
->   was written, not merely a non-null one.
-> - `SubscribeNotification_OnChange_CarriesValueTypeNameAndTimestamp` — the `Action<AdsNotification>`
->   overload's `Value`, `TypeName` and `Timestamp`.
-> - `SubscribeNotification_StructSymbol_DecodesToTheSameTreeAsARead` and
->   `SubscribeNotification_ArraySymbol_DecodesToTheSameTreeAsARead` — the decode divergence check:
->   a notification's decoded tree must equal the tree a fresh read of the same symbol returns. The
->   array fact is the one that exercises `IAccessorValueFactory.CreateValue` over a container
->   payload; a struct with sub-symbols reads its members instead.
-> - `ReadValueWithMetadata_StructSymbol_DecodesToAKeyedTree` and
->   `ReadValueWithMetadata_ArraySymbol_DecodesToAnObjectArray` — container reads carry a decoded
->   tree plus `TypeName`/`Category`.
+> **Not yet verified:** the `ARRAY` decode path (`DecodeArrayAsync`). No array symbol was available
+> on the verification target. Arrays whose sub-symbol count matches their length re-read each element
+> rather than taking values from the payload, so the untested surface is the payload-derived length
+> and shape rather than element values — but it is untested.
 >
-> Every fact is gated behind `HardwareFactAttribute` and skips silently without hardware, and the
-> symbol-gated ones return early (reporting as **passed**) when their variable is unset — so
-> neither the green CI suite nor a hardware run with variables missing closes this gate. Remove
-> this note once the full hardware run is green.
+> **Note on the packaged hardware suite.** `tests/Dahlke.TwinCAT.Ads.HardwareTests` cannot currently
+> perform this verification on a host without a TwinCAT system router. Its fixture uses the
+> code-first `AddTwinCatAds(o => ...)` overload and never sets `o.Router.NetId`, so `AdsRouterService`
+> takes its "embedded router disabled — using system router" path and every fact fails on connection
+> timeout regardless of PLC reachability. `AmsRouterOptions` exposes only `NetId`, so the code-first
+> path cannot express `RemoteConnections` at all; the fixture needs the `IConfiguration` overload.
+> The verification above was therefore performed with a standalone harness rather than that suite.
 
 ### Added
 
