@@ -628,6 +628,10 @@ internal sealed class AdsConnection : IManagedConnection
         var notificationHandle = await _client.AddDeviceNotificationAsync(
             symbolPath, symbol.ByteSize, settings, null, cts.Token).ConfigureAwait(false);
 
+        // Per-subscription latch for GetNotificationValue's diagnostic — see its remarks. Local to
+        // this registration so the report is once per subscription, not once per notification.
+        var payloadFallbackReported = 0;
+
         var handler = new EventHandler<AdsNotificationEventArgs>((_, e) =>
         {
             if (e.Handle != notificationHandle.Handle) return;
@@ -636,7 +640,7 @@ internal sealed class AdsConnection : IManagedConnection
                 var loader = GetSymbolLoader();
                 object? value = null;
                 if (loader.Symbols.TryGetInstance(symbolPath, out var sym) && sym is IValueSymbol vs)
-                    value = GetNotificationValue(vs, e.Data, e.TimeStamp);
+                    value = GetNotificationValue(vs, e.Data, e.TimeStamp, ref payloadFallbackReported);
                 callback(symbolPath, value);
             }
             catch (Exception ex)
@@ -693,12 +697,19 @@ internal sealed class AdsConnection : IManagedConnection
     ///   </description></item>
     /// </list>
     /// <para>
-    /// <b>No ADS I/O on the notification thread.</b> The value itself comes from
-    /// <see cref="AdsNotificationEventArgs.Data"/> — see <see cref="GetNotificationValue"/> and
-    /// <see cref="NotificationPayload"/> — so no path above reads the symbol back to learn what
-    /// changed. The offload above therefore remains only for what the payload cannot give: the
-    /// per-member/per-element reads <see cref="PlcValueDecoder.DecodeAsync"/> performs to build a
-    /// container's neutral tree.
+    /// <b>No ADS I/O on the notification thread — with one documented exception.</b> The value
+    /// itself comes from <see cref="AdsNotificationEventArgs.Data"/> — see
+    /// <see cref="GetNotificationValue"/> and <see cref="NotificationPayload"/> — so no path above
+    /// reads the symbol back to learn what changed. The offload above therefore remains only for
+    /// what the payload cannot give: the per-member/per-element reads
+    /// <see cref="PlcValueDecoder.DecodeAsync"/> performs to build a container's neutral tree.
+    /// The exception is a symbol whose payload cannot serve at all — chiefly one with EXTERNAL DATA
+    /// REFERENCES, whose value does not live entirely in its own storage. For those,
+    /// <see cref="GetNotificationValue"/> falls back to a synchronous <c>ReadValue()</c> on the
+    /// notification thread, permanently and for every notification of that subscription, and says
+    /// so in the log once per subscription. Do not read the heading above as unconditional: a
+    /// subscriber whose symbol falls in that class still pays a round-trip per notification, exactly
+    /// as every subscriber did before Task 10.
     /// </para>
     /// <para>
     /// <b>Disposal.</b> Disposing the returned handle cancels a token the offloaded decode
@@ -724,6 +735,10 @@ internal sealed class AdsConnection : IManagedConnection
         // token (a struct) below so the delivery path never touches the source itself.
         var disposal = new CancellationTokenSource();
         var disposalToken = disposal.Token;
+
+        // Per-subscription latch for GetNotificationValue's diagnostic — see its remarks. Local to
+        // this registration so the report is once per subscription, not once per notification.
+        var payloadFallbackReported = 0;
 
         var handler = new EventHandler<AdsNotificationEventArgs>((_, e) =>
         {
@@ -753,7 +768,7 @@ internal sealed class AdsConnection : IManagedConnection
 
                 // Decoded from the notification's own payload — the same shared, zero-I/O step the
                 // untyped overload takes.
-                var raw = GetNotificationValue(vs, e.Data, e.TimeStamp);
+                var raw = GetNotificationValue(vs, e.Data, e.TimeStamp, ref payloadFallbackReported);
 
                 if (PlcValueDecoder.TryDecodeWithoutReads(raw, sym, out var value))
                 {
@@ -815,11 +830,25 @@ internal sealed class AdsConnection : IManagedConnection
     /// <para>
     /// <b>The fallback read is deliberate, not a leftover.</b> A notification handler that dropped
     /// the notification instead would be strictly worse than the round-trip this method exists to
-    /// avoid, so anything unexpected from the payload decode ends in the same place the code was
-    /// before Task 10: one <c>ReadValue()</c>. The cause is logged at Debug (through
-    /// <see cref="LogBestEffort"/>, since a throwing logging provider must not cost us the
-    /// fallback) rather than Warning, because for a symbol whose payload genuinely cannot serve
-    /// this is the expected steady state and would otherwise log on every notification.
+    /// avoid, so both a refusal and anything unexpected thrown by the payload decode end in the
+    /// same place the code was before Task 10: one <c>ReadValue()</c> — synchronous, not
+    /// cancellable, and not bounded by <see cref="PlcTargetOptions.TimeoutMs"/>, on the ADS
+    /// notification thread.
+    /// </para>
+    /// <para>
+    /// <b>The fallback is reported, exactly once per subscription.</b> Because a refusal is a
+    /// property of the symbol rather than of one notification (see
+    /// <see cref="NotificationPayloadRefusal"/>), falling back is permanent for that subscription:
+    /// every notification it ever delivers pays the round-trip. Left silent, a deployment where the
+    /// payload never serves — say a symbol loader that yields no value accessor — would lose this
+    /// whole optimisation with nothing to observe, and the claim that no notification path performs
+    /// ADS I/O would be unfalsifiable in the field. So the FIRST fallback per subscription is
+    /// logged, naming the reason, and later ones are silent: <paramref name="fallbackReported"/> is
+    /// a latch owned by the registration, not by this connection. A refusal is logged at
+    /// Information — it is a shape this code recognised and handled, and the operator's lever is
+    /// deployment or symbol choice, not an error to chase — while an exception out of the decode is
+    /// a Warning, being a shape that was not anticipated. Both go through
+    /// <see cref="LogBestEffort"/>: a throwing logging provider must not cost us the fallback.
     /// </para>
     /// <para>
     /// Internal rather than private so that "the payload is preferred and the round-trip really is
@@ -830,18 +859,32 @@ internal sealed class AdsConnection : IManagedConnection
     /// the ADS client). Production code reaches it only from the two notification handlers above.
     /// </para>
     /// </remarks>
+    /// <param name="symbol">The resolved symbol the notification is registered for.</param>
+    /// <param name="payload">The notification's raw bytes.</param>
+    /// <param name="timestamp">The notification's own timestamp.</param>
+    /// <param name="fallbackReported">
+    /// A 0/1 latch owned by the subscription, so the fallback diagnostic is emitted once for it
+    /// rather than once per notification. Exchanged atomically, since a caller may re-enter the
+    /// handler.
+    /// </param>
     internal object? GetNotificationValue(IValueSymbol symbol, ReadOnlyMemory<byte> payload,
-        DateTimeOffset timestamp)
+        DateTimeOffset timestamp, ref int fallbackReported)
     {
         try
         {
-            if (NotificationPayload.TryDecodeValue(symbol, payload, timestamp, out var fromPayload))
+            if (NotificationPayload.TryDecodeValue(symbol, payload, timestamp, out var fromPayload, out var refusal))
                 return fromPayload;
+
+            if (Interlocked.Exchange(ref fallbackReported, 1) == 0)
+                LogBestEffort(() => _logger.LogInformation(
+                    "Notifications for {Symbol} cannot be served from the notification payload ({Reason}); every one will read the symbol instead",
+                    symbol.InstancePath, refusal));
         }
         catch (Exception ex)
         {
-            LogBestEffort(() => _logger.LogDebug(
-                ex, "Decoding the notification payload for {Symbol} failed; reading the symbol instead", symbol.InstancePath));
+            if (Interlocked.Exchange(ref fallbackReported, 1) == 0)
+                LogBestEffort(() => _logger.LogWarning(
+                    ex, "Decoding the notification payload for {Symbol} failed; reading the symbol instead", symbol.InstancePath));
         }
 
         return symbol.ReadValue();

@@ -57,6 +57,13 @@ internal class StubSymbol : ISymbol
     // HasExternalDataReferences() whether the notification payload covers the symbol's whole value,
     // and that predicate reads exactly these three. The defaults describe an ordinary symbol whose
     // value lives entirely in its own storage.
+    //
+    // Note what making DataType real COSTS: it used to throw, so any consumer that started reading
+    // it failed loudly. It now answers null by default, so a future consumer that reads DataType
+    // will silently see "no type" instead. That trade is accepted deliberately — a fake IDataType
+    // rich enough for HasExternalDataReferences() to walk would be a large, mostly-throwing double
+    // in every test that merely decodes a scalar — but a consumer that depends on DataType being
+    // present should set it (see StubDataType) rather than rely on the default.
     public bool IsStatic { get; set; }
     public bool IsProperty { get; set; }
     public IDataType? DataType { get; set; }
@@ -250,6 +257,81 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
         throw new NotSupportedException();
 
     public void SetParent(ISymbol parent) => throw new NotSupportedException();
+}
+
+/// <summary>
+/// A symbol that WRAPS another, the way Beckhoff's <see cref="DynamicSymbol"/> wraps the symbol it
+/// delegates to under <c>SymbolsLoadMode.DynamicTree</c> — the shape <c>AdsConnection</c>'s symbol
+/// loader actually yields. <see cref="Unwrap"/> returns a DIFFERENT object from this one, which is
+/// what lets a test tell whether a consumer unwrapped before using the symbol, as Beckhoff's own
+/// <c>ReadValue()</c> does.
+/// </summary>
+/// <remarks>
+/// Deliberately value-capable (<see cref="IValueRawSymbol"/>) with its OWN
+/// <see cref="ValueAccessor"/>, exactly as the real <c>DynamicSymbol</c> is. Without that, a
+/// consumer that skipped the unwrap would fail a type check instead of quietly using the wrong
+/// symbol — so the test would still go red, but for the wrong reason and it would stop being a pin
+/// on symbol IDENTITY.
+/// </remarks>
+internal sealed class StubDynamicSymbol(IValueSymbol inner, DataTypeCategory category, string typeName)
+    : StubSymbol(category, typeName), IDynamicSymbol, IValueRawSymbol
+{
+    public IValueSymbol Unwrap() => inner;
+
+    /// <summary>
+    /// The accessor a consumer reaches if it forgets to unwrap. Set it to a DIFFERENT fake from the
+    /// inner symbol's so "used the wrapper" and "used the inner symbol" are distinguishable.
+    /// </summary>
+    public IAccessorRawValue? ValueAccessor { get; set; }
+
+    // --- Not consumed by NotificationPayload ---------------------------------
+    public string NormalizedName => throw new NotSupportedException();
+    public bool HasValue => throw new NotSupportedException();
+
+    public event EventHandler<RawValueChangedEventArgs>? RawValueChanged
+    {
+        add => throw new NotSupportedException();
+        remove => throw new NotSupportedException();
+    }
+
+    public byte[] ReadRawValue() => throw new NotSupportedException();
+    public byte[] ReadRawValue(int timeout) => throw new NotSupportedException();
+    public Task<ResultReadRawAccess> ReadRawValueAsync(CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
+    public void WriteRawValue(byte[] rawValue) => throw new NotSupportedException();
+    public void WriteRawValue(byte[] rawValue, int timeout) => throw new NotSupportedException();
+    public Task<ResultWriteAccess> WriteRawValueAsync(byte[] rawValue, CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
+    public void SetParent(ISymbol parent) => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Minimal <see cref="IDataType"/> exposing only <see cref="Category"/> — all Beckhoff's
+/// <c>HasExternalDataReferences()</c> reads before short-circuiting on a
+/// <see cref="DataTypeCategory.Reference"/> type. Lets a test reach the DataType-driven branch of
+/// that predicate (a <c>REFERENCE TO</c> symbol) rather than only the cheap
+/// <see cref="StubSymbol.IsStatic"/> one.
+/// </summary>
+internal sealed class StubDataType(DataTypeCategory category) : IDataType
+{
+    public DataTypeCategory Category => category;
+
+    // --- Not consumed by NotificationPayload ---------------------------------
+    public string Name => throw new NotSupportedException();
+    public string Namespace => throw new NotSupportedException();
+    public string FullName => throw new NotSupportedException();
+    public string Comment => throw new NotSupportedException();
+    public int Id => throw new NotSupportedException();
+    public bool IsContainer => throw new NotSupportedException();
+    public bool IsPrimitive => throw new NotSupportedException();
+    public bool IsPointer => throw new NotSupportedException();
+    public bool IsReference => throw new NotSupportedException();
+    public ITypeAttributeCollection Attributes => throw new NotSupportedException();
+    public int Size => throw new NotSupportedException();
+    public int ByteSize => throw new NotSupportedException();
+    public int BitSize => throw new NotSupportedException();
+    public bool IsBitType => throw new NotSupportedException();
+    public bool IsByteAligned => throw new NotSupportedException();
 }
 
 internal sealed class StubSymbolCollection(IReadOnlyList<ISymbol> symbols) : ISymbolCollection<ISymbol>
