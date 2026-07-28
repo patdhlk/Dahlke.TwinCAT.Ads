@@ -636,7 +636,7 @@ internal sealed class AdsConnection : IManagedConnection
                 var loader = GetSymbolLoader();
                 object? value = null;
                 if (loader.Symbols.TryGetInstance(symbolPath, out var sym) && sym is IValueSymbol vs)
-                    value = vs.ReadValue();
+                    value = GetNotificationValue(vs, e.Data, e.TimeStamp);
                 callback(symbolPath, value);
             }
             catch (Exception ex)
@@ -687,10 +687,19 @@ internal sealed class AdsConnection : IManagedConnection
     ///     <see cref="PlcValueDecoder.DecodesFromSubSymbolsOnly"/>), so the notification thread is
     ///     never blocked on a full-struct round-trip whose value the decoder would discard —
     ///     the same skip <see cref="ReadValueWithMetadataAsync"/> and <see cref="ReadValuesAsync"/>
-    ///     already perform. Arrays still need their raw value (length + elements) and so are read
-    ///     inline before the hand-off.
+    ///     already perform. An array still needs its raw value (length + elements), but gets it
+    ///     from the notification payload via <see cref="GetNotificationValue"/> rather than from the
+    ///     wire, so the hand-off costs no round-trip either.
     ///   </description></item>
     /// </list>
+    /// <para>
+    /// <b>No ADS I/O on the notification thread.</b> The value itself comes from
+    /// <see cref="AdsNotificationEventArgs.Data"/> — see <see cref="GetNotificationValue"/> and
+    /// <see cref="NotificationPayload"/> — so no path above reads the symbol back to learn what
+    /// changed. The offload above therefore remains only for what the payload cannot give: the
+    /// per-member/per-element reads <see cref="PlcValueDecoder.DecodeAsync"/> performs to build a
+    /// container's neutral tree.
+    /// </para>
     /// <para>
     /// <b>Disposal.</b> Disposing the returned handle cancels a token the offloaded decode
     /// observes, so an in-flight container decode aborts its remaining member reads and does NOT
@@ -742,9 +751,9 @@ internal sealed class AdsConnection : IManagedConnection
                     return;
                 }
 
-                // The same per-notification re-read the untyped overload performs. Task 10
-                // replaces it by decoding e.Data directly.
-                var raw = vs.ReadValue();
+                // Decoded from the notification's own payload — the same shared, zero-I/O step the
+                // untyped overload takes.
+                var raw = GetNotificationValue(vs, e.Data, e.TimeStamp);
 
                 if (PlcValueDecoder.TryDecodeWithoutReads(raw, sym, out var value))
                 {
@@ -787,6 +796,55 @@ internal sealed class AdsConnection : IManagedConnection
             // disposed subscription and removes a race. NotificationSubscription guarantees this
             // whole action runs at most once.
         });
+    }
+
+    /// <summary>
+    /// Obtains the changed value for one notification — the single value-decode step BOTH
+    /// <c>SubscribeAsync</c> overloads share. Normally decodes
+    /// <see cref="AdsNotificationEventArgs.Data"/> in place with no ADS I/O; falls back to reading
+    /// the symbol only when the payload cannot serve.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The result is in Beckhoff's own shape — whatever <c>ReadValue()</c> would have returned —
+    /// which is what the untyped overload delivers directly and what
+    /// <see cref="PlcValueDecoder"/> consumes for the typed one. See
+    /// <see cref="NotificationPayload"/> for why decoding the payload is equivalent to the read and
+    /// for the one case (external data references) it cannot cover.
+    /// </para>
+    /// <para>
+    /// <b>The fallback read is deliberate, not a leftover.</b> A notification handler that dropped
+    /// the notification instead would be strictly worse than the round-trip this method exists to
+    /// avoid, so anything unexpected from the payload decode ends in the same place the code was
+    /// before Task 10: one <c>ReadValue()</c>. The cause is logged at Debug (through
+    /// <see cref="LogBestEffort"/>, since a throwing logging provider must not cost us the
+    /// fallback) rather than Warning, because for a symbol whose payload genuinely cannot serve
+    /// this is the expected steady state and would otherwise log on every notification.
+    /// </para>
+    /// <para>
+    /// Internal rather than private so that "the payload is preferred and the round-trip really is
+    /// gone" is covered by tests instead of inspection — the same seam reasoning as
+    /// <see cref="DeliverDecodedContainerInBackground"/> and <see cref="SetSymbolLoaderForTesting"/>,
+    /// and the reason this takes the payload and timestamp rather than the
+    /// <see cref="AdsNotificationEventArgs"/> they come from (which cannot be constructed outside
+    /// the ADS client). Production code reaches it only from the two notification handlers above.
+    /// </para>
+    /// </remarks>
+    internal object? GetNotificationValue(IValueSymbol symbol, ReadOnlyMemory<byte> payload,
+        DateTimeOffset timestamp)
+    {
+        try
+        {
+            if (NotificationPayload.TryDecodeValue(symbol, payload, timestamp, out var fromPayload))
+                return fromPayload;
+        }
+        catch (Exception ex)
+        {
+            LogBestEffort(() => _logger.LogDebug(
+                ex, "Decoding the notification payload for {Symbol} failed; reading the symbol instead", symbol.InstancePath));
+        }
+
+        return symbol.ReadValue();
     }
 
     /// <summary>

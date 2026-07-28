@@ -20,6 +20,15 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// else throws so that any new dependency either consumer grows fails loudly rather than
 /// silently passing on a default.
 /// </summary>
+/// <remarks>
+/// Since Task 10, <see cref="NotificationPayload"/> is a third consumer, and it reads three more
+/// members: <see cref="IsStatic"/>, <see cref="IsProperty"/> and <see cref="DataType"/> — the
+/// inputs to Beckhoff's <c>HasExternalDataReferences()</c>, which decides whether a notification
+/// payload covers the symbol's whole value. All three are now plain settable properties defaulting
+/// to "no external data references" (<see langword="false"/>, <see langword="false"/>,
+/// <see langword="null"/> — a null <c>DataType</c> makes that predicate return
+/// <see langword="false"/> without needing an <see cref="IDataType"/> fake).
+/// </remarks>
 internal class StubSymbol : ISymbol
 {
     public StubSymbol(DataTypeCategory category, string typeName, params ISymbol[] subSymbols)
@@ -44,8 +53,15 @@ internal class StubSymbol : ISymbol
     public int ByteSize { get; set; }
     public string Comment { get; set; } = "";
 
+    // Genuinely read since Task 10: NotificationPayload.TryDecodeValue asks Beckhoff's
+    // HasExternalDataReferences() whether the notification payload covers the symbol's whole value,
+    // and that predicate reads exactly these three. The defaults describe an ordinary symbol whose
+    // value lives entirely in its own storage.
+    public bool IsStatic { get; set; }
+    public bool IsProperty { get; set; }
+    public IDataType? DataType { get; set; }
+
     // --- Not consumed by PlcValueDecoder -------------------------------------
-    public IDataType? DataType => throw new NotSupportedException();
     public ISymbol? Parent => throw new NotSupportedException();
     public bool IsContainerType => throw new NotSupportedException();
     public bool IsPrimitiveType => throw new NotSupportedException();
@@ -55,8 +71,6 @@ internal class StubSymbol : ISymbol
     public bool IsReference => throw new NotSupportedException();
     public bool IsPointer => throw new NotSupportedException();
     public bool IsBitType => throw new NotSupportedException();
-    public bool IsStatic => throw new NotSupportedException();
-    public bool IsProperty => throw new NotSupportedException();
     public bool IsByteAligned => throw new NotSupportedException();
     public int Size => throw new NotSupportedException();
     public int BitSize => throw new NotSupportedException();
@@ -105,11 +119,51 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
     public static StubValueSymbol ThatNeverCompletesRead(string instanceName, DataTypeCategory category, string typeName) =>
         new(instanceName, category, typeName, failRead: false, neverCompletesRead: true);
 
-    // ReadValue() (the synchronous, non-cancellable overload) is no longer called by
-    // PlcValueDecoder — it reads struct members / array elements via ReadValueAsync instead
-    // (see PlcValueDecoder's remarks on being "async and cancellable, all the way down"), so
-    // per this stub's strict policy (throw for anything not genuinely read), this now throws.
-    public object ReadValue() => throw new NotSupportedException();
+    private readonly bool _allowSynchronousRead;
+
+    /// <summary>
+    /// A symbol whose synchronous <see cref="ReadValue()"/> succeeds, returning
+    /// <paramref name="readValue"/>. Opt-in, because exactly ONE caller in the library may legally
+    /// use it: <c>AdsConnection.GetNotificationValue</c>'s fallback for a symbol whose notification
+    /// payload cannot serve. Every other stub keeps <see cref="ReadValue()"/> throwing, so a
+    /// regression that reintroduces a synchronous, non-cancellable read anywhere else — in
+    /// <see cref="PlcValueDecoder"/> above all — still fails loudly.
+    /// </summary>
+    public static StubValueSymbol WithSynchronousReadValue(string instanceName,
+        DataTypeCategory category, string typeName, object readValue) =>
+        new(instanceName, category, typeName, readValue, allowSynchronousRead: true);
+
+    private StubValueSymbol(string instanceName, DataTypeCategory category, string typeName,
+        object readValue, bool allowSynchronousRead)
+        : base(category, typeName)
+    {
+        InstanceName = instanceName;
+
+        // Both reads report the same value, so a test never has to care which one served it —
+        // only how many times the synchronous one did.
+        _value = readValue;
+        _allowSynchronousRead = allowSynchronousRead;
+    }
+
+    /// <summary>
+    /// Counts the synchronous reads this symbol served — how a test asserts POSITIVELY that the
+    /// notification round-trip was avoided (0) rather than merely that some value arrived.
+    /// </summary>
+    public int SynchronousReadCount { get; private set; }
+
+    // ReadValue() (the synchronous, non-cancellable overload) is not called by PlcValueDecoder —
+    // it reads struct members / array elements via ReadValueAsync instead (see PlcValueDecoder's
+    // remarks on being "async and cancellable, all the way down"). Per this stub's strict policy
+    // (throw for anything not genuinely read) it therefore throws unless a test opted in through
+    // WithSynchronousReadValue.
+    public object ReadValue()
+    {
+        if (!_allowSynchronousRead)
+            throw new NotSupportedException();
+
+        SynchronousReadCount++;
+        return _value!;
+    }
 
     private readonly TaskCompletionSource _readCancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -168,7 +222,12 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
     }
 
     public bool HasValue => throw new NotSupportedException();
-    public IAccessorRawValue ValueAccessor => throw new NotSupportedException();
+
+    // Genuinely read since Task 10: NotificationPayload.TryDecodeValue reaches the symbol's own
+    // value factory through this. Null (the default) is a real production value — Beckhoff's
+    // Symbol.ValueAccessor returns null when its factory services carry no accessor — and makes the
+    // payload decode decline, so a test needs to set this only to exercise the decode itself.
+    public IAccessorRawValue? ValueAccessor { get; set; }
 
     public void WriteValue(object value) => throw new NotSupportedException();
     public void WriteValue(object value, int size) => throw new NotSupportedException();
