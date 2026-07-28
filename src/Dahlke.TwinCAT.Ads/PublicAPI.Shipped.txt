@@ -78,6 +78,7 @@ Dahlke.TwinCAT.Ads.IAdsConnection.DisplayName.get -> string!
 Dahlke.TwinCAT.Ads.IAdsConnection.GetAdsStateAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<TwinCAT.Ads.AdsState>!
 Dahlke.TwinCAT.Ads.IAdsConnection.GetDeviceInfoAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.AdsDeviceInfo!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.GetSymbolsAsync(string? parentPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>!>!
+Dahlke.TwinCAT.Ads.IAdsConnection.GetSymbolsAsync(string? parentPath, bool includeChildren, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.IsConnected.get -> bool
 Dahlke.TwinCAT.Ads.IAdsConnection.PlcId.get -> string!
 Dahlke.TwinCAT.Ads.IAdsConnection.ReadValueAsync(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<object?>!
@@ -125,6 +126,7 @@ Dahlke.TwinCAT.Ads.SimulatedAdsConnection.Dispose() -> void
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.GetAdsStateAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<TwinCAT.Ads.AdsState>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.GetDeviceInfoAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.AdsDeviceInfo!>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.GetSymbolsAsync(string? parentPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>!>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.GetSymbolsAsync(string? parentPath, bool includeChildren, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>!>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.IsConnected.get -> bool
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.PlcId.get -> string!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.ReadValueAsync(string! symbolPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<object?>!
@@ -199,6 +201,7 @@ static Dahlke.TwinCAT.Ads.AdsSymbolInfo.operator !=(Dahlke.TwinCAT.Ads.AdsSymbol
 static Dahlke.TwinCAT.Ads.AdsSymbolInfo.operator ==(Dahlke.TwinCAT.Ads.AdsSymbolInfo? left, Dahlke.TwinCAT.Ads.AdsSymbolInfo? right) -> bool
 static Dahlke.TwinCAT.Ads.AdsValueResult.Failure(System.Exception! error) -> Dahlke.TwinCAT.Ads.AdsValueResult!
 static Dahlke.TwinCAT.Ads.AdsValueResult.Success(object? value) -> Dahlke.TwinCAT.Ads.AdsValueResult!
+static Dahlke.TwinCAT.Ads.AdsValueResult.Success(object? value, string? symbolPath, string? typeName, string? category) -> Dahlke.TwinCAT.Ads.AdsValueResult!
 static Dahlke.TwinCAT.Ads.HealthChecksBuilderExtensions.AddTwinCatAdsHealthCheck(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder! builder, string! name = "twincat_ads", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = null, System.Collections.Generic.IEnumerable<string!>? tags = null) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
 static Dahlke.TwinCAT.Ads.Iec61131Converter.Beckhoff.ConvertValue(string! typeName, object? rawValue) -> object?
 static Dahlke.TwinCAT.Ads.Iec61131Converter.Beckhoff.GetDefaultValue(string! typeName) -> object?
