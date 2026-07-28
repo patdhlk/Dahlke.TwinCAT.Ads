@@ -341,7 +341,13 @@ public sealed class SimulatedAdsConnection : IManagedConnection
             try
             {
                 var value = await ReadValueAsync(path, ct).ConfigureAwait(false);
-                results[path] = AdsValueResult.Success(value, path);
+
+                // Carry the same inferred metadata ReadValueWithMetadataAsync reports. A real
+                // connection populates TypeName/Category on every successful batch result, so
+                // leaving them null here would show a consumer developing against simulation a
+                // case that does not exist on hardware.
+                var (typeName, category) = InferPlcType(value);
+                results[path] = AdsValueResult.Success(value, path, typeName, category);
             }
             catch (OperationCanceledException)
             {
@@ -414,7 +420,13 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// <see cref="WriteControlAsync"/> call immediately.
     /// </remarks>
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
-        => Task.FromResult(_adsState);
+    {
+        // Honours the token like every other member here. It previously did not, which made this
+        // the one operation whose cancellation behaviour differed from the in-memory double the
+        // contract suite runs the facade against.
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(_adsState);
+    }
 
     /// <inheritdoc />
     /// <remarks>Records the requested state so <see cref="GetAdsStateAsync"/> reflects it immediately.</remarks>

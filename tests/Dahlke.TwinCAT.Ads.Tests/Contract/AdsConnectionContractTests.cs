@@ -182,6 +182,35 @@ public abstract class AdsConnectionContractTests
         Assert.Equal(2, results["MAIN.b"].Value);
     }
 
+    /// <summary>
+    /// A real connection populates <see cref="AdsValueResult.TypeName"/> and
+    /// <see cref="AdsValueResult.Category"/> on every successful batch result. Both simulated
+    /// implementations left them null, so a consumer developing against simulation saw nulls and
+    /// either coded around a case that does not exist on hardware or shipped a bug that only
+    /// appears once it meets a real PLC. The inferred names are indicative rather than
+    /// authoritative — the point is that the FIELDS are populated, matching the single-symbol
+    /// metadata read, which has always inferred them here.
+    /// </summary>
+    [Fact]
+    public async Task BatchRead_CarriesTypeMetadata_LikeTheSingleSymbolMetadataRead()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.a", (short)1);
+        await h.WriteRawAsync("MAIN.b", "hello");
+
+        var results = await h.Connection.ReadValuesAsync(["MAIN.a", "MAIN.b"], CancellationToken.None);
+
+        Assert.NotNull(results["MAIN.a"].TypeName);
+        Assert.NotNull(results["MAIN.a"].Category);
+        Assert.NotNull(results["MAIN.b"].TypeName);
+        Assert.NotNull(results["MAIN.b"].Category);
+
+        // ...and agrees with what a single-symbol metadata read of the same symbol reports.
+        var single = await h.Connection.ReadValueWithMetadataAsync("MAIN.a", CancellationToken.None);
+        Assert.Equal(single.TypeName, results["MAIN.a"].TypeName);
+        Assert.Equal(single.Category, results["MAIN.a"].Category);
+    }
+
     [Fact]
     public async Task BatchRead_MissingSymbol_YieldsSuccessNull()
     {
@@ -551,6 +580,85 @@ public abstract class AdsConnectionContractTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => h.Connection.SubscribeAsync("MAIN.x", 100, (_, _) => { }, cts.Token));
+    }
+
+    /// <summary>
+    /// The section heading says "every operation", but the cases above cover only the members that
+    /// existed before the capability work — read, write, batch and the untyped subscribe. Every
+    /// member added since must honour the token too, and nothing was checking that: the omission
+    /// hid a real divergence, with one implementation observing its token on
+    /// <c>GetAdsStateAsync</c> and the other ignoring it entirely.
+    /// </summary>
+    [Fact]
+    public async Task PreCancelledToken_MetadataRead_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.x", 1);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.ReadValueWithMetadataAsync("MAIN.x", cts.Token));
+    }
+
+    [Fact]
+    public async Task PreCancelledToken_AdsState_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.GetAdsStateAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task PreCancelledToken_DeviceInfo_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.GetDeviceInfoAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task PreCancelledToken_WriteControl_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.WriteControlAsync(AdsState.Stop, deviceState: 0, cts.Token));
+    }
+
+    [Fact]
+    public async Task PreCancelledToken_SymbolBrowsing_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.x", 1);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.GetSymbolsAsync(null, cts.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.GetSymbolsAsync(null, includeChildren: false, cts.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.SearchSymbolsAsync("MAIN", includeChildren: false, cts.Token));
+    }
+
+    [Fact]
+    public async Task PreCancelledToken_SubscribeNotification_Throws()
+    {
+        await using var h = await CreateHarnessAsync();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Connection.SubscribeAsync("MAIN.x", 100, (AdsNotification _) => { }, cts.Token));
     }
 
     // =====================================================================

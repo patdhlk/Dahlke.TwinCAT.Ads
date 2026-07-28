@@ -160,9 +160,12 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
                 continue;
 
             // Missing symbol → Success(null), mirroring the untyped single-read and the
-            // documented in-memory/sim batch semantic.
+            // documented in-memory/sim batch semantic. Type metadata is carried either way, as a
+            // real connection carries it — InferPlcType maps a null to ("UNKNOWN", "Unknown")
+            // rather than leaving the fields null.
             _symbols.TryGetValue(path, out var value);
-            results[path] = AdsValueResult.Success(value, path);
+            var (typeName, category) = SimulatedAdsConnection.InferPlcType(value);
+            results[path] = AdsValueResult.Success(value, path, typeName, category);
         }
         return Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(results);
     }
