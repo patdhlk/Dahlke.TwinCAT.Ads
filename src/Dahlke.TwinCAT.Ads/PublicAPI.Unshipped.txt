@@ -1,1 +1,2 @@
 #nullable enable
+static Dahlke.TwinCAT.Ads.AdsValueResult.Success(object? value, string? symbolPath, string? typeName, string? category) -> Dahlke.TwinCAT.Ads.AdsValueResult!

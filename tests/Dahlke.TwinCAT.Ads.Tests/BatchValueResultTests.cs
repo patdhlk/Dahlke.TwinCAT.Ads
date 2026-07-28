@@ -36,6 +36,72 @@ public class BatchValueResultTests
         Assert.Null(r.Error);
     }
 
+    /// <summary>
+    /// A consumer writing a test double of <see cref="IAdsConnection.ReadValueWithMetadataAsync"/>
+    /// must be able to produce a result that satisfies what the interface documents. Before this
+    /// factory existed, <see cref="AdsValueResult.TypeName"/> and
+    /// <see cref="AdsValueResult.Category"/> were public to read but reachable only through
+    /// internal factories, so every faked metadata result reported <see langword="null"/> for both
+    /// — and a consumer's own tests could not exercise the code path that reads them.
+    /// </summary>
+    [Fact]
+    public void Success_WithMetadata_CarriesPathTypeNameAndCategory()
+    {
+        var r = AdsValueResult.Success(42, "MAIN.Counter", "INT", "Primitive");
+
+        Assert.True(r.Succeeded);
+        Assert.Equal(42, r.Value);
+        Assert.Equal("MAIN.Counter", r.SymbolPath);
+        Assert.Equal("INT", r.TypeName);
+        Assert.Equal("Primitive", r.Category);
+        Assert.Null(r.Error);
+    }
+
+    /// <summary>
+    /// The factory must be genuinely <c>public</c>, which is the whole point of it and the one
+    /// thing the assertions above cannot show: this test project has <c>InternalsVisibleTo</c>, so
+    /// it would compile against an internal factory just as happily. An external consumer — the
+    /// party that actually needs to fake <see cref="IAdsConnection"/> — would not.
+    /// </summary>
+    [Fact]
+    public void Success_WithMetadata_IsPublic_SoExternalTestDoublesCanConstructIt()
+    {
+        var factory = typeof(AdsValueResult).GetMethod(
+            nameof(AdsValueResult.Success),
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+            binder: null,
+            types: [typeof(object), typeof(string), typeof(string), typeof(string)],
+            modifiers: null);
+
+        Assert.NotNull(factory);
+        Assert.True(factory.IsPublic);
+    }
+
+    [Fact]
+    public void Success_WithMetadata_AllowsNullMetadata()
+    {
+        var r = AdsValueResult.Success(null, symbolPath: null, typeName: null, category: null);
+
+        Assert.True(r.Succeeded);
+        Assert.Null(r.Value);
+        Assert.Null(r.SymbolPath);
+        Assert.Null(r.TypeName);
+        Assert.Null(r.Category);
+    }
+
+    /// <summary>
+    /// The path threaded by the metadata factory is the one <see cref="AdsValueResult.GetValue{T}"/>
+    /// names in a conversion error — the same reason the batch machinery threads it.
+    /// </summary>
+    [Fact]
+    public void Success_WithMetadata_SymbolPathSurfacesInConversionErrors()
+    {
+        var r = AdsValueResult.Success("not-a-number", "MAIN.Counter", "STRING", "String");
+
+        var ex = Assert.Throws<InvalidCastException>(() => r.GetValue<int>());
+        Assert.Contains("MAIN.Counter", ex.Message);
+    }
+
     [Fact]
     public void Failure_CarriesError_NotSucceeded()
     {

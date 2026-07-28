@@ -91,10 +91,29 @@ public sealed class AdsValueResult
         => new(succeeded: true, value, error: null, symbolPath);
 
     /// <summary>
-    /// Creates a successful result carrying the decoded value together with the symbol's
-    /// PLC type metadata.
+    /// Creates a successful result carrying the decoded value together with the symbol's path and
+    /// PLC type metadata — the full shape
+    /// <see cref="IAdsConnection.ReadValueWithMetadataAsync"/> produces.
     /// </summary>
-    internal static AdsValueResult Success(object? value, string? symbolPath, string? typeName, string? category)
+    /// <param name="value">The decoded value; may be <see langword="null"/>.</param>
+    /// <param name="symbolPath">
+    /// The symbol this result describes, surfaced by <see cref="GetValue{T}"/> in conversion errors.
+    /// May be <see langword="null"/>.
+    /// </param>
+    /// <param name="typeName">The PLC type name, for example <c>ST_Motor</c> or <c>INT</c>.</param>
+    /// <param name="category">
+    /// The type category, for example <c>Primitive</c>, <c>Struct</c>, <c>Array</c> or <c>Enum</c>.
+    /// </param>
+    /// <remarks>
+    /// Public specifically so a test double of <see cref="IAdsConnection"/> can satisfy the contract
+    /// that interface documents. <see cref="TypeName"/> and <see cref="Category"/> are part of the
+    /// public shape of a metadata read, so a consumer faking
+    /// <see cref="IAdsConnection.ReadValueWithMetadataAsync"/> must be able to populate them —
+    /// otherwise every faked result reports <see langword="null"/> for both, and the consumer's own
+    /// code paths that read them cannot be tested at all. Prefer <see cref="Success(object?)"/> when
+    /// no metadata is being modelled.
+    /// </remarks>
+    public static AdsValueResult Success(object? value, string? symbolPath, string? typeName, string? category)
         => new(succeeded: true, value, error: null, symbolPath, typeName, category);
 
     /// <summary>
