@@ -52,6 +52,50 @@ public class PlcValueDecoderTests
         Assert.Equal(true, decoded["Running"]);
     }
 
+    /// <summary>
+    /// A UNION's members are ordinary readable sub-symbols that happen to overlap in storage, and
+    /// Beckhoff's value factory wraps a union in the same <c>DynamicValue</c> it wraps a struct in.
+    /// Passing that through untouched would put a TwinCAT type on a surface documented as neutral —
+    /// the one thing this decoder exists to prevent — so a union decodes by the same sub-symbol
+    /// walk a struct does.
+    /// </summary>
+    [Fact]
+    public async Task Decode_converts_union_to_dictionary_keyed_by_instance_name()
+    {
+        var symbol = new StubSymbol(DataTypeCategory.Union, "U_Payload",
+            new StubValueSymbol("AsInt", DataTypeCategory.Primitive, "DINT", 1145258561),
+            new StubValueSymbol("AsReal", DataTypeCategory.Primitive, "REAL", 1000.5f));
+
+        var decoded = Assert.IsType<Dictionary<string, object?>>(
+            await PlcValueDecoder.DecodeAsync(new object(), symbol, CancellationToken.None));
+
+        Assert.Equal(2, decoded.Count);
+        Assert.Equal(1145258561, decoded["AsInt"]);
+        Assert.Equal(1000.5f, decoded["AsReal"]);
+    }
+
+    /// <summary>
+    /// An opaque union — no sub-symbols to walk — passes through, exactly as an opaque struct does.
+    /// </summary>
+    [Fact]
+    public async Task Decode_passes_opaque_union_through_unchanged()
+    {
+        var symbol = new StubSymbol(DataTypeCategory.Union, "U_Opaque");
+        var raw = new object();
+
+        Assert.Same(raw, await PlcValueDecoder.DecodeAsync(raw, symbol, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task TryDecodeWithoutReads_refuses_a_union_with_sub_symbols()
+    {
+        var symbol = new StubSymbol(DataTypeCategory.Union, "U_Payload",
+            new StubValueSymbol("AsInt", DataTypeCategory.Primitive, "DINT", 1));
+
+        Assert.False(PlcValueDecoder.TryDecodeWithoutReads(new object(), symbol, out var decoded));
+        Assert.Null(decoded);
+    }
+
     [Fact]
     public async Task Decode_converts_nested_struct_recursively()
     {

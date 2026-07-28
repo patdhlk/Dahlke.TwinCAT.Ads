@@ -435,14 +435,51 @@ internal sealed class AdsConnection : IManagedConnection
     private static readonly object SkippedReadPlaceholder = new();
 
     /// <summary>
-    /// Classifies a resolved symbol as a container (struct, function block or array) whose value
-    /// must be decoded individually via <see cref="PlcValueDecoder"/> to preserve its nested tree,
-    /// as opposed to a scalar/string/enum that can share a sum command with other symbols.
+    /// Classifies a resolved symbol as a container (struct, function block, union or array) whose
+    /// value must be decoded individually via <see cref="PlcValueDecoder"/> to preserve its nested
+    /// tree, as opposed to a scalar/string/enum that can share a sum command with other symbols.
     /// Internal (rather than private) so the classification itself — independent of any ADS
     /// round-trip — is directly unit-testable.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Not every remaining category is genuinely scalar.</b> Anything not listed here takes the
+    /// sum-command path and is delivered in whatever shape Beckhoff's value factory produced, with
+    /// no neutral-tree decode. For <see cref="DataTypeCategory.Primitive"/>,
+    /// <see cref="DataTypeCategory.String"/>, <see cref="DataTypeCategory.Enum"/> and
+    /// <see cref="DataTypeCategory.SubRange"/> that is exactly right — the factory already yields a
+    /// plain .NET value. For four others it is a known, accepted degradation:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <see cref="DataTypeCategory.Alias"/> — an alias to a primitive decodes correctly, but an
+    ///     alias to a STRUCT or ARRAY reaches the caller as the factory's own object (a
+    ///     <c>DynamicValue</c> or raw <see cref="Array"/>) rather than a neutral tree.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <see cref="DataTypeCategory.Program"/> — a PROGRAM instance is a container of variables;
+    ///     it is not projected member-by-member here.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <see cref="DataTypeCategory.Pointer"/> and <see cref="DataTypeCategory.Reference"/> —
+    ///     delivered as the raw address / whatever the factory resolves, never dereferenced into a
+    ///     tree. <see cref="NotificationPayload"/> separately declines to serve a
+    ///     <see cref="DataTypeCategory.Reference"/> from a notification payload at all.
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// These are NOT routed through the decoder because whether a sub-symbol walk is meaningful
+    /// differs per category and could not be established without hardware — and a wrong route would
+    /// turn a currently-working pass-through into a failed read. A consumer serialising results
+    /// generically should treat a value whose reported
+    /// <see cref="AdsValueResult.Category"/> is one of the four above as opaque. Union WAS in this
+    /// list and is now decoded: its members are ordinary readable sub-symbols, so the walk is
+    /// well defined (see <see cref="PlcValueDecoder.DecodesFromSubSymbolsOnly"/>).
+    /// </para>
+    /// </remarks>
     internal static bool IsContainer(ISymbol symbol) =>
-        symbol.Category is DataTypeCategory.Struct or DataTypeCategory.FunctionBlock or DataTypeCategory.Array;
+        symbol.Category is DataTypeCategory.Struct or DataTypeCategory.FunctionBlock
+            or DataTypeCategory.Union or DataTypeCategory.Array;
 
     /// <inheritdoc />
     /// <remarks>
@@ -1035,6 +1072,10 @@ internal sealed class AdsConnection : IManagedConnection
 
     /// <inheritdoc />
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+        => GetSymbolsAsync(parentPath, includeChildren: true, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
         => RunBrowseAsync(() =>
         {
             var loader = GetSymbolLoader();
@@ -1052,7 +1093,7 @@ internal sealed class AdsConnection : IManagedConnection
             }
 
             return (IReadOnlyList<AdsSymbolInfo>)symbols
-                .Select(s => MapSymbol(s, includeChildren: true))
+                .Select(s => MapSymbol(s, includeChildren))
                 .ToList();
         }, parentPath ?? "<root>", ct);
 

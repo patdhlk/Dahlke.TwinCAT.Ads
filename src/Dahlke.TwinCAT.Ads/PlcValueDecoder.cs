@@ -14,12 +14,20 @@ namespace Dahlke.TwinCAT.Ads;
 /// </para>
 /// <list type="bullet">
 ///   <item><description>Primitives and strings — returned as-is.</description></item>
-///   <item><description>Structs and function blocks — <c>Dictionary&lt;string, object?&gt;</c>
-///     keyed by each sub-symbol's <see cref="IInstance.InstanceName"/>.</description></item>
+///   <item><description>Structs, function blocks and unions —
+///     <c>Dictionary&lt;string, object?&gt;</c> keyed by each sub-symbol's
+///     <see cref="IInstance.InstanceName"/>.</description></item>
 ///   <item><description>Arrays — <c>object?[]</c> with each element decoded recursively.</description></item>
 ///   <item><description>Enums — the numeric backing value.</description></item>
 ///   <item><description><see langword="null"/> — <see langword="null"/>.</description></item>
 /// </list>
+/// <para>
+/// <b>Categories this decoder does NOT transform</b> pass through in Beckhoff's own shape:
+/// <see cref="DataTypeCategory.Alias"/>, <see cref="DataTypeCategory.Program"/>,
+/// <see cref="DataTypeCategory.Pointer"/> and <see cref="DataTypeCategory.Reference"/>. For an
+/// alias to a primitive that is correct; for the rest it is a known degradation, documented on
+/// <c>AdsConnection.IsContainer</c> along with why routing them here was not attempted.
+/// </para>
 /// <para>
 /// Struct and array members are read through their sub-symbols rather than unpacked from
 /// raw bytes, so PLC struct packing, string encoding and enum backing types are handled by
@@ -52,9 +60,8 @@ internal static class PlcValueDecoder
 
         var category = symbol.Category;
 
-        // Structs / function blocks: iterate sub-symbols and recurse.
-        if (category is DataTypeCategory.Struct or DataTypeCategory.FunctionBlock
-            && symbol.SubSymbols.Count > 0)
+        // Structs / function blocks / unions: iterate sub-symbols and recurse.
+        if (DecodesFromSubSymbolsOnly(symbol))
         {
             return await DecodeStructAsync(symbol, ct).ConfigureAwait(false);
         }
@@ -93,9 +100,9 @@ internal static class PlcValueDecoder
             return true;
         }
 
-        // Containers are the shapes DecodeAsync actually transforms: a struct/function block with
-        // sub-symbols is rebuilt as a dictionary by reading each member (one ADS read per member),
-        // and an array is rebuilt as an object?[] element by element (reading per-element
+        // Containers are the shapes DecodeAsync actually transforms: a struct/function block/union
+        // with sub-symbols is rebuilt as a dictionary by reading each member (one ADS read per
+        // member), and an array is rebuilt as an object?[] element by element (reading per-element
         // sub-symbols when they line up). Neither is a pass-through, so neither can be served
         // without I/O — even the array whose sub-symbols do not line up still needs the rebuild.
         if (symbol.Category is DataTypeCategory.Array || DecodesFromSubSymbolsOnly(symbol))
@@ -112,18 +119,25 @@ internal static class PlcValueDecoder
 
     /// <summary>
     /// True when decoding <paramref name="symbol"/> reads entirely from its own sub-symbols and
-    /// never consumes an externally supplied <c>value</c> — this holds for structs and function
-    /// blocks that expose at least one sub-symbol. A caller may use this to skip fetching its own
-    /// top-level raw value for <paramref name="symbol"/> before calling <see cref="DecodeAsync"/>:
-    /// <see cref="DecodeAsync"/>'s <c>value</c> parameter is only ever consulted for a null check
-    /// in that case, never returned or inspected further, so any non-null placeholder satisfies
-    /// it. Arrays (which need the raw value for <c>Array.Length</c> and element access) and
-    /// opaque structs/function blocks with no sub-symbols (which pass the raw value through
-    /// unchanged) both still need a genuine externally supplied value, so this returns
-    /// <see langword="false"/> for them.
+    /// never consumes an externally supplied <c>value</c> — this holds for structs, function
+    /// blocks and unions that expose at least one sub-symbol. A caller may use this to skip
+    /// fetching its own top-level raw value for <paramref name="symbol"/> before calling
+    /// <see cref="DecodeAsync"/>: <see cref="DecodeAsync"/>'s <c>value</c> parameter is only ever
+    /// consulted for a null check in that case, never returned or inspected further, so any
+    /// non-null placeholder satisfies it. Arrays (which need the raw value for
+    /// <c>Array.Length</c> and element access) and opaque structs/function blocks/unions with no
+    /// sub-symbols (which pass the raw value through unchanged) both still need a genuine
+    /// externally supplied value, so this returns <see langword="false"/> for them.
     /// </summary>
+    /// <remarks>
+    /// <b>Unions decode like structs.</b> A union's members are ordinary readable sub-symbols that
+    /// merely overlap in storage, and Beckhoff's value factory wraps a union in the same
+    /// <c>DynamicValue</c> it wraps a struct in — so passing one through would put a TwinCAT type
+    /// on a surface documented as neutral. Reading each member independently is well defined; the
+    /// members simply reinterpret the same bytes, which is what a union means.
+    /// </remarks>
     public static bool DecodesFromSubSymbolsOnly(ISymbol symbol) =>
-        symbol.Category is DataTypeCategory.Struct or DataTypeCategory.FunctionBlock
+        symbol.Category is DataTypeCategory.Struct or DataTypeCategory.FunctionBlock or DataTypeCategory.Union
         && symbol.SubSymbols.Count > 0;
 
     private static async Task<Dictionary<string, object?>> DecodeStructAsync(ISymbol symbol, CancellationToken ct)

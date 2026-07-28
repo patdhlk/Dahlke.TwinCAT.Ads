@@ -1,2 +1,4 @@
 #nullable enable
+Dahlke.TwinCAT.Ads.IAdsConnection.GetSymbolsAsync(string? parentPath, bool includeChildren, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>!>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.GetSymbolsAsync(string? parentPath, bool includeChildren, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>!>!
 static Dahlke.TwinCAT.Ads.AdsValueResult.Success(object? value, string? symbolPath, string? typeName, string? category) -> Dahlke.TwinCAT.Ads.AdsValueResult!

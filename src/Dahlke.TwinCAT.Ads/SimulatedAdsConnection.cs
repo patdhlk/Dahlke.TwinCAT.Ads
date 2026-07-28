@@ -547,6 +547,15 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// never consults <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/>.
     /// </remarks>
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+        => GetSymbolsAsync(parentPath, includeChildren: true, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Same synthetic-container derivation as
+    /// <see cref="GetSymbolsAsync(string?, CancellationToken)"/>; <paramref name="includeChildren"/>
+    /// selects whether each returned node carries its nested subtree, matching a real connection.
+    /// </remarks>
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -566,7 +575,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
             .ToList();
 
         var result = childNames
-            .Select(name => BuildSymbolInfo(prefix + name, includeChildren: true))
+            .Select(name => BuildSymbolInfo(prefix + name, includeChildren))
             .ToList();
 
         return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);

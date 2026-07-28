@@ -552,6 +552,13 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+    {
+        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
+        return await conn.GetSymbolsAsync(parentPath, includeChildren, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
     {
         var conn = await SnapshotAsync(ct).ConfigureAwait(false);

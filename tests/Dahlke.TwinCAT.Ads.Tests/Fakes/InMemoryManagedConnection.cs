@@ -260,6 +260,10 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// documented mapping spec.
     /// </summary>
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+        => GetSymbolsAsync(parentPath, includeChildren: true, ct);
+
+    /// <inheritdoc cref="GetSymbolsAsync(string?, CancellationToken)"/>
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -279,7 +283,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
             .ToList();
 
         var result = childNames
-            .Select(name => BuildSymbolInfo(prefix + name, includeChildren: true))
+            .Select(name => BuildSymbolInfo(prefix + name, includeChildren))
             .ToList();
 
         return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);

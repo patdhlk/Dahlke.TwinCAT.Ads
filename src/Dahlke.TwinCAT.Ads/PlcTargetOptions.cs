@@ -28,7 +28,7 @@ public sealed class PlcTargetOptions
 
     /// <summary>
     /// Timeout in milliseconds for symbol-browsing operations
-    /// (<see cref="IAdsConnection.GetSymbolsAsync"/> and
+    /// (<see cref="IAdsConnection.GetSymbolsAsync(string?, bool, System.Threading.CancellationToken)"/> and
     /// <see cref="IAdsConnection.SearchSymbolsAsync"/>).
     /// </summary>
     /// <remarks>

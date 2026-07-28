@@ -112,6 +112,52 @@ public class AdsConnectionSymbolBrowsingTests
         Assert.All(motorInfo.Children!, c => Assert.Null(c.Children));
     }
 
+    /// <summary>
+    /// The two-argument overload is documented as equivalent to <c>includeChildren: true</c>, which
+    /// is what the recursive test above pins. This pins the other half: asking for one level
+    /// returns one level, so a root browse does not project the whole PLC.
+    /// </summary>
+    [Fact]
+    public async Task GetSymbolsAsync_IncludeChildrenFalse_ReturnsOneLevel_WithNullChildren()
+    {
+        var speed = new StubValueSymbol("Speed", DataTypeCategory.Primitive, "INT", 1500);
+        var running = new StubValueSymbol("Running", DataTypeCategory.Primitive, "BOOL", true);
+        var motor = new StubSymbol(DataTypeCategory.Struct, "ST_Motor", speed, running) { InstanceName = "MAIN.Motor" };
+        var main = new StubSymbol(DataTypeCategory.Struct, "MAIN_PRG", motor) { InstanceName = "MAIN" };
+        using var connection = CreateConnection(30_000, main);
+
+        var symbols = await connection.GetSymbolsAsync(null, includeChildren: false, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        var mainInfo = Assert.Single(symbols);
+        Assert.Equal("MAIN", mainInfo.InstancePath);
+
+        // Null, never an empty list — the same distinction the leaf case makes.
+        Assert.Null(mainInfo.Children);
+    }
+
+    [Fact]
+    public async Task GetSymbolsAsync_IncludeChildrenTrue_MatchesTheTwoArgumentOverload()
+    {
+        var speed = new StubValueSymbol("Speed", DataTypeCategory.Primitive, "INT", 1500);
+        var motor = new StubSymbol(DataTypeCategory.Struct, "ST_Motor", speed) { InstanceName = "MAIN.Motor" };
+        var main = new StubSymbol(DataTypeCategory.Struct, "MAIN_PRG", motor) { InstanceName = "MAIN" };
+        using var connection = CreateConnection(30_000, main);
+
+        var explicitly = await connection.GetSymbolsAsync(null, includeChildren: true, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        var byDefault = await connection.GetSymbolsAsync(null, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(byDefault.Count, explicitly.Count);
+        Assert.Equal(
+            byDefault[0].Children!.Single().InstancePath,
+            explicitly[0].Children!.Single().InstancePath);
+        Assert.Equal(
+            byDefault[0].Children!.Single().Children!.Count,
+            explicitly[0].Children!.Single().Children!.Count);
+    }
+
     [Fact]
     public async Task GetSymbolsAsync_UnknownParent_ThrowsAdsErrorException_SymbolNotFound()
     {

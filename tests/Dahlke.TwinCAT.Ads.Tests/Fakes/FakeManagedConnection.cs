@@ -217,6 +217,9 @@ internal sealed class FakeManagedConnection : IManagedConnection
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
         => throw new NotSupportedException();
 
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+        => throw new NotSupportedException();
+
     public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
         => throw new NotSupportedException();
 

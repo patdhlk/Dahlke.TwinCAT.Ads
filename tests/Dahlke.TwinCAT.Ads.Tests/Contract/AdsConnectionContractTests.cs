@@ -569,6 +569,39 @@ public abstract class AdsConnectionContractTests
         Assert.NotEmpty(symbols);
     }
 
+    /// <summary>
+    /// Both halves of the <c>includeChildren</c> flag, pinned across every implementation. The
+    /// two-argument overload is documented as equivalent to <c>includeChildren: true</c>; passing
+    /// <see langword="false"/> must return the same nodes with a <see langword="null"/>
+    /// <see cref="AdsSymbolInfo.Children"/> — never an empty list, and never a different set of
+    /// nodes.
+    /// </summary>
+    [Fact]
+    public async Task GetSymbolsAsync_includeChildren_controls_only_the_subtree_not_the_nodes()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Motor.Speed", 1500);
+
+        var withChildren = await h.Connection.GetSymbolsAsync(null, includeChildren: true, CancellationToken.None);
+        var withoutChildren = await h.Connection.GetSymbolsAsync(null, includeChildren: false, CancellationToken.None);
+        var byDefault = await h.Connection.GetSymbolsAsync(null, CancellationToken.None);
+
+        // Same nodes at this level regardless of the flag.
+        Assert.Equal(
+            withChildren.Select(s => s.InstancePath),
+            withoutChildren.Select(s => s.InstancePath));
+        Assert.Equal(
+            withChildren.Select(s => s.InstancePath),
+            byDefault.Select(s => s.InstancePath));
+
+        // The flag decides only whether the subtree comes with them.
+        Assert.NotNull(Assert.Single(withChildren).Children);
+        Assert.Null(Assert.Single(withoutChildren).Children);
+
+        // The two-argument overload is the includeChildren: true shorthand.
+        Assert.NotNull(Assert.Single(byDefault).Children);
+    }
+
     [Fact]
     public async Task GetSymbolsAsync_throws_for_an_unknown_parent()
     {
