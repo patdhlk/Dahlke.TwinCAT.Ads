@@ -495,6 +495,20 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+    {
+        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
+        return await conn.GetSymbolsAsync(parentPath, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+    {
+        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
+        return await conn.SearchSymbolsAsync(pattern, includeChildren, ct).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// A durable subscription record: the immutable subscribe arguments plus the
     /// current underlying registration (and the connection it was created on). Held

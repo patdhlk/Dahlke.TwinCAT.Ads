@@ -439,4 +439,60 @@ public interface IAdsConnection
     /// <see langword="null"/>.
     /// </remarks>
     Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct);
+
+    /// <summary>
+    /// Lists the PLC's symbols one level at a time.
+    /// </summary>
+    /// <param name="parentPath">
+    /// The container to enumerate, or <see langword="null"/>/empty for the root symbols.
+    /// </param>
+    /// <param name="ct">Cancels the wait for the browse (see remarks) — it cannot interrupt the browse itself.</param>
+    /// <returns>The immediate symbols under <paramref name="parentPath"/>, each with its children populated.</returns>
+    /// <exception cref="AdsErrorException">
+    /// Thrown with <see cref="AdsErrorCode.DeviceSymbolNotFound"/> when
+    /// <paramref name="parentPath"/> does not resolve.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> elapses first — note this
+    /// is the browse timeout, NOT <see cref="PlcTargetOptions.TimeoutMs"/>.
+    /// </exception>
+    /// <remarks>
+    /// Browsing uploads the PLC's symbol table, a blocking call with no cancellable overload. The
+    /// implementation runs it on the thread pool and races it against
+    /// <paramref name="ct"/>/<see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> so the CALLER
+    /// stops waiting either way; a browse that loses that race is abandoned — it keeps running to
+    /// completion on its thread-pool thread, but its result is discarded. The browse itself is
+    /// never interrupted, only the caller's wait for it.
+    /// </remarks>
+    Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct);
+
+    /// <summary>
+    /// Searches the whole symbol tree for symbols whose instance path contains
+    /// <paramref name="pattern"/>, compared case-insensitively.
+    /// </summary>
+    /// <param name="pattern">Substring to match against each symbol's instance path.</param>
+    /// <param name="includeChildren">
+    /// When <see langword="true"/> each match carries its nested children; when
+    /// <see langword="false"/> every match has a <see langword="null"/>
+    /// <see cref="AdsSymbolInfo.Children"/>, which keeps large result sets flat and cheap.
+    /// </param>
+    /// <param name="ct">Cancels the wait for the search (see remarks) — it cannot interrupt the search itself.</param>
+    /// <returns>All matching symbols, or an empty list when nothing matches.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> elapses first.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// This walks the ENTIRE symbol tree, so its cost is proportional to the PLC's total symbol
+    /// count — prefer <see cref="GetSymbolsAsync"/> for interactive drill-down of one level at a
+    /// time.
+    /// </para>
+    /// <para>
+    /// Same thread-pool/timeout-race semantics as <see cref="GetSymbolsAsync"/>: the underlying
+    /// walk cannot itself be interrupted, only the caller's wait for it (see its remarks).
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct);
 }

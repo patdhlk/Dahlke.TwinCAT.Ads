@@ -623,6 +623,120 @@ internal sealed class AdsConnection : IManagedConnection
     public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
 
+    /// <inheritdoc />
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+        => RunBrowseAsync(() =>
+        {
+            var loader = GetSymbolLoader();
+
+            ISymbolCollection<ISymbol> symbols;
+            if (string.IsNullOrEmpty(parentPath))
+            {
+                symbols = loader.Symbols;
+            }
+            else
+            {
+                if (!loader.Symbols.TryGetInstance(parentPath, out var parent))
+                    throw new AdsErrorException($"Symbol '{parentPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+                symbols = parent.SubSymbols;
+            }
+
+            return (IReadOnlyList<AdsSymbolInfo>)symbols
+                .Select(s => MapSymbol(s, includeChildren: true))
+                .ToList();
+        }, parentPath ?? "<root>", ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+        => RunBrowseAsync(() =>
+        {
+            var loader = GetSymbolLoader();
+
+            return (IReadOnlyList<AdsSymbolInfo>)FlattenSymbols(loader.Symbols)
+                .Where(s => s.InstancePath.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                .Select(s => MapSymbol(s, includeChildren))
+                .ToList();
+        }, pattern, ct);
+
+    /// <summary>
+    /// Runs a synchronous symbol-browse <paramref name="browse"/> on the thread pool, racing it
+    /// against <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> (linked to <paramref name="ct"/>)
+    /// so the CALLER stops waiting even though the browse itself cannot be interrupted.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The Beckhoff symbol upload inside <paramref name="browse"/> is a blocking call with no
+    /// cancellable overload. Passing a <see cref="CancellationToken"/> into an overload of
+    /// <c>Task.Run</c> only prevents the delegate from starting at all; once the delegate is
+    /// actually running on its thread-pool thread, that token has no further effect — cancelling
+    /// it does not make <c>Task.Run</c>'s returned task complete early. So this method does not
+    /// rely on that: it races the browse against a separate
+    /// <see cref="Task.Delay(int, CancellationToken)"/> via <see cref="Task.WhenAny(Task, Task)"/>
+    /// instead. Whichever finishes first wins:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     If the browse wins, its result (or exception, e.g. a "symbol not found"
+    ///     <see cref="AdsErrorException"/>) is awaited and returned/propagated normally.
+    ///   </description></item>
+    ///   <item><description>
+    ///     If the timer wins — because <paramref name="ct"/> was cancelled or
+    ///     <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> elapsed — this method throws
+    ///     immediately via <see cref="CancellationDisambiguator"/> and the browse is ABANDONED: it
+    ///     keeps running to completion on its thread-pool thread, but its eventual result or
+    ///     exception is discarded. The browse itself is never interrupted, only the caller's wait
+    ///     for it.
+    ///   </description></item>
+    /// </list>
+    /// </remarks>
+    private async Task<IReadOnlyList<AdsSymbolInfo>> RunBrowseAsync(
+        Func<IReadOnlyList<AdsSymbolInfo>> browse, string context, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var browseTask = Task.Run(browse);
+        var timeoutTask = Task.Delay(_options.SymbolBrowseTimeoutMs, ct);
+
+        var winner = await Task.WhenAny(browseTask, timeoutTask).ConfigureAwait(false);
+
+        if (ReferenceEquals(winner, browseTask))
+            return await browseTask.ConfigureAwait(false);
+
+        throw CancellationDisambiguator.CreateException(ct, context, PlcId, _options.SymbolBrowseTimeoutMs);
+    }
+
+    /// <summary>
+    /// Maps a Beckhoff <see cref="ISymbol"/> to the neutral <see cref="AdsSymbolInfo"/> shape,
+    /// recursing into <see cref="ISymbol.SubSymbols"/> only when <paramref name="includeChildren"/>
+    /// is <see langword="true"/> and there are any — otherwise <see cref="AdsSymbolInfo.Children"/>
+    /// is <see langword="null"/>, never an empty list.
+    /// </summary>
+    private static AdsSymbolInfo MapSymbol(ISymbol symbol, bool includeChildren)
+    {
+        List<AdsSymbolInfo>? children = null;
+        if (includeChildren && symbol.SubSymbols.Count > 0)
+            children = symbol.SubSymbols.Select(s => MapSymbol(s, includeChildren: true)).ToList();
+
+        return new AdsSymbolInfo(
+            symbol.InstancePath,
+            symbol.TypeName,
+            symbol.Category.ToString(),
+            symbol.ByteSize,
+            string.IsNullOrEmpty(symbol.Comment) ? null : symbol.Comment,
+            children);
+    }
+
+    /// <summary>Depth-first walk of the entire symbol tree, used by <see cref="SearchSymbolsAsync"/>.</summary>
+    private static IEnumerable<ISymbol> FlattenSymbols(ISymbolCollection<ISymbol> symbols)
+    {
+        foreach (var symbol in symbols)
+        {
+            yield return symbol;
+            foreach (var child in FlattenSymbols(symbol.SubSymbols))
+                yield return child;
+        }
+    }
+
     /// <summary>
     /// Logs the PLC symbol tree for diagnostics.
     /// Symbols are included when their depth (dot-count in the symbol's <c>InstancePath</c>)

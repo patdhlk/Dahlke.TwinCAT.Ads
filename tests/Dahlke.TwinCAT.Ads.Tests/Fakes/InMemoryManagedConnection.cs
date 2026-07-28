@@ -202,6 +202,91 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, logger: null), ct);
 
+    // ---- Symbol browsing --------------------------------------------------
+
+    /// <summary>
+    /// Mirrors <see cref="SimulatedAdsConnection.GetSymbolsAsync"/>'s documented tree-from-dotted-
+    /// paths semantics — deliberately re-implemented rather than shared (same rationale as the
+    /// rest of this double's data plane; see the class remarks), except for
+    /// <see cref="SimulatedAdsConnection.InferPlcType"/>, which is reused directly as the
+    /// documented mapping spec.
+    /// </summary>
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (!string.IsNullOrEmpty(parentPath) && !HasAnySymbolUnder(parentPath))
+            throw new AdsErrorException($"In-memory symbol '{parentPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+
+        var prefix = string.IsNullOrEmpty(parentPath) ? string.Empty : parentPath + ".";
+        var childNames = _symbols.Keys
+            .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
+            .Select(k => k.Substring(prefix.Length).Split('.')[0])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var result = childNames
+            .Select(name => BuildSymbolInfo(prefix + name, includeChildren: true))
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
+    }
+
+    /// <inheritdoc cref="GetSymbolsAsync"/>
+    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var result = AllPaths()
+            .Where(p => p.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .Select(p => BuildSymbolInfo(p, includeChildren))
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
+    }
+
+    private bool HasAnySymbolUnder(string path) =>
+        _symbols.Keys.Any(k =>
+            k.Equals(path, StringComparison.OrdinalIgnoreCase) ||
+            k.StartsWith(path + ".", StringComparison.OrdinalIgnoreCase));
+
+    private IEnumerable<string> AllPaths()
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in _symbols.Keys)
+        {
+            var segments = key.Split('.');
+            for (var i = 1; i <= segments.Length; i++)
+                paths.Add(string.Join('.', segments.Take(i)));
+        }
+        return paths;
+    }
+
+    private AdsSymbolInfo BuildSymbolInfo(string path, bool includeChildren)
+    {
+        var isLeaf = _symbols.TryGetValue(path, out var value);
+        var (typeName, category) = isLeaf ? SimulatedAdsConnection.InferPlcType(value) : ("STRUCT", "Struct");
+
+        List<AdsSymbolInfo>? children = null;
+        if (includeChildren)
+        {
+            var prefix = path + ".";
+            var childNames = _symbols.Keys
+                .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
+                .Select(k => k.Substring(prefix.Length).Split('.')[0])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (childNames.Count > 0)
+                children = childNames.Select(n => BuildSymbolInfo(prefix + n, includeChildren: true)).ToList();
+        }
+
+        return new AdsSymbolInfo(path, typeName, category, ByteSize: 0, Comment: null, children);
+    }
+
     /// <summary>
     /// Stores <paramref name="value"/> at <paramref name="symbolPath"/> and fires subscribers
     /// when the value changed (on-change semantics). The first write to a path always fires.

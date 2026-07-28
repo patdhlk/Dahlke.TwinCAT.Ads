@@ -8,10 +8,13 @@ using TwinCAT.ValueAccess;
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
-/// Minimal <see cref="ISymbol"/> stub exposing what <see cref="PlcValueDecoder"/> and the
-/// batch-read partition in <c>AdsConnection.ReadValuesAsync</c> genuinely read:
-/// <see cref="Category"/>, <see cref="TypeName"/>, <see cref="InstanceName"/> and
-/// <see cref="SubSymbols"/> (its <c>Count</c> and enumeration), plus (on
+/// Minimal <see cref="ISymbol"/> stub exposing what <see cref="PlcValueDecoder"/>, the
+/// batch-read partition in <c>AdsConnection.ReadValuesAsync</c>, and (since Task 6) the symbol
+/// browsing in <c>AdsConnection.GetSymbolsAsync</c>/<c>SearchSymbolsAsync</c> genuinely read:
+/// <see cref="Category"/>, <see cref="TypeName"/>, <see cref="InstanceName"/>,
+/// <see cref="InstancePath"/>, <see cref="ByteSize"/>, <see cref="Comment"/>, and
+/// <see cref="SubSymbols"/> (its <c>Count</c>, indexer, and enumeration — see
+/// <see cref="StubSymbolCollection"/>), plus (on
 /// <see cref="StubValueSymbol"/>) the async <c>ReadValueAsync(CancellationToken)</c>
 /// <see cref="PlcValueDecoder"/> now uses to read struct members / array elements. Everything
 /// else throws so that any new dependency either consumer grows fails loudly rather than
@@ -31,10 +34,17 @@ internal class StubSymbol : ISymbol
     public string InstanceName { get; set; } = "Stub";
     public ISymbolCollection<ISymbol> SubSymbols { get; }
 
+    // Genuinely read by AdsSymbolInfo mapping (Task 6): AdsConnection.MapSymbol reads
+    // InstancePath, ByteSize and Comment for every browsed/searched symbol. InstancePath mirrors
+    // InstanceName — every test that browses a symbol already sets InstanceName to the full
+    // dotted path (see e.g. ReadValueWithMetadataAsyncTests), so no separate field is needed.
+    // ByteSize/Comment are plain settable properties (defaulting to 0/"") so tests that don't
+    // care about them need not set anything.
+    public string InstancePath => InstanceName;
+    public int ByteSize { get; set; }
+    public string Comment { get; set; } = "";
+
     // --- Not consumed by PlcValueDecoder -------------------------------------
-    public string InstancePath => throw new NotSupportedException();
-    public int ByteSize => throw new NotSupportedException();
-    public string Comment => throw new NotSupportedException();
     public IDataType? DataType => throw new NotSupportedException();
     public ISymbol? Parent => throw new NotSupportedException();
     public bool IsContainerType => throw new NotSupportedException();
@@ -174,9 +184,15 @@ internal sealed class StubSymbolCollection(IReadOnlyList<ISymbol> symbols) : ISy
     // non-generic overload is never invoked by the decoder or any test.
     IEnumerator IEnumerable.GetEnumerator() => throw new NotSupportedException();
 
+    // Genuinely read since Task 6: AdsConnection.MapSymbol recurses via
+    // `symbol.SubSymbols.Select(...).ToList()`. Because this collection is (transitively) an
+    // IList<ISymbol>, .NET's LINQ Select specializes to an indexer-based fast path
+    // (IListSelectIterator) instead of calling GetEnumerator — confirmed empirically, and the
+    // same reason FakeSymbolCollection's indexer getter had to become real. The setter remains
+    // unused (nothing ever assigns into a symbol collection) and stays throwing.
     public ISymbol this[int index]
     {
-        get => throw new NotSupportedException();
+        get => symbols[index];
         set => throw new NotSupportedException();
     }
 

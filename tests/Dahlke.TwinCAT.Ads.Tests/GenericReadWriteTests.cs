@@ -477,6 +477,14 @@ public class GenericReadWriteTests
         public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
             => throw new NotSupportedException();
 
+        // Never exercised: these facade-routing tests only assert typed/untyped read-write
+        // delegation, not symbol browsing (see the strict stub policy — real only where read).
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+            => throw new NotSupportedException();
+
         public void Connect() => IsConnected = true;
         public void Disconnect() => IsConnected = false;
         public Task<bool> IsAliveAsync(CancellationToken ct) => Task.FromResult(true);

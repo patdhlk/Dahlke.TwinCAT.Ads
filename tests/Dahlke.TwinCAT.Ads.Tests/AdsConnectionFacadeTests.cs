@@ -627,6 +627,14 @@ public class AdsConnectionFacadeTests
         public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
             => throw new NotSupportedException();
 
+        // Never exercised: these routing tests assert read/write delegation only (see the strict
+        // stub policy — real only where genuinely read).
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+            => throw new NotSupportedException();
+
         public void Connect() => IsConnected = true;
         public void Disconnect() => IsConnected = false;
         public Task<bool> IsAliveAsync(CancellationToken ct) => Task.FromResult(true);

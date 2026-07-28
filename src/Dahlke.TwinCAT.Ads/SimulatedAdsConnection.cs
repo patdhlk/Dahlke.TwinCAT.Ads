@@ -477,6 +477,104 @@ public sealed class SimulatedAdsConnection : IManagedConnection
         list.Fire(symbolPath, newValue, _logger);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The simulated store is a flat map of dotted paths, so the symbol tree is derived from the
+    /// seeded keys: <c>MAIN.Motor.Speed</c> yields a <c>MAIN</c> container holding a
+    /// <c>MAIN.Motor</c> container holding the <c>MAIN.Motor.Speed</c> leaf. Container nodes are
+    /// synthetic — they have no stored value — and report type <c>STRUCT</c>. There is no real
+    /// browse to bound, so — unlike <see cref="AdsConnection"/> — this completes synchronously and
+    /// never consults <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/>.
+    /// </remarks>
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (!string.IsNullOrEmpty(parentPath) && !HasAnySymbolUnder(parentPath))
+            throw new AdsErrorException($"Symbol '{parentPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+
+        var prefix = string.IsNullOrEmpty(parentPath) ? string.Empty : parentPath + ".";
+        var childNames = _symbols.Keys
+            .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
+            .Select(k => k.Substring(prefix.Length).Split('.')[0])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var result = childNames
+            .Select(name => BuildSymbolInfo(prefix + name, includeChildren: true))
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Matches the same substring rule as a real connection, case-insensitively. Walks every
+    /// seeded leaf path plus every synthetic container path above it — see
+    /// <see cref="AllPaths"/> — so its cost is proportional to the number of seeded symbols.
+    /// </remarks>
+    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var result = AllPaths()
+            .Where(p => p.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .Select(p => BuildSymbolInfo(p, includeChildren))
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
+    }
+
+    /// <summary>Whether any stored symbol sits at or beneath <paramref name="path"/>.</summary>
+    private bool HasAnySymbolUnder(string path) =>
+        _symbols.Keys.Any(k =>
+            k.Equals(path, StringComparison.OrdinalIgnoreCase) ||
+            k.StartsWith(path + ".", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Every stored leaf path plus every synthetic container path above it.</summary>
+    private IEnumerable<string> AllPaths()
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in _symbols.Keys)
+        {
+            var segments = key.Split('.');
+            for (var i = 1; i <= segments.Length; i++)
+                paths.Add(string.Join('.', segments.Take(i)));
+        }
+        return paths;
+    }
+
+    /// <summary>
+    /// Builds symbol metadata for one simulated path, recursing into children on demand. A path
+    /// with a stored value is a leaf, mapped via <see cref="InferPlcType"/> (the same inference
+    /// <see cref="ReadValueWithMetadataAsync"/> uses); a path with no stored value is a synthetic
+    /// <c>STRUCT</c> container implied by deeper seeded paths.
+    /// </summary>
+    private AdsSymbolInfo BuildSymbolInfo(string path, bool includeChildren)
+    {
+        var isLeaf = _symbols.TryGetValue(path, out var value);
+        var (typeName, category) = isLeaf ? InferPlcType(value) : ("STRUCT", "Struct");
+
+        List<AdsSymbolInfo>? children = null;
+        if (includeChildren)
+        {
+            var prefix = path + ".";
+            var childNames = _symbols.Keys
+                .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
+                .Select(k => k.Substring(prefix.Length).Split('.')[0])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (childNames.Count > 0)
+                children = childNames.Select(n => BuildSymbolInfo(prefix + n, includeChildren: true)).ToList();
+        }
+
+        return new AdsSymbolInfo(path, typeName, category, ByteSize: 0, Comment: null, children);
+    }
+
     void IManagedConnection.Connect() { }
     void IManagedConnection.Disconnect() { }
     Task<bool> IManagedConnection.IsAliveAsync(CancellationToken ct) => Task.FromResult(true);

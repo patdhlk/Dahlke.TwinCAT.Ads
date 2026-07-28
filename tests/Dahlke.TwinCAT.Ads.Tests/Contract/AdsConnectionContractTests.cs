@@ -478,6 +478,66 @@ public abstract class AdsConnectionContractTests
     }
 
     // =====================================================================
+    // Symbol browsing.
+    // =====================================================================
+
+    [Fact]
+    public async Task GetSymbolsAsync_with_null_parent_returns_root_symbols()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+        await h.WriteRawAsync("MAIN.Running", true);
+
+        var symbols = await h.Connection.GetSymbolsAsync(null, CancellationToken.None);
+
+        Assert.NotEmpty(symbols);
+    }
+
+    [Fact]
+    public async Task GetSymbolsAsync_throws_for_an_unknown_parent()
+    {
+        await using var h = await CreateHarnessAsync();
+
+        var ex = await Assert.ThrowsAsync<AdsErrorException>(
+            () => h.Connection.GetSymbolsAsync("MAIN.NoSuchParent", CancellationToken.None));
+
+        Assert.Equal(AdsErrorCode.DeviceSymbolNotFound, ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task SearchSymbolsAsync_matches_case_insensitively_on_instance_path()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+
+        var matches = await h.Connection.SearchSymbolsAsync("speed", includeChildren: false, CancellationToken.None);
+
+        Assert.Contains(matches, s => s.InstancePath.Contains("Speed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task SearchSymbolsAsync_returns_empty_when_nothing_matches()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+
+        var matches = await h.Connection.SearchSymbolsAsync("zzz-no-match", includeChildren: false, CancellationToken.None);
+
+        Assert.Empty(matches);
+    }
+
+    [Fact]
+    public async Task SearchSymbolsAsync_omits_children_when_includeChildren_is_false()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1500);
+
+        var matches = await h.Connection.SearchSymbolsAsync("MAIN", includeChildren: false, CancellationToken.None);
+
+        Assert.All(matches, s => Assert.Null(s.Children));
+    }
+
+    // =====================================================================
     // Shared timing knobs (real-time guards only; never a primary sync mechanism).
     // =====================================================================
 
