@@ -400,15 +400,18 @@ public class AdsConnectionSymbolBrowsingTests
         var options = new PlcTargetOptions { DisplayName = "PLC 1", TimeoutMs = 3000, SymbolBrowseTimeoutMs = 50 };
         using var connection = new AdsConnection("plc1", options, capturing);
         var browseFailure = new InvalidOperationException("simulated ADS upload failure");
+        using var browseGate = new ManualResetEventSlim(initialState: false);
         connection.SetSymbolLoaderForTesting(
-            new SlowIterationSymbolLoader(TimeSpan.FromMilliseconds(300), browseFailure));
+            new SlowIterationSymbolLoader(TimeSpan.Zero, browseFailure, browseGate));
 
+        // The browse blocks on the gate, so it cannot possibly complete before the 50ms browse
+        // timeout — the caller deterministically observes TimeoutException rather than the browse's
+        // own exception, no matter how loaded the machine is.
         await Assert.ThrowsAsync<TimeoutException>(
             () => connection.SearchSymbolsAsync("anything", includeChildren: false, CancellationToken.None));
 
-        // The abandoned browse is still running in the background at this point (it started its
-        // 300ms sleep only ~50ms ago); poll for its continuation to log rather than assuming a
-        // fixed additional delay.
+        // Now let the abandoned browse run on and fail. Its fault must still be observed and logged.
+        browseGate.Set();
         var logged = await WaitForConditionAsync(
             () => capturing.Entries.Any(e => e.Message.Contains("Abandoned symbol browse")),
             TimeSpan.FromSeconds(3));
@@ -477,9 +480,10 @@ public class AdsConnectionSymbolBrowsingTests
     /// collection, reached via <c>AdsConnection.FlattenSymbols</c>'s plain <c>foreach</c>) throws,
     /// per this repo's stub-integrity policy.
     /// </summary>
-    private sealed class SlowIterationSymbolLoader(TimeSpan delay, Exception? throwAfterDelay = null) : IDynamicSymbolLoader
+    private sealed class SlowIterationSymbolLoader(
+        TimeSpan delay, Exception? throwAfterDelay = null, ManualResetEventSlim? gate = null) : IDynamicSymbolLoader
     {
-        private readonly SlowSymbolCollection _symbols = new(delay, throwAfterDelay);
+        private readonly SlowSymbolCollection _symbols = new(delay, throwAfterDelay, gate);
 
         public ISymbolCollection<ISymbol> Symbols => _symbols;
 
@@ -508,7 +512,8 @@ public class AdsConnectionSymbolBrowsingTests
         public IDataTypeCollection<IDataType> DataTypes => throw new NotSupportedException();
         public Encoding DefaultValueEncoding => throw new NotSupportedException();
 
-        private sealed class SlowSymbolCollection(TimeSpan delay, Exception? throwAfterDelay) : ISymbolCollection<ISymbol>
+        private sealed class SlowSymbolCollection(
+            TimeSpan delay, Exception? throwAfterDelay, ManualResetEventSlim? gate) : ISymbolCollection<ISymbol>
         {
             private volatile bool _completed;
 
@@ -516,7 +521,14 @@ public class AdsConnectionSymbolBrowsingTests
 
             public IEnumerator<ISymbol> GetEnumerator()
             {
-                Thread.Sleep(delay);
+                // A gate makes the browse's duration explicit rather than racing a timer: the
+                // enumeration cannot finish until the test releases it, so a starved CI runner
+                // cannot let the browse beat the browse-timeout and change which exception the
+                // caller observes.
+                if (gate is not null)
+                    gate.Wait(TimeSpan.FromSeconds(30));
+                else
+                    Thread.Sleep(delay);
                 _completed = true;
                 if (throwAfterDelay is not null)
                     throw throwAfterDelay;
