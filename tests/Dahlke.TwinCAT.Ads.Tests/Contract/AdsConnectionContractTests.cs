@@ -438,6 +438,21 @@ public abstract class AdsConnectionContractTests
     }
 
     // =====================================================================
+    // WriteControl.
+    // =====================================================================
+
+    [Fact]
+    public async Task WriteControlAsync_then_GetAdsStateAsync_reflects_the_requested_state()
+    {
+        await using var h = await CreateHarnessAsync();
+
+        await h.Connection.WriteControlAsync(AdsState.Stop, deviceState: 0, CancellationToken.None);
+        var state = await h.Connection.GetAdsStateAsync(CancellationToken.None);
+
+        Assert.Equal(AdsState.Stop, state);
+    }
+
+    // =====================================================================
     // Cancellation: pre-cancelled token throws on every operation.
     // =====================================================================
 

@@ -211,6 +211,9 @@ internal sealed class FakeManagedConnection : IManagedConnection
     public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
         => throw new NotSupportedException();
 
+    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+        => throw new NotSupportedException();
+
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
         => throw new NotSupportedException();
 

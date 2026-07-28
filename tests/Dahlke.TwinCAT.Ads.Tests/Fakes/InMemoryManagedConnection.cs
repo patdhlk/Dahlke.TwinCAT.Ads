@@ -71,6 +71,10 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     private readonly ConcurrentDictionary<string, object?> _symbols = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SubscriberList> _subscribers = new();
 
+    // Written by WriteControlAsync, read by GetAdsStateAsync — volatile mirrors
+    // SimulatedAdsConnection's equivalent field so the contract fact holds here too.
+    private volatile AdsState _adsState = AdsState.Run;
+
     public InMemoryManagedConnection(string plcId = "plc1", string displayName = "In-Memory PLC")
     {
         PlcId = plcId;
@@ -187,7 +191,21 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(AdsState.Run);
+        return Task.FromResult(_adsState);
+    }
+
+    /// <summary>
+    /// Mirrors <see cref="SimulatedAdsConnection.WriteControlAsync"/>'s observable-state
+    /// semantics: records the requested state so <see cref="GetAdsStateAsync"/> reflects it
+    /// immediately — genuinely implemented (not a throwing stub) because the shared contract
+    /// suite exercises this double's <c>WriteControlAsync</c>-then-<c>GetAdsStateAsync</c>
+    /// round-trip via <see cref="AdsConnectionFacade"/>.
+    /// </summary>
+    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        _adsState = state;
+        return Task.CompletedTask;
     }
 
     /// <summary>

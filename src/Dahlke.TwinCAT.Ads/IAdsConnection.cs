@@ -377,6 +377,26 @@ public interface IAdsConnection
     Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct);
 
     /// <summary>
+    /// Issues an ADS WriteControl request, asking the device to transition to
+    /// <paramref name="state"/>.
+    /// </summary>
+    /// <param name="state">The requested ADS state, for example <see cref="AdsState.Run"/> or <see cref="AdsState.Stop"/>.</param>
+    /// <param name="deviceState">
+    /// The device-specific state word accompanying the request. Pass <c>0</c> unless the target
+    /// documents a meaning for it.
+    /// </param>
+    /// <param name="ct">Cancels the operation; <see cref="PlcTargetOptions.TimeoutMs"/> applies.</param>
+    /// <exception cref="AdsErrorException">Thrown when the device rejects the transition.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">Thrown when the per-target timeout elapses first.</exception>
+    /// <remarks>
+    /// The request is asynchronous at the protocol level: a completed call means the device
+    /// ACCEPTED the request, not that it has finished transitioning. Poll
+    /// <see cref="GetAdsStateAsync"/> to observe the settled state.
+    /// </remarks>
+    Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct);
+
+    /// <summary>
     /// Subscribes to value-change notifications for <paramref name="symbolPath"/>,
     /// invoking <paramref name="callback"/> with the symbol path and latest value
     /// each time the PLC reports a change (at most every <paramref name="cycleTimeMs"/>

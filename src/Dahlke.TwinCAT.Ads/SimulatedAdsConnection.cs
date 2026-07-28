@@ -51,6 +51,11 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     private readonly ILogger<SimulatedAdsConnection> _logger;
     private readonly ConcurrentDictionary<string, object?> _symbols = new(StringComparer.OrdinalIgnoreCase);
 
+    // Written by WriteControlAsync, read by GetAdsStateAsync; volatile gives lock-free
+    // cross-thread visibility for this simple flag-like field (same rationale as the
+    // facade's _stopped/_state fields).
+    private volatile AdsState _adsState = AdsState.Run;
+
     // Per-path subscriber list. Each entry is a list of (unique id → callback) pairs.
     // ConcurrentDictionary provides thread-safe path lookup; the inner lock guards
     // the list under concurrent subscribe/dispose/fire operations.
@@ -404,9 +409,24 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     }
 
     /// <inheritdoc />
-    /// <remarks>A simulated device is always in <see cref="AdsState.Run"/>.</remarks>
+    /// <remarks>
+    /// Starts at <see cref="AdsState.Run"/> and reflects the most recent
+    /// <see cref="WriteControlAsync"/> call immediately.
+    /// </remarks>
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
-        => Task.FromResult(AdsState.Run);
+        => Task.FromResult(_adsState);
+
+    /// <inheritdoc />
+    /// <remarks>Records the requested state so <see cref="GetAdsStateAsync"/> reflects it immediately.</remarks>
+    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        _adsState = state;
+        _logger.LogInformation(
+            "Simulated WriteControl on {PlcId}: state={State}, deviceState={DeviceState}",
+            PlcId, state, deviceState);
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc />
     /// <remarks>

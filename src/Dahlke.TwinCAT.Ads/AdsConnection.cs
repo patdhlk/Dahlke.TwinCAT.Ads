@@ -582,6 +582,25 @@ internal sealed class AdsConnection : IManagedConnection
         return new AdsDeviceInfo(info.Name, AdsVersionFormatter.Format(info.Version));
     }
 
+    /// <inheritdoc />
+    public async Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+    {
+        using var cts = CreateTimeoutCts(ct);
+
+        try
+        {
+            var result = await _client.WriteControlAsync(state, deviceState, cts.Token).ConfigureAwait(false);
+            if (result.Failed)
+                throw new AdsErrorException(
+                    $"WriteControl to state '{state}' on PLC '{PlcId}' failed: {result.ErrorCode}",
+                    result.ErrorCode);
+        }
+        catch (OperationCanceledException)
+        {
+            throw CancellationDisambiguator.CreateException(ct, $"<write-control:{state}>", PlcId, _options.TimeoutMs);
+        }
+    }
+
     /// <summary>
     /// Checks whether the connection is actually functional (not just IsConnected).
     /// Returns false if ReadState fails.
