@@ -15,6 +15,7 @@ msbuild.wrn
 ## NuGet
 *.nupkg
 *.snupkg
+artifacts/
 **/[Pp]ackages/*
 !**/[Pp]ackages/build/
 *.nuget.props

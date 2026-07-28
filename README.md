@@ -159,6 +159,24 @@ float setpoint = results["GVL.Setpoint"].GetValue<float>();
 
 On real connections both operations use a single ADS sum command (one round-trip). A per-symbol failure is captured in `AdsValueResult.Error` and does not abort the batch. A whole-batch timeout throws `TimeoutException`; caller cancellation throws `OperationCanceledException`.
 
+## Symbol Browsing and Metadata
+
+```csharp
+// Browse the symbol tree one level at a time
+var roots = await conn.GetSymbolsAsync(null, ct);
+foreach (var s in roots)
+    Console.WriteLine($"{s.InstancePath} : {s.TypeName} ({s.Category}, {s.ByteSize}B)");
+
+// Search across the whole tree by substring
+var motors = await conn.SearchSymbolsAsync("Motor", ct);
+
+// Read a value together with its PLC type
+var result = await conn.ReadValueWithMetadataAsync("MAIN.Motor", ct);
+Console.WriteLine($"{result.TypeName} = {result.Value}");   // ST_Motor = Dictionary<string, object?>
+```
+
+Browsing is bounded by `PlcTargetOptions.SymbolBrowseTimeoutMs` (default 30 s) rather than `TimeoutMs`, since uploading the symbol table can take longer than a typical read or write. `ReadValueWithMetadataAsync` decodes structs and function blocks to `Dictionary<string, object?>` keyed by member name, arrays to `object?[]`, and passes scalars through unchanged.
+
 ## Subscriptions
 
 ### Typed subscription (preferred)
@@ -184,6 +202,16 @@ using var sub = await conn.SubscribeAsync(
 ```
 
 Subscriptions are durable: owned by the stable facade, not the underlying connection. When a reconnect occurs the subscription is automatically re-registered against the new connection. Callbacks fire on a background thread — they must be thread-safe and must not block. A `null` notification value with a value-type `T` is dropped (Warning logged). Dispose is idempotent and thread-safe.
+
+### Notification metadata
+
+```csharp
+using var sub = await conn.SubscribeAsync("GVL.Temp", cycleTimeMs: 200,
+    n => Console.WriteLine($"[{n.Timestamp:O}] {n.SymbolPath} ({n.TypeName}) = {n.Value}"),
+    CancellationToken.None);
+```
+
+Carries the same durability guarantees as the untyped overload, plus the symbol's PLC type name and the PLC-reported timestamp of the change. Struct, function block and array notifications are decoded off the notification thread and so may be delivered slightly later — and, under a fast burst, out of order relative to scalar notifications.
 
 ## Reactive (Rx) companion
 

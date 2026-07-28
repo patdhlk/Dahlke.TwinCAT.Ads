@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-07-28
+
+> **⚠️ Hardware verification pending before publish.** The notification-payload decode described
+> under "Fixed" below was verified by decompiling `Beckhoff.TwinCAT.Ads 7.0.292` and confirming it
+> makes the identical internal call a read would make — **not** by running against a live PLC.
+> Before this package is pushed to NuGet, run `Subscribe_OnChange_ReceivesNotification` and
+> `SubscribeTyped_OnChange_ReceivesTypedNotification` in `tests/Dahlke.TwinCAT.Ads.HardwareTests`
+> against a PLC exposing at least one struct symbol and one array symbol. Those tests are gated
+> behind `HardwareFactAttribute` and skip silently without hardware, so the green CI/local suite
+> does not close this gate. Remove this note once the hardware run is green.
+
+### Added
+
+- `IAdsConnection.ReadValueWithMetadataAsync` — reads a symbol and returns an `AdsValueResult`
+  carrying a decoded value tree plus the symbol's PLC `TypeName` and `Category`. Structs and
+  function blocks decode to a `Dictionary<string, object?>` keyed by member name (assignable to
+  `IReadOnlyDictionary<string, object?>`), arrays to `object?[]`, scalars pass through unchanged.
+- `IAdsConnection.GetSymbolsAsync` / `SearchSymbolsAsync` and the `AdsSymbolInfo` record — browse
+  and search the PLC symbol tree without depending on TwinCAT types. Browsing is bounded by the
+  new `PlcTargetOptions.SymbolBrowseTimeoutMs` (default 30s), separate from `TimeoutMs` because it
+  uploads the symbol table. The timeout bounds how long the caller waits; the underlying upload
+  itself cannot be cancelled and keeps running on a background thread if the caller times out —
+  its result is then discarded and any fault it raises is logged rather than left unobserved.
+- `IAdsConnection.GetDeviceInfoAsync` and the `AdsDeviceInfo` record — device name and version. ADS
+  state is deliberately excluded; read it via `GetAdsStateAsync`.
+- `IAdsConnection.WriteControlAsync` — requests an ADS device state transition. The call completing
+  means the device accepted the request, not that it finished transitioning; poll
+  `GetAdsStateAsync` for the settled state.
+- `SubscribeAsync(string, int, Action<AdsNotification>, CancellationToken)` and the
+  `AdsNotification` record — notifications carrying the symbol path, decoded value, PLC type name
+  and the PLC-reported timestamp. Durability across reconnects is identical to the existing
+  overloads; see **Known limitations** below for how container symbols' delivery timing differs
+  from scalars.
+- `AdsValueResult.TypeName` and `AdsValueResult.Category`.
+
+### Changed
+
+- **Breaking:** `Beckhoff.TwinCAT.Ads` and `Beckhoff.TwinCAT.Ads.TcpRouter` now require `7.*`
+  (previously `6.*`).
+- Batch `ReadValuesAsync` now **partitions** by symbol category: scalars, strings and enums share a
+  single ADS sum command as before, while structs, function blocks and arrays are decoded
+  individually so their member values are returned as a tree rather than an opaque value. An
+  all-scalar batch keeps its single round-trip; a batch containing containers costs that same
+  round-trip for the scalars plus, per container symbol, either one read (arrays, and
+  structs/function blocks with no sub-symbols) or — for structs/function blocks that do have
+  sub-symbols — no top-level read at all, just one read per member, since a top-level read would
+  only be discarded. Results carry `TypeName`/`Category` either way, and the whole batch (sum
+  command, container reads, and every member read) shares one timeout/cancellation budget.
+- Simulated symbol paths are now matched **case-insensitively**, matching real TwinCAT semantics.
+  Previously a browse and a read disagreed on casing, so a mis-cased parent path could report a
+  leaf as an empty container; browsing with a mis-cased path now also echoes back the symbol's
+  originally-registered casing rather than the caller's.
+- `SimulatedAdsConnection` implements every new member, so a fully simulated host can serve symbol
+  browsing, device info, state writes and metadata reads with no TwinCAT installation.
+
+### Fixed
+
+- Notification handlers no longer read the symbol back over ADS to learn what changed. The value
+  is decoded from the notification payload the PLC already sent, using the same value factory a
+  read uses internally, removing a round-trip per event from the ADS notification thread. A symbol
+  whose payload cannot serve on its own — for example one with external data references, or one
+  without a decodable value source — falls back to a read instead; the fallback is logged once per
+  subscription so a symbol that permanently loses the optimization stays visible rather than
+  silent.
+- Struct decoding is now bounded by the operation's timeout and cancellation token. Previously each
+  member read was unbounded and blocked a thread-pool thread, so a struct with many members could
+  overrun `TimeoutMs` without failing.
+
+### Known limitations
+
+- Notifications for struct, function block and array symbols are decoded off the ADS notification
+  thread, so they may be delivered slightly later than scalar notifications and may arrive out of
+  order relative to them. Disposing a subscription cancels any in-flight decode and suppresses its
+  delivery — but the guarantee is "never delivered after disposal completes," not "never delivered
+  concurrently with disposal": a callback already running when `Dispose()` is called may still
+  complete and fire.
+- `AdsConnection`'s device-level operations (`GetDeviceInfoAsync`, `WriteControlAsync`,
+  subscription registration) have no unit-test coverage because the underlying `AdsClient` has no
+  injection point; they are covered by the hardware test suite only.
+
 ## [0.4.0] - 2026-06-16
 
 ### Added
