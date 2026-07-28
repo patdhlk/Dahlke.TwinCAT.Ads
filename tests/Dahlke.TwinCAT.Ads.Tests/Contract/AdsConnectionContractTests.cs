@@ -379,6 +379,52 @@ public abstract class AdsConnectionContractTests
     }
 
     [Fact]
+    public async Task Subscribe_Notification_DeliversPath_Value_TypeName_And_Timestamp()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speed", 1000);
+
+        var received = new TaskCompletionSource<AdsNotification>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var sub = await h.Connection.SubscribeAsync(
+            "MAIN.Speed", 100, n => received.TrySetResult(n), CancellationToken.None);
+
+        await h.WriteRawAsync("MAIN.Speed", 2000);
+
+        var notification = await received.Task.WaitAsync(Timeout);
+
+        Assert.Equal("MAIN.Speed", notification.SymbolPath);
+        Assert.Equal(2000, notification.Value);
+
+        // The notification reports the SAME PLC type name a metadata read of the same symbol
+        // reports — both come from the symbol's own type, so this holds for every
+        // implementation without hard-coding one implementation's inference table here.
+        var metadata = await h.Connection.ReadValueWithMetadataAsync("MAIN.Speed", CancellationToken.None);
+        Assert.False(string.IsNullOrEmpty(notification.TypeName));
+        Assert.Equal(metadata.TypeName, notification.TypeName);
+
+        Assert.NotEqual(default, notification.Timestamp);
+    }
+
+    [Fact]
+    public async Task Subscribe_Notification_Dispose_StopsDelivery()
+    {
+        await using var h = await CreateHarnessAsync();
+
+        var count = 0;
+        var sub = await h.Connection.SubscribeAsync(
+            "MAIN.x", 100, _ => Interlocked.Increment(ref count), CancellationToken.None);
+
+        await h.WriteRawAsync("MAIN.x", 1);
+        await WaitUntil(() => Volatile.Read(ref count) == 1);
+
+        sub.Dispose();
+
+        await h.WriteRawAsync("MAIN.x", 2);
+        await Task.Delay(SettleDelay);
+        Assert.Equal(1, Volatile.Read(ref count));
+    }
+
+    [Fact]
     public async Task Subscribe_Typed_MismatchedNotification_Dropped_OthersUnaffected()
     {
         await using var h = await CreateHarnessAsync();

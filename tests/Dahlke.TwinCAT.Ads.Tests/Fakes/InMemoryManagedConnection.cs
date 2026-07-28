@@ -231,6 +231,25 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, logger: null), ct);
 
+    /// <summary>
+    /// Mirrors <see cref="SimulatedAdsConnection"/>'s documented notification-metadata semantics:
+    /// the type name is inferred from the written value via
+    /// <see cref="SimulatedAdsConnection.InferPlcType"/> (reused as the documented mapping spec,
+    /// like everywhere else in this double), and the timestamp is the moment of the write, since
+    /// this double has no PLC clock. Genuinely implemented — the shared contract suite subscribes
+    /// through the facade to THIS overload and asserts all four fields.
+    /// </summary>
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+        => SubscribeAsync(
+            symbolPath,
+            cycleTimeMs,
+            (path, value) =>
+            {
+                var (typeName, _) = SimulatedAdsConnection.InferPlcType(value);
+                callback(new AdsNotification(path, value, typeName, DateTimeOffset.UtcNow));
+            },
+            ct);
+
     // ---- Symbol browsing --------------------------------------------------
 
     /// <summary>

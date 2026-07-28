@@ -10,7 +10,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Subscriptions.</b> Callbacks registered via <see cref="SubscribeAsync"/> fire
+/// <b>Subscriptions.</b> Callbacks registered via <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/> fire
 /// synchronously on the writer's thread, immediately after the value is stored, whenever the
 /// written value differs from the previously stored value (<c>!Equals(oldValue, newValue)</c>,
 /// using <see cref="object.Equals(object, object)"/>).
@@ -491,7 +491,7 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// <inheritdoc />
     /// <remarks>
     /// Wraps <paramref name="callback"/> with <see cref="TypedCallbackAdapter.Wrap{T}"/>
-    /// and delegates to the untyped <see cref="SubscribeAsync"/>. Each notification value
+    /// and delegates to the untyped <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/>. Each notification value
     /// is converted to <typeparamref name="T"/> with the same rules as
     /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>; a value that fails
     /// conversion (or a null with a non-nullable value-type <typeparamref name="T"/>) is
@@ -499,6 +499,35 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     /// </remarks>
     public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Adapts <paramref name="callback"/> into the untyped shape and delegates to the untyped
+    /// <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/>, so it goes through the same subscriber list, the same
+    /// on-change rule and the same exception handling as every other simulated subscription.
+    /// <para>
+    /// The simulated store holds CLR values with no PLC type information, so
+    /// <see cref="AdsNotification.TypeName"/> is inferred from the written value's runtime type via
+    /// <see cref="InferPlcType"/> — the same inference <see cref="ReadValueWithMetadataAsync"/>
+    /// uses, so a notification and a metadata read report the same type for the same value.
+    /// </para>
+    /// <para>
+    /// <see cref="AdsNotification.Timestamp"/> is <see cref="DateTimeOffset.UtcNow"/>: there is no
+    /// PLC-reported time to relay, and the simulated write that triggered this callback happened
+    /// immediately before it (callbacks fire synchronously on the writer's thread).
+    /// </para>
+    /// </remarks>
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs,
+        Action<AdsNotification> callback, CancellationToken ct)
+        => SubscribeAsync(
+            symbolPath,
+            cycleTimeMs,
+            (path, value) =>
+            {
+                var (typeName, _) = InferPlcType(value);
+                callback(new AdsNotification(path, value, typeName, DateTimeOffset.UtcNow));
+            },
+            ct);
 
     private void FireCallbacks(string symbolPath, object? newValue)
     {

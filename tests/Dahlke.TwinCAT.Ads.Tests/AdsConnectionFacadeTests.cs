@@ -639,6 +639,11 @@ public class AdsConnectionFacadeTests
 
         // Never exercised: these routing tests assert read/write delegation only (see the strict
         // stub policy — real only where genuinely read).
+        public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        // Never exercised: these routing tests assert read/write delegation only (see the strict
+        // stub policy — real only where genuinely read).
         public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
             => throw new NotSupportedException();
 

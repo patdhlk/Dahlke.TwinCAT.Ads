@@ -70,6 +70,47 @@ internal static class PlcValueDecoder
     }
 
     /// <summary>
+    /// Decodes <paramref name="value"/> WITHOUT performing any ADS I/O, for callers that cannot
+    /// await — notably the synchronous ADS notification handler in <c>AdsConnection</c>.
+    /// Returns <see langword="true"/> and the decoded value when <see cref="DecodeAsync"/> would
+    /// have passed <paramref name="value"/> straight through, and <see langword="false"/> (with
+    /// <paramref name="decoded"/> set to <see langword="null"/>) when decoding genuinely needs
+    /// <see cref="DecodeAsync"/> — in which case the caller must move the decode somewhere it can
+    /// await.
+    /// </summary>
+    /// <remarks>
+    /// This is deliberately NOT a second decoder: the pass-through branch below is the same
+    /// branch <see cref="DecodeAsync"/> ends on, so a value decoded here is identical to one
+    /// decoded there. Only the container shapes — which <see cref="DecodeAsync"/> genuinely
+    /// transforms, reading one member/element at a time — are refused.
+    /// </remarks>
+    public static bool TryDecodeWithoutReads(object? value, ISymbol symbol, out object? decoded)
+    {
+        // A null value decodes to null on every path — DecodeAsync's own first check.
+        if (value is null)
+        {
+            decoded = null;
+            return true;
+        }
+
+        // Containers are the shapes DecodeAsync actually transforms: a struct/function block with
+        // sub-symbols is rebuilt as a dictionary by reading each member (one ADS read per member),
+        // and an array is rebuilt as an object?[] element by element (reading per-element
+        // sub-symbols when they line up). Neither is a pass-through, so neither can be served
+        // without I/O — even the array whose sub-symbols do not line up still needs the rebuild.
+        if (symbol.Category is DataTypeCategory.Array || DecodesFromSubSymbolsOnly(symbol))
+        {
+            decoded = null;
+            return false;
+        }
+
+        // Everything else — primitives, strings, enums, and opaque structs/function blocks with no
+        // sub-symbols — is returned unchanged by DecodeAsync, so decoding needs no I/O at all.
+        decoded = value;
+        return true;
+    }
+
+    /// <summary>
     /// True when decoding <paramref name="symbol"/> reads entirely from its own sub-symbols and
     /// never consumes an externally supplied <c>value</c> — this holds for structs and function
     /// blocks that expose at least one sub-symbol. A caller may use this to skip fetching its own

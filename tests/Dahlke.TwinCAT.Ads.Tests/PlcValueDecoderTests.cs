@@ -135,4 +135,66 @@ public class PlcValueDecoderTests
 
         Assert.Equal(AdsErrorCode.DeviceError, ex.ErrorCode);
     }
+
+    // =========================================================================
+    // TryDecodeWithoutReads — the I/O-free path the synchronous ADS notification
+    // handler uses (it cannot await DecodeAsync).
+    // =========================================================================
+
+    [Theory]
+    [InlineData(DataTypeCategory.Primitive, "INT")]
+    [InlineData(DataTypeCategory.String, "STRING(80)")]
+    [InlineData(DataTypeCategory.Enum, "E_Mode")]
+    public void TryDecodeWithoutReads_passes_non_container_values_through(DataTypeCategory category, string typeName)
+    {
+        var symbol = new StubSymbol(category, typeName);
+
+        Assert.True(PlcValueDecoder.TryDecodeWithoutReads(42, symbol, out var decoded));
+        Assert.Equal(42, decoded);
+    }
+
+    [Fact]
+    public void TryDecodeWithoutReads_passes_opaque_struct_without_sub_symbols_through()
+    {
+        // No sub-symbols to read, so DecodeAsync passes the raw value through — no I/O needed.
+        var symbol = new StubSymbol(DataTypeCategory.Struct, "ST_Opaque");
+
+        Assert.True(PlcValueDecoder.TryDecodeWithoutReads("raw", symbol, out var decoded));
+        Assert.Equal("raw", decoded);
+    }
+
+    [Fact]
+    public void TryDecodeWithoutReads_returns_null_for_a_null_value()
+    {
+        var symbol = new StubSymbol(DataTypeCategory.Struct, "ST_Motor",
+            new StubValueSymbol("Speed", DataTypeCategory.Primitive, "INT", 1500));
+
+        // A null decodes to null on every path, container symbol or not — so even a struct
+        // needs no reads for it.
+        Assert.True(PlcValueDecoder.TryDecodeWithoutReads(null, symbol, out var decoded));
+        Assert.Null(decoded);
+    }
+
+    [Fact]
+    public void TryDecodeWithoutReads_refuses_a_struct_with_sub_symbols()
+    {
+        // Decoding this reads one member per field — it must go through DecodeAsync. If this
+        // stub's members were read here, StubValueSymbol.ReadValue() would throw.
+        var symbol = new StubSymbol(DataTypeCategory.Struct, "ST_Motor",
+            new StubValueSymbol("Speed", DataTypeCategory.Primitive, "INT", 1500));
+
+        Assert.False(PlcValueDecoder.TryDecodeWithoutReads(new object(), symbol, out var decoded));
+        Assert.Null(decoded);
+    }
+
+    [Fact]
+    public void TryDecodeWithoutReads_refuses_an_array()
+    {
+        // An array is rebuilt element by element (object?[]), never passed through, so it is
+        // refused even when its elements would not need sub-symbol reads.
+        var symbol = new StubSymbol(DataTypeCategory.Array, "ARRAY [0..1] OF INT");
+
+        Assert.False(PlcValueDecoder.TryDecodeWithoutReads(new[] { 10, 20 }, symbol, out var decoded));
+        Assert.Null(decoded);
+    }
 }

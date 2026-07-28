@@ -469,6 +469,51 @@ public interface IAdsConnection
     Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct);
 
     /// <summary>
+    /// Subscribes to value-change notifications for <paramref name="symbolPath"/>, delivering the
+    /// symbol path, value, PLC type name and PLC-reported timestamp on each change.
+    /// </summary>
+    /// <param name="symbolPath">The fully-qualified PLC symbol to watch.</param>
+    /// <param name="cycleTimeMs">Minimum interval, in milliseconds, between notifications.</param>
+    /// <param name="callback">Invoked on each notification.</param>
+    /// <param name="ct">Cancels the initial registration, not the subscription itself.</param>
+    /// <returns>A handle whose disposal removes the subscription permanently.</returns>
+    /// <remarks>
+    /// <para>
+    /// Durability and threading are identical to
+    /// <see cref="SubscribeAsync(string,int,System.Action{string,object?},CancellationToken)"/>:
+    /// subscriptions registered through the durable facade survive reconnects and are
+    /// re-registered automatically (the returned <see cref="IDisposable"/> stays valid across a
+    /// reconnect, and disposing it removes the subscription for good), registration during an
+    /// outage follows the same wait-then-throw contract, callbacks arrive on a background thread
+    /// — never the caller's — and a throwing callback is logged at Warning without tearing down
+    /// the subscription. Prefer this overload when the consumer needs to report the value's PLC
+    /// type or the change's timestamp.
+    /// </para>
+    /// <para>
+    /// <b><see cref="AdsNotification.TypeName"/></b> is the symbol's own PLC type, resolved once
+    /// when the subscription is registered — the same name a
+    /// <see cref="ReadValueWithMetadataAsync"/> of that symbol reports. A simulated connection has
+    /// no declared PLC types and infers it from the written value's runtime type instead.
+    /// </para>
+    /// <para>
+    /// <b><see cref="AdsNotification.Timestamp"/></b> is the time the ADS notification itself
+    /// carries — recorded by the PLC, not measured on arrival, so it is unaffected by delivery
+    /// latency. A simulated connection has no PLC clock and reports the moment of the simulated
+    /// write.
+    /// </para>
+    /// <para>
+    /// <b>Container symbols deliver slightly later.</b> For a scalar, string or enum symbol the
+    /// callback fires directly from the notification thread. Decoding a struct, function block or
+    /// array performs one ADS read per member, which cannot run on that thread, so for those
+    /// symbols the decode is moved onto the thread pool and the callback fires when it completes.
+    /// Notifications for a container may therefore arrive slightly later — and, under a burst
+    /// faster than the decode, out of order. Each notification still carries the timestamp of the
+    /// change it describes.
+    /// </para>
+    /// </remarks>
+    Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct);
+
+    /// <summary>
     /// Lists the PLC's symbols one level at a time.
     /// </summary>
     /// <param name="parentPath">

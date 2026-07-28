@@ -22,6 +22,24 @@ Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions
 Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.AdsDiagnosticsOptions() -> void
 Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.SymbolDump.get -> Dahlke.TwinCAT.Ads.SymbolDumpOptions!
 Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.SymbolDump.set -> void
+Dahlke.TwinCAT.Ads.AdsNotification
+Dahlke.TwinCAT.Ads.AdsNotification.AdsNotification(string! SymbolPath, object? Value, string! TypeName, System.DateTimeOffset Timestamp) -> void
+Dahlke.TwinCAT.Ads.AdsNotification.SymbolPath.get -> string!
+Dahlke.TwinCAT.Ads.AdsNotification.SymbolPath.init -> void
+Dahlke.TwinCAT.Ads.AdsNotification.Value.get -> object?
+Dahlke.TwinCAT.Ads.AdsNotification.Value.init -> void
+Dahlke.TwinCAT.Ads.AdsNotification.TypeName.get -> string!
+Dahlke.TwinCAT.Ads.AdsNotification.TypeName.init -> void
+Dahlke.TwinCAT.Ads.AdsNotification.Timestamp.get -> System.DateTimeOffset
+Dahlke.TwinCAT.Ads.AdsNotification.Timestamp.init -> void
+Dahlke.TwinCAT.Ads.AdsNotification.Deconstruct(out string! SymbolPath, out object? Value, out string! TypeName, out System.DateTimeOffset Timestamp) -> void
+Dahlke.TwinCAT.Ads.AdsNotification.Equals(Dahlke.TwinCAT.Ads.AdsNotification? other) -> bool
+override Dahlke.TwinCAT.Ads.AdsNotification.Equals(object? obj) -> bool
+override Dahlke.TwinCAT.Ads.AdsNotification.GetHashCode() -> int
+override Dahlke.TwinCAT.Ads.AdsNotification.ToString() -> string!
+static Dahlke.TwinCAT.Ads.AdsNotification.operator !=(Dahlke.TwinCAT.Ads.AdsNotification? left, Dahlke.TwinCAT.Ads.AdsNotification? right) -> bool
+static Dahlke.TwinCAT.Ads.AdsNotification.operator ==(Dahlke.TwinCAT.Ads.AdsNotification? left, Dahlke.TwinCAT.Ads.AdsNotification? right) -> bool
+Dahlke.TwinCAT.Ads.AdsNotification.<Clone>$() -> Dahlke.TwinCAT.Ads.AdsNotification!
 Dahlke.TwinCAT.Ads.AdsSymbolInfo
 Dahlke.TwinCAT.Ads.AdsSymbolInfo.AdsSymbolInfo(string! InstancePath, string! TypeName, string! Category, int ByteSize, string? Comment, System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>? Children) -> void
 Dahlke.TwinCAT.Ads.AdsSymbolInfo.ByteSize.get -> int
@@ -104,6 +122,7 @@ Dahlke.TwinCAT.Ads.IAdsConnection.ReadValueWithMetadataAsync(string! symbolPath,
 Dahlke.TwinCAT.Ads.IAdsConnection.ReadValuesAsync(System.Collections.Generic.IEnumerable<string!>! symbolPaths, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string!, Dahlke.TwinCAT.Ads.AdsValueResult!>!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.SearchSymbolsAsync(string! pattern, bool includeChildren, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.State.get -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.IAdsConnection.SubscribeAsync(string! symbolPath, int cycleTimeMs, System.Action<Dahlke.TwinCAT.Ads.AdsNotification!>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.SubscribeAsync(string! symbolPath, int cycleTimeMs, System.Action<string!, object?>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.SubscribeAsync<T>(string! symbolPath, int cycleTimeMs, System.Action<string!, T?>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.WriteControlAsync(TwinCAT.Ads.AdsState state, ushort deviceState, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
@@ -150,6 +169,7 @@ Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SearchSymbolsAsync(string! pattern, bo
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SetInitialValues(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! values) -> void
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SimulatedAdsConnection(string! plcId, string! displayName, Microsoft.Extensions.Logging.ILoggerFactory! loggerFactory) -> void
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.State.get -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SubscribeAsync(string! symbolPath, int cycleTimeMs, System.Action<Dahlke.TwinCAT.Ads.AdsNotification!>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SubscribeAsync(string! symbolPath, int cycleTimeMs, System.Action<string!, object?>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SubscribeAsync<T>(string! symbolPath, int cycleTimeMs, System.Action<string!, T?>! callback, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.WriteControlAsync(TwinCAT.Ads.AdsState state, ushort deviceState, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!

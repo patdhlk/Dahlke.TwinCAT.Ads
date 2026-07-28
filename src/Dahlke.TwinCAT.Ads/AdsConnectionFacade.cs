@@ -58,9 +58,12 @@ namespace Dahlke.TwinCAT.Ads;
 /// </para>
 /// <para>
 /// <b>Durable subscriptions.</b> Unlike one-shot operations, a subscription made
-/// via <see cref="SubscribeAsync"/> outlives the connection it was first
-/// registered on. The facade keeps every active subscription as a record (path,
-/// cycle time, callback) in a registry. On the first call it registers
+/// via any <c>SubscribeAsync</c> overload outlives the connection it was first
+/// registered on. The facade keeps every active subscription as a record — the path,
+/// plus a REGISTRAR delegate that registers that subscription against a connection
+/// handed to it (see <see cref="DurableSubscription"/>) — in a registry. Because the
+/// record holds a registrar rather than a callback, every overload's subscriptions
+/// re-register through ONE path regardless of callback shape. On the first call it registers
 /// immediately against the current connection (waiting per the same wait-then-throw
 /// contract); thereafter, whenever the pool publishes a new connection via
 /// <see cref="SetCurrent"/>, the facade re-registers every active record against
@@ -460,16 +463,48 @@ internal sealed class AdsConnectionFacade : IAdsConnection
 
     /// <inheritdoc />
     /// <remarks>
-    /// Registers a DURABLE subscription. The record (path, cycle time, callback) is
-    /// added to the facade's registry and registered immediately against the current
-    /// connection (waiting per the wait-then-throw contract during an outage). The
-    /// returned <see cref="IDisposable"/> survives reconnects: the facade
-    /// re-registers the record on each newly published connection, and the same
-    /// handle keeps removing the subscription permanently when disposed.
+    /// Registers a DURABLE subscription. The record (path plus a registrar that binds
+    /// the cycle time and this callback) is added to the facade's registry and
+    /// registered immediately against the current connection (waiting per the
+    /// wait-then-throw contract during an outage). The returned
+    /// <see cref="IDisposable"/> survives reconnects: the facade re-registers the
+    /// record on each newly published connection, and the same handle keeps removing
+    /// the subscription permanently when disposed.
     /// </remarks>
-    public async Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
+        => SubscribeCoreAsync(
+            symbolPath,
+            (conn, token) => conn.SubscribeAsync(symbolPath, cycleTimeMs, callback, token),
+            ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Durable in exactly the same way as
+    /// <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/>, and
+    /// through exactly the same code: the only difference is which underlying overload this
+    /// overload's registrar closes over. The record itself stores no callback, so
+    /// <see cref="ReRegisterAllAsync"/> and <see cref="DurableSubscription.RegisterAsync"/> never
+    /// branch on callback shape.
+    /// </remarks>
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+        => SubscribeCoreAsync(
+            symbolPath,
+            (conn, token) => conn.SubscribeAsync(symbolPath, cycleTimeMs, callback, token),
+            ct);
+
+    /// <summary>
+    /// The one durable-subscription path, shared by every <c>SubscribeAsync</c> overload:
+    /// creates the record, publishes it to the registry, and performs the first registration.
+    /// <paramref name="register"/> is the record's registrar — it has already captured the cycle
+    /// time and the caller's callback (in whatever shape that callback has), so everything
+    /// downstream of here, including re-registration after a reconnect, is callback-agnostic.
+    /// </summary>
+    private async Task<IDisposable> SubscribeCoreAsync(
+        string symbolPath,
+        Func<IManagedConnection, CancellationToken, Task<IDisposable>> register,
+        CancellationToken ct)
     {
-        var subscription = new DurableSubscription(this, symbolPath, cycleTimeMs, callback);
+        var subscription = new DurableSubscription(this, symbolPath, register);
 
         // Add to the registry BEFORE the first registration. If a reconnect fires
         // between here and the immediate registration below, the background
@@ -524,14 +559,28 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     }
 
     /// <summary>
-    /// A durable subscription record: the immutable subscribe arguments plus the
-    /// current underlying registration (and the connection it was created on). Held
-    /// in the facade's registry and re-registered on every reconnect. Disposing the
-    /// handle removes it from the registry and disposes the live registration.
+    /// A durable subscription record: a REGISTRAR — "register this subscription against
+    /// the connection you hand me" — plus the current underlying registration (and the
+    /// connection it was created on). Held in the facade's registry and re-registered on
+    /// every reconnect. Disposing the handle removes it from the registry and disposes
+    /// the live registration.
     /// </summary>
+    /// <remarks>
+    /// <b>Why a registrar and not a callback.</b> <see cref="IAdsConnection"/> offers several
+    /// subscription callback shapes (<c>Action&lt;string, object?&gt;</c>,
+    /// <c>Action&lt;string, T?&gt;</c>, <c>Action&lt;AdsNotification&gt;</c>). Storing a callback
+    /// would force this record to know which shape it holds and force
+    /// <see cref="RegisterAsync"/> — the single path every reconnect funnels through — to branch on
+    /// it, doubling the ways a reconnect can go wrong for each shape added. Storing the
+    /// already-bound registration call instead erases the difference: each public overload closes
+    /// over its own arguments and callback, and this record re-invokes one delegate. The typed
+    /// overload needs nothing at all here — it wraps its callback into the untyped shape before
+    /// subscribing, so it arrives as an untyped registrar.
+    /// </remarks>
     private sealed class DurableSubscription : IDisposable
     {
         private readonly AdsConnectionFacade _facade;
+        private readonly Func<IManagedConnection, CancellationToken, Task<IDisposable>> _register;
         private readonly object _gate = new();
 
         // The connection the current registration was created on, and that
@@ -550,17 +599,17 @@ internal sealed class AdsConnectionFacade : IAdsConnection
         private bool _disposed;
 
         public DurableSubscription(
-            AdsConnectionFacade facade, string symbolPath, int cycleTimeMs, Action<string, object?> callback)
+            AdsConnectionFacade facade,
+            string symbolPath,
+            Func<IManagedConnection, CancellationToken, Task<IDisposable>> register)
         {
             _facade = facade;
             SymbolPath = symbolPath;
-            CycleTimeMs = cycleTimeMs;
-            Callback = callback;
+            _register = register;
         }
 
+        /// <summary>The subscribed symbol, kept for re-registration failure logging.</summary>
         public string SymbolPath { get; }
-        public int CycleTimeMs { get; }
-        public Action<string, object?> Callback { get; }
 
         /// <summary>
         /// Registers this subscription against <paramref name="connection"/> and
@@ -595,7 +644,7 @@ internal sealed class AdsConnectionFacade : IAdsConnection
             IDisposable fresh;
             try
             {
-                fresh = await connection.SubscribeAsync(SymbolPath, CycleTimeMs, Callback, ct).ConfigureAwait(false);
+                fresh = await _register(connection, ct).ConfigureAwait(false);
             }
             catch
             {

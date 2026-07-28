@@ -314,6 +314,32 @@ internal sealed class FakeManagedConnection : IManagedConnection
     }
 
     /// <summary>
+    /// Adapts the <see cref="AdsNotification"/> callback into the untyped shape and delegates to
+    /// the untyped <see cref="SubscribeAsync"/>, so a notification-shaped durable subscription is
+    /// recorded in <see cref="Subscriptions"/> exactly like an untyped one and
+    /// <see cref="SubscriptionRecord.FireNotification"/> drives it. Genuinely implemented (not a
+    /// throwing stub) because the facade's durable-subscription tests re-register a
+    /// notification-shaped subscription against this double across a reconnect.
+    /// </summary>
+    /// <remarks>
+    /// The type name is inferred from the fired value via
+    /// <see cref="SimulatedAdsConnection.InferPlcType"/> and the timestamp is the moment of the
+    /// fire: this double has no PLC, and the facade tests assert re-registration and delivery, not
+    /// metadata fidelity (the shared contract suite pins that against
+    /// <see cref="InMemoryManagedConnection"/>).
+    /// </remarks>
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+        => SubscribeAsync(
+            symbolPath,
+            cycleTimeMs,
+            (path, value) =>
+            {
+                var (typeName, _) = SimulatedAdsConnection.InferPlcType(value);
+                callback(new AdsNotification(path, value, typeName, DateTimeOffset.UtcNow));
+            },
+            ct);
+
+    /// <summary>
     /// The typed overload is never exercised against the underlying connection: the
     /// facade wraps the typed callback into the untyped shape BEFORE storing it in the
     /// durable record, so only the untyped <see cref="SubscribeAsync"/> ever reaches a

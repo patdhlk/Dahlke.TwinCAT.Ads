@@ -655,10 +655,127 @@ internal sealed class AdsConnection : IManagedConnection
         });
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>Type name and timestamp.</b> <see cref="AdsNotification.TypeName"/> comes from the
+    /// symbol resolved once at registration; <see cref="AdsNotification.Timestamp"/> is
+    /// <see cref="AdsNotificationEventArgs.TimeStamp"/> — the time the PLC put on the
+    /// notification, not the moment this process saw it.
+    /// </para>
+    /// <para>
+    /// <b>Decoding inside a synchronous handler.</b> The ADS notification handler is a
+    /// synchronous <see cref="EventHandler{TEventArgs}"/> and so cannot await
+    /// <see cref="PlcValueDecoder.DecodeAsync"/>, whose struct/array path performs one ADS read
+    /// per member. Blocking on it here (<c>GetAwaiter().GetResult()</c>) would stall the ADS
+    /// notification thread for the whole decode, and an <c>async void</c> handler would let
+    /// exceptions escape the <c>try</c>/<c>catch</c> that keeps a faulty callback from tearing the
+    /// subscription down. So the handler splits by shape:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     Scalars, strings, enums and opaque structs — the overwhelmingly common subscription
+    ///     target — decode with NO I/O via
+    ///     <see cref="PlcValueDecoder.TryDecodeWithoutReads"/> and are delivered inline, on the
+    ///     notification thread, exactly like the untyped overload.
+    ///   </description></item>
+    ///   <item><description>
+    ///     Structs, function blocks and arrays hand the already-read raw value to
+    ///     <see cref="PlcValueDecoder.DecodeAsync"/> on the thread pool and deliver when it
+    ///     completes — see <see cref="DeliverDecodedContainerInBackground"/>.
+    ///   </description></item>
+    /// </list>
+    /// </remarks>
+    public async Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs,
+        Action<AdsNotification> callback, CancellationToken ct)
+    {
+        using var cts = CreateTimeoutCts(ct);
+        var symbol = _client.ReadSymbol(symbolPath);
+        var typeName = symbol.TypeName;
+        var settings = new NotificationSettings(AdsTransMode.OnChange, cycleTimeMs, 0);
+        var notificationHandle = await _client.AddDeviceNotificationAsync(
+            symbolPath, symbol.ByteSize, settings, null, cts.Token).ConfigureAwait(false);
+
+        var handler = new EventHandler<AdsNotificationEventArgs>((_, e) =>
+        {
+            if (e.Handle != notificationHandle.Handle) return;
+            try
+            {
+                var loader = GetSymbolLoader();
+                if (!loader.Symbols.TryGetInstance(symbolPath, out var sym) || sym is not IValueSymbol vs)
+                {
+                    // Same as the untyped overload: an unresolvable symbol yields a null value
+                    // rather than a dropped notification.
+                    callback(new AdsNotification(symbolPath, null, typeName, e.TimeStamp));
+                    return;
+                }
+
+                // The same per-notification re-read the untyped overload performs. Task 10
+                // replaces it by decoding e.Data directly.
+                var raw = vs.ReadValue();
+
+                if (PlcValueDecoder.TryDecodeWithoutReads(raw, sym, out var value))
+                {
+                    callback(new AdsNotification(symbolPath, value, typeName, e.TimeStamp));
+                    return;
+                }
+
+                // A container: decoding reads one member/element at a time, so it must not run on
+                // the ADS notification thread.
+                DeliverDecodedContainerInBackground(symbolPath, raw, sym, typeName, e.TimeStamp, callback);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Notification error for {Symbol}", symbolPath);
+            }
+        });
+
+        _client.AdsNotification += handler;
+
+        return new NotificationSubscription(() =>
+        {
+            _client.AdsNotification -= handler;
+            try { _client.DeleteDeviceNotification(notificationHandle.Handle); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Error deleting notification for {Symbol}", symbolPath); }
+        });
+    }
+
+    /// <summary>
+    /// Decodes a container notification value off the ADS notification thread and delivers the
+    /// resulting <see cref="AdsNotification"/> when the decode completes, carrying
+    /// <paramref name="timestamp"/> — the time of the change being reported, captured before the
+    /// hand-off, NOT the time the decode finished.
+    /// </summary>
+    /// <remarks>
+    /// The work runs as a <see cref="Task"/> (never <c>async void</c>) whose body catches
+    /// everything and logs at Warning, matching the notification handler's own contract that a
+    /// failure must not tear down the subscription. Because nothing can escape that body the task
+    /// can never fault, so discarding it cannot leave an unobserved task exception behind. The
+    /// decode is bounded by the target's <see cref="PlcTargetOptions.TimeoutMs"/>, like every other
+    /// multi-read decode in this type.
+    /// </remarks>
+    private void DeliverDecodedContainerInBackground(string symbolPath, object? raw, ISymbol symbol,
+        string typeName, DateTimeOffset timestamp, Action<AdsNotification> callback)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var cts = CreateTimeoutCts(CancellationToken.None);
+                var value = await PlcValueDecoder.DecodeAsync(raw, symbol, cts.Token).ConfigureAwait(false);
+                callback(new AdsNotification(symbolPath, value, typeName, timestamp));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Notification error for {Symbol}", symbolPath);
+            }
+        });
+    }
+
     /// <summary>
     /// Typed subscription: wraps <paramref name="callback"/> with
     /// <see cref="TypedCallbackAdapter.Wrap{T}"/> and delegates to the untyped
-    /// <see cref="SubscribeAsync"/>. Each notification value is converted to
+    /// <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/>. Each notification value is converted to
     /// <typeparamref name="T"/> with the same rules as
     /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>; an unconvertible value
     /// is dropped with a Warning rather than delivered.

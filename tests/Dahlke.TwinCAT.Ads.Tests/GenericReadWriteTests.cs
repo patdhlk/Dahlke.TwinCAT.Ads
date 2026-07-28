@@ -488,6 +488,11 @@ public class GenericReadWriteTests
             => throw new NotSupportedException();
 
         // Never exercised: these facade-routing tests only assert typed/untyped read-write
+        // delegation, not notification-shaped subscriptions (see the strict stub policy).
+        public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        // Never exercised: these facade-routing tests only assert typed/untyped read-write
         // delegation, not symbol browsing (see the strict stub policy — real only where read).
         public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
             => throw new NotSupportedException();

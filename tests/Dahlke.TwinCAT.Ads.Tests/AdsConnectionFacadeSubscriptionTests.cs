@@ -97,6 +97,42 @@ public class AdsConnectionFacadeSubscriptionTests
     }
 
     [Fact]
+    public async Task Reconnect_ReRegistersNotificationSubscription_OnNewConnection_OldHandleStillValid()
+    {
+        var time = new FakeTimeProvider();
+        var facade = NewFacade(time);
+        var first = new FakeManagedConnection("plc1") { IsConnected = true };
+        facade.SetCurrent(first);
+
+        var received = new TaskCompletionSource<AdsNotification>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handle = await facade
+            .SubscribeAsync("MAIN.x", 100, n => received.TrySetResult(n), CancellationToken.None)
+            .WaitAsync(RealTimeout);
+        Assert.Single(first.Subscriptions);
+
+        // Reconnect: the notification-shaped subscription must be re-registered by the SAME
+        // single re-registration path the untyped one uses, with the same arguments.
+        var second = new FakeManagedConnection("plc1") { IsConnected = true };
+        facade.SetCurrent(second);
+
+        await WaitUntil(() => second.Subscriptions.Count == 1);
+        var rec = Only(second);
+        Assert.Equal("MAIN.x", rec.Path);
+        Assert.Equal(100, rec.CycleTimeMs);
+
+        // The unchanged handle's callback fires from the NEW connection, still fully populated.
+        rec.FireNotification(7);
+        var notification = await received.Task.WaitAsync(RealTimeout);
+        Assert.Equal("MAIN.x", notification.SymbolPath);
+        Assert.Equal(7, notification.Value);
+        Assert.False(string.IsNullOrEmpty(notification.TypeName));
+        Assert.NotEqual(default, notification.Timestamp);
+
+        handle.Dispose();
+        Assert.True(rec.IsDisposed);
+    }
+
+    [Fact]
     public async Task Reconnect_ReRegistersAllSubscriptions()
     {
         var time = new FakeTimeProvider();
