@@ -56,12 +56,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the PLC-reported timestamp. Durability across reconnects is identical to the existing
   overloads; see **Known limitations** below for how container symbols' delivery timing differs
   from scalars.
-- `AdsValueResult.TypeName` and `AdsValueResult.Category`.
+- `AdsValueResult.TypeName` and `AdsValueResult.Category`, plus a public
+  `AdsValueResult.Success(value, symbolPath, typeName, category)` factory so a consumer writing a
+  test double of `IAdsConnection.ReadValueWithMetadataAsync` can populate them — previously they
+  were public to read but reachable only from internal factories, so every faked result reported
+  `null`.
+- `GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)` — the flag
+  `SearchSymbolsAsync` already had. The existing two-argument overload keeps its current behaviour
+  (children populated recursively), so nothing that compiles today changes meaning; pass
+  `includeChildren: false` for interactive drill-down, which is what keeps a root browse from
+  projecting every symbol on the PLC.
 
 ### Changed
 
-- **Breaking:** `Beckhoff.TwinCAT.Ads` and `Beckhoff.TwinCAT.Ads.TcpRouter` now require `7.*`
-  (previously `6.*`).
+- **Breaking:** `Beckhoff.TwinCAT.Ads` and `Beckhoff.TwinCAT.Ads.TcpRouter` now require
+  `[7.0.292,8.0.0)` (previously `6.*`). The range is bracketed rather than floating: the
+  notification-payload decode depends on deep public contract (`IValueRawSymbol.ValueAccessor` →
+  `ValueFactory` → `CreateValue`) that a major version could reshape while preserving every
+  signature, which would yield silently wrong values with no compile error and no test failure.
+- `UNION` symbols now decode to a member-keyed tree like structs and function blocks, instead of
+  reaching the caller as a raw TwinCAT `DynamicValue`. `Alias`, `Program`, `Pointer` and
+  `Reference` are still passed through undecoded — now documented as such on
+  `ReadValueWithMetadataAsync` rather than silently degrading.
+- Symbol-tree walks (`GetSymbolsAsync`, `SearchSymbolsAsync`) stop at a symbol Beckhoff flags
+  `IsRecursive` and at a hard depth ceiling of 32 levels. A truncated symbol is reported as a leaf.
+- Simulated batch reads now carry `TypeName`/`Category` like a real connection, and
+  `SimulatedAdsConnection.GetAdsStateAsync` now honours its cancellation token.
 - Batch `ReadValuesAsync` now **partitions** by symbol category: scalars, strings and enums share a
   single ADS sum command as before, while structs, function blocks and arrays are decoded
   individually so their member values are returned as a tree rather than an opaque value. An
@@ -87,6 +107,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a decodable value source — falls back to a read instead; the fallback is logged once per
   subscription so a symbol that permanently loses the optimization stays visible rather than
   silent.
+- `GetAdsStateAsync` and `IsAliveAsync` now check whether the ADS state read actually succeeded.
+  Beckhoff's `ReadStateAsync` uses the non-throwing Result pattern, so a failed read completed
+  normally and was treated as a success: `GetAdsStateAsync` returned `default(AdsState)` —
+  indistinguishable from a state the device reported — and `IsAliveAsync` returned `true`, so an
+  unreachable-but-connected PLC was reported healthy and never reconnected. `GetAdsStateAsync` now
+  throws `AdsErrorException` (the exception it always documented); `IsAliveAsync` returns `false`,
+  matching its own contract and the pool health loop's design.
+- The untyped `SubscribeAsync` handler's logging is now failure-tolerant like the typed one's. It
+  runs on the ADS notification thread, so a throwing logging provider escaped into Beckhoff's event
+  dispatch, out of the `catch` that keeps a faulty callback from tearing the subscription down.
+- A notification payload refusal that should be unreachable under `SymbolsLoadMode.DynamicTree`
+  (`NoValueFactory`, `NotAValueSymbol`) is now logged at **Warning** naming the likely cause — a
+  change in the Beckhoff client's symbol/value-accessor contract — rather than at Information
+  alongside the benign external-data-references case.
 - Struct decoding is now bounded by the operation's timeout and cancellation token. Previously each
   member read was unbounded and blocked a thread-pool thread, so a struct with many members could
   overrun `TimeoutMs` without failing.
@@ -99,9 +133,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delivery — but the guarantee is "never delivered after disposal completes," not "never delivered
   concurrently with disposal": a callback already running when `Dispose()` is called may still
   complete and fire.
+- Container notifications carry a value and a timestamp that do **not** describe the same instant.
+  The timestamp is the PLC's time for the change; the member reads that build the value run later,
+  on the thread pool, and see whatever the PLC holds then. Under a burst the pair is incoherent.
+  Scalar notifications have no such gap — their value comes from the notification's own payload.
+- `Alias`, `Program`, `Pointer` and `Reference` symbols are not decoded into a neutral tree and
+  reach the caller in Beckhoff's own shape. Treat a result whose `Category` is one of those as
+  opaque. Routing them through the decoder was not attempted because whether a sub-symbol walk is
+  meaningful differs per category and could not be established without hardware.
 - `AdsConnection`'s device-level operations (`GetDeviceInfoAsync`, `WriteControlAsync`,
-  subscription registration) have no unit-test coverage because the underlying `AdsClient` has no
-  injection point; they are covered by the hardware test suite only.
+  `GetAdsStateAsync`/`IsAliveAsync` failure handling, subscription registration) have no unit-test
+  coverage because the underlying `AdsClient` has no injection point; they are covered by the
+  hardware test suite only.
 
 ## [0.4.0] - 2026-06-16
 
