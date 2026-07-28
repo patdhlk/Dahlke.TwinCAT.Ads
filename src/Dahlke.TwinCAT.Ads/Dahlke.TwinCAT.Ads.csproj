@@ -38,8 +38,18 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="7.*" />
-    <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="7.*" />
+    <!--
+      Bracketed rather than floating. "7.*" packs as an unbracketed minimum with NO upper bound,
+      so a consumer restoring after Beckhoff ships 8.x silently gets it. The notification-payload
+      decode reaches deep into public contract that a major version could reshape while preserving
+      every signature: IValueRawSymbol.ValueAccessor -> ValueFactory -> CreateValue, plus Unwrap()
+      and HasExternalDataReferences(). A change in readRaw's semantics there would produce silently
+      WRONG VALUES with no compile error and no test failure — all hardware facts skip without a
+      PLC, and the unit tests decode against stubs this library defines itself. The ceiling turns
+      that into a restore-time failure a maintainer can evaluate deliberately.
+    -->
+    <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="[7.0.292,8.0.0)" />
+    <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="[7.0.292,8.0.0)" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="8.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.*" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.*" />

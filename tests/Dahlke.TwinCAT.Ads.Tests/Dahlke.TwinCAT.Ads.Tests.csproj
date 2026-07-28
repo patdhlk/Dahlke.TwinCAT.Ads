@@ -8,7 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="7.*" />
+    <!-- Matches the library's ceiling so the tests cannot resolve a version the library forbids. -->
+    <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="[7.0.292,8.0.0)" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.*" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="9.*" />
