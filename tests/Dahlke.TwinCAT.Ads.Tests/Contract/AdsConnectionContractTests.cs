@@ -505,6 +505,39 @@ public abstract class AdsConnectionContractTests
     }
 
     [Fact]
+    public async Task GetSymbolsAsync_DerivesContainerChain_FromDottedPath_CaseInsensitively()
+    {
+        // Pins the plan's container-derivation contract end to end — MAIN.Motor.Speed implies a
+        // MAIN container holding a MAIN.Motor container holding the leaf — AND guards a real bug
+        // found in review: parent lookups must resolve case-insensitively (real ADS symbol paths
+        // are case-insensitive) while still reporting each InstancePath in the AS-SEEDED casing,
+        // not whatever casing the caller happened to type.
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Motor.Speed", 1500);
+
+        var rootSymbols = await h.Connection.GetSymbolsAsync(null, CancellationToken.None);
+        var main = Assert.Single(rootSymbols, s => s.InstancePath.Equals("MAIN", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("MAIN", main.InstancePath);
+        Assert.Equal("STRUCT", main.TypeName);
+        Assert.Equal("Struct", main.Category);
+        Assert.Equal(0, main.ByteSize);
+
+        // Mis-cased parent lookup for a synthetic container that is never itself a stored key.
+        var motorSymbols = await h.Connection.GetSymbolsAsync("main", CancellationToken.None);
+        var motor = Assert.Single(motorSymbols);
+        Assert.Equal("MAIN.Motor", motor.InstancePath); // stored casing, not the caller's "main"
+        Assert.Equal("STRUCT", motor.TypeName);
+        Assert.Equal("Struct", motor.Category);
+
+        // Mis-cased multi-segment parent lookup down to the leaf.
+        var leafSymbols = await h.Connection.GetSymbolsAsync("MAIN.MOTOR", CancellationToken.None);
+        var leaf = Assert.Single(leafSymbols);
+        Assert.Equal("MAIN.Motor.Speed", leaf.InstancePath); // stored casing throughout
+        Assert.Equal("Primitive", leaf.Category);
+        Assert.NotEqual("STRUCT", leaf.TypeName); // a real leaf, not mis-detected as a container
+    }
+
+    [Fact]
     public async Task SearchSymbolsAsync_matches_case_insensitively_on_instance_path()
     {
         await using var h = await CreateHarnessAsync();

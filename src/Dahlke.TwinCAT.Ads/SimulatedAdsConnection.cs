@@ -49,7 +49,7 @@ namespace Dahlke.TwinCAT.Ads;
 public sealed class SimulatedAdsConnection : IManagedConnection
 {
     private readonly ILogger<SimulatedAdsConnection> _logger;
-    private readonly ConcurrentDictionary<string, object?> _symbols = new();
+    private readonly ConcurrentDictionary<string, object?> _symbols = new(StringComparer.OrdinalIgnoreCase);
 
     // Per-path subscriber list. Each entry is a list of (unique id → callback) pairs.
     // ConcurrentDictionary provides thread-safe path lookup; the inner lock guards
@@ -490,10 +490,14 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     {
         ct.ThrowIfCancellationRequested();
 
-        if (!string.IsNullOrEmpty(parentPath) && !HasAnySymbolUnder(parentPath))
-            throw new AdsErrorException($"Symbol '{parentPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+        var prefix = string.Empty;
+        if (!string.IsNullOrEmpty(parentPath))
+        {
+            var canonicalParent = ResolveStoredCasing(parentPath)
+                ?? throw new AdsErrorException($"Symbol '{parentPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+            prefix = canonicalParent + ".";
+        }
 
-        var prefix = string.IsNullOrEmpty(parentPath) ? string.Empty : parentPath + ".";
         var childNames = _symbols.Keys
             .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
             .Select(k => k.Substring(prefix.Length).Split('.')[0])
@@ -527,11 +531,25 @@ public sealed class SimulatedAdsConnection : IManagedConnection
         return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
     }
 
-    /// <summary>Whether any stored symbol sits at or beneath <paramref name="path"/>.</summary>
-    private bool HasAnySymbolUnder(string path) =>
-        _symbols.Keys.Any(k =>
-            k.Equals(path, StringComparison.OrdinalIgnoreCase) ||
-            k.StartsWith(path + ".", StringComparison.OrdinalIgnoreCase));
+    /// <summary>
+    /// Resolves <paramref name="path"/> to its as-seeded casing by locating a stored key at or
+    /// beneath it, or <see langword="null"/> when nothing is seeded there. PLC symbol paths are
+    /// case-insensitive, so a mis-cased caller lookup (e.g. <c>GetSymbolsAsync("main")</c> against
+    /// a symbol seeded as <c>MAIN.Speed</c>) must still report <see cref="AdsSymbolInfo.InstancePath"/>
+    /// in the casing the symbol was actually seeded with, not echo back whatever the caller typed.
+    /// </summary>
+    private string? ResolveStoredCasing(string path)
+    {
+        foreach (var key in _symbols.Keys)
+        {
+            if (key.Equals(path, StringComparison.OrdinalIgnoreCase))
+                return key;
+            if (key.Length > path.Length && key[path.Length] == '.' &&
+                key.AsSpan(0, path.Length).Equals(path, StringComparison.OrdinalIgnoreCase))
+                return key[..path.Length];
+        }
+        return null;
+    }
 
     /// <summary>Every stored leaf path plus every synthetic container path above it.</summary>
     private IEnumerable<string> AllPaths()

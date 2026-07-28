@@ -2,6 +2,7 @@ using System.Collections;
 using System.Diagnostics;
 using System.Text;
 using Dahlke.TwinCAT.Ads.Tests.Fakes;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TwinCAT;
 using TwinCAT.Ads;
@@ -241,20 +242,98 @@ public class AdsConnectionSymbolBrowsingTests
             $"Expected caller cancellation to win the race well before the 1s slow browse completed; took {sw.ElapsedMilliseconds}ms.");
     }
 
+    [Fact]
+    public async Task SearchSymbolsAsync_AbandonedBrowse_ThatLaterFaults_IsLoggedAsWarning_NotUnobserved()
+    {
+        // The browse itself blocks for 300ms then throws — but the browse timeout is 50ms, so the
+        // caller has already stopped waiting (TimeoutException) by the time the browse actually
+        // fails. Finding 1: that fault must still be OBSERVED (never an unobserved task exception
+        // at finalization — a real risk on a host with ThrowUnobservedTaskExceptions enabled) and
+        // LOGGED at Warning, since the caller never sees the browse's own exception.
+        var capturing = new CapturingLoggerFactory();
+        var options = new PlcTargetOptions { DisplayName = "PLC 1", TimeoutMs = 3000, SymbolBrowseTimeoutMs = 50 };
+        using var connection = new AdsConnection("plc1", options, capturing);
+        var browseFailure = new InvalidOperationException("simulated ADS upload failure");
+        connection.SetSymbolLoaderForTesting(
+            new SlowIterationSymbolLoader(TimeSpan.FromMilliseconds(300), browseFailure));
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => connection.SearchSymbolsAsync("anything", includeChildren: false, CancellationToken.None));
+
+        // The abandoned browse is still running in the background at this point (it started its
+        // 300ms sleep only ~50ms ago); poll for its continuation to log rather than assuming a
+        // fixed additional delay.
+        var logged = await WaitForConditionAsync(
+            () => capturing.Entries.Any(e => e.Message.Contains("Abandoned symbol browse")),
+            TimeSpan.FromSeconds(3));
+        Assert.True(logged, "Expected the abandoned browse's eventual fault to be logged.");
+
+        var entry = Assert.Single(capturing.Entries, e => e.Message.Contains("Abandoned symbol browse"));
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Same(browseFailure, entry.Exception);
+    }
+
+    private static async Task<bool> WaitForConditionAsync(Func<bool> predicate, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (predicate())
+                return true;
+            await Task.Delay(TimeSpan.FromMilliseconds(10));
+        }
+        return predicate();
+    }
+
+    /// <summary>
+    /// Minimal capturing <see cref="ILoggerFactory"/>, local to this test class (the same shape as
+    /// the one already used privately in <c>PoolDeferredStartTests</c>, plus the log level since
+    /// this test needs to assert Warning specifically). Records every log call's level, message,
+    /// and exception so a test can assert on it without a mocking framework.
+    /// </summary>
+    private sealed class CapturingLoggerFactory : ILoggerFactory
+    {
+        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = new();
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Entries);
+
+        public void AddProvider(ILoggerProvider provider) { }
+        public void Dispose() { }
+
+        private sealed class CapturingLogger(List<(LogLevel, string, Exception?)> sink) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                lock (sink)
+                    sink.Add((logLevel, formatter(state, exception), exception));
+            }
+        }
+    }
+
     /// <summary>
     /// A one-off <see cref="IDynamicSymbolLoader"/> double, local to this test class, whose root
     /// symbol collection blocks synchronously in <c>GetEnumerator</c> for a caller-supplied delay
-    /// before yielding an empty tree. Used only to pin <c>RunBrowseAsync</c>'s timeout/cancellation
-    /// race deterministically, simulating a slow PLC symbol upload without hardware or a real
+    /// before either yielding an empty tree or throwing <paramref name="throwAfterDelay"/> (used
+    /// to simulate an abandoned browse that goes on to fail — Finding 1). Used only to pin
+    /// <c>RunBrowseAsync</c>'s timeout/cancellation race and fault-observation behaviour
+    /// deterministically, simulating a slow/failing PLC symbol upload without hardware or a real
     /// multi-second wait. Reuses the same <c>SetSymbolLoaderForTesting</c> seam as
     /// <see cref="FakeDynamicSymbolLoader"/> — this is a second test double, not a second seam.
     /// Every member besides the one genuinely exercised (<c>GetEnumerator</c> on the root
     /// collection, reached via <c>AdsConnection.FlattenSymbols</c>'s plain <c>foreach</c>) throws,
     /// per this repo's stub-integrity policy.
     /// </summary>
-    private sealed class SlowIterationSymbolLoader(TimeSpan delay) : IDynamicSymbolLoader
+    private sealed class SlowIterationSymbolLoader(TimeSpan delay, Exception? throwAfterDelay = null) : IDynamicSymbolLoader
     {
-        public ISymbolCollection<ISymbol> Symbols { get; } = new SlowSymbolCollection(delay);
+        public ISymbolCollection<ISymbol> Symbols { get; } = new SlowSymbolCollection(delay, throwAfterDelay);
 
         public Task<ResultDynamicSymbols> GetDynamicSymbolsAsync(CancellationToken cancel) => throw new NotSupportedException();
         public IDynamicSymbolsEnumerable SymbolsDynamic => throw new NotSupportedException();
@@ -273,11 +352,13 @@ public class AdsConnectionSymbolBrowsingTests
         public IDataTypeCollection<IDataType> DataTypes => throw new NotSupportedException();
         public Encoding DefaultValueEncoding => throw new NotSupportedException();
 
-        private sealed class SlowSymbolCollection(TimeSpan delay) : ISymbolCollection<ISymbol>
+        private sealed class SlowSymbolCollection(TimeSpan delay, Exception? throwAfterDelay) : ISymbolCollection<ISymbol>
         {
             public IEnumerator<ISymbol> GetEnumerator()
             {
                 Thread.Sleep(delay);
+                if (throwAfterDelay is not null)
+                    throw throwAfterDelay;
                 return Enumerable.Empty<ISymbol>().GetEnumerator();
             }
 

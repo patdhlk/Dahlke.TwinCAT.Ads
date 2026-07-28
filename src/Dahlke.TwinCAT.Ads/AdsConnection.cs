@@ -677,15 +677,22 @@ internal sealed class AdsConnection : IManagedConnection
     /// <list type="bullet">
     ///   <item><description>
     ///     If the browse wins, its result (or exception, e.g. a "symbol not found"
-    ///     <see cref="AdsErrorException"/>) is awaited and returned/propagated normally.
+    ///     <see cref="AdsErrorException"/>) is awaited and returned/propagated normally. The
+    ///     now-pointless timer is cancelled immediately rather than left running for up to
+    ///     <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> after this method has already
+    ///     returned.
     ///   </description></item>
     ///   <item><description>
     ///     If the timer wins — because <paramref name="ct"/> was cancelled or
     ///     <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> elapsed — this method throws
     ///     immediately via <see cref="CancellationDisambiguator"/> and the browse is ABANDONED: it
-    ///     keeps running to completion on its thread-pool thread, but its eventual result or
-    ///     exception is discarded. The browse itself is never interrupted, only the caller's wait
-    ///     for it.
+    ///     keeps running to completion on its thread-pool thread, but its eventual result is
+    ///     discarded. The browse itself is never interrupted, only the caller's wait for it. An
+    ///     abandoned browse's eventual FAULT (a real possibility: a browse slow enough to blow
+    ///     the budget will often go on to fail — ADS upload error, disconnect mid-upload,
+    ///     <see cref="GetSymbolLoader"/> faulting) is still observed and logged at Warning via
+    ///     <see cref="LogIfAbandonedBrowseFails"/>, rather than left to surface only as an
+    ///     unobserved task exception at finalization.
     ///   </description></item>
     /// </list>
     /// </remarks>
@@ -695,14 +702,45 @@ internal sealed class AdsConnection : IManagedConnection
         ct.ThrowIfCancellationRequested();
 
         var browseTask = Task.Run(browse);
-        var timeoutTask = Task.Delay(_options.SymbolBrowseTimeoutMs, ct);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var timeoutTask = Task.Delay(_options.SymbolBrowseTimeoutMs, timeoutCts.Token);
 
         var winner = await Task.WhenAny(browseTask, timeoutTask).ConfigureAwait(false);
 
         if (ReferenceEquals(winner, browseTask))
+        {
+            // The timer is now pointless — cancel it so it doesn't sit alive for up to
+            // SymbolBrowseTimeoutMs (30s by default) after this method has already returned.
+            timeoutCts.Cancel();
             return await browseTask.ConfigureAwait(false);
+        }
+
+        // Abandoned: attach a fire-and-forget continuation so a later fault is observed (never
+        // an unobserved task exception) and logged — the caller only ever sees the
+        // TimeoutException/OperationCanceledException thrown below, never the browse's own
+        // exception, so this is the only place that failure can be diagnosed.
+        LogIfAbandonedBrowseFails(browseTask, context);
 
         throw CancellationDisambiguator.CreateException(ct, context, PlcId, _options.SymbolBrowseTimeoutMs);
+    }
+
+    /// <summary>
+    /// Attaches a fire-and-forget continuation that logs at Warning if the already-abandoned
+    /// <paramref name="browseTask"/> later completes with a fault. Accessing
+    /// <see cref="Task.Exception"/> inside the continuation marks it observed, so the fault never
+    /// surfaces as a <see cref="TaskScheduler.UnobservedTaskException"/> at finalization — which,
+    /// on a host configured with <c>ThrowUnobservedTaskExceptions</c>, would crash the process for
+    /// something this library cannot control.
+    /// </summary>
+    private void LogIfAbandonedBrowseFails(Task<IReadOnlyList<AdsSymbolInfo>> browseTask, string context)
+    {
+        _ = browseTask.ContinueWith(
+            t => _logger.LogWarning(
+                t.Exception?.GetBaseException(),
+                "Abandoned symbol browse for '{Context}' on PLC '{PlcId}' failed after the caller had already stopped waiting for it.",
+                context, PlcId),
+            TaskContinuationOptions.OnlyOnFaulted);
     }
 
     /// <summary>

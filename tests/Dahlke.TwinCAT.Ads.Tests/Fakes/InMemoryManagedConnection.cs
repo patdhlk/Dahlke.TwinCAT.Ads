@@ -68,7 +68,7 @@ namespace Dahlke.TwinCAT.Ads.Tests.Fakes;
 /// </remarks>
 internal sealed class InMemoryManagedConnection : IManagedConnection
 {
-    private readonly ConcurrentDictionary<string, object?> _symbols = new();
+    private readonly ConcurrentDictionary<string, object?> _symbols = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SubscriberList> _subscribers = new();
 
     public InMemoryManagedConnection(string plcId = "plc1", string displayName = "In-Memory PLC")
@@ -215,10 +215,14 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     {
         ct.ThrowIfCancellationRequested();
 
-        if (!string.IsNullOrEmpty(parentPath) && !HasAnySymbolUnder(parentPath))
-            throw new AdsErrorException($"In-memory symbol '{parentPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+        var prefix = string.Empty;
+        if (!string.IsNullOrEmpty(parentPath))
+        {
+            var canonicalParent = ResolveStoredCasing(parentPath)
+                ?? throw new AdsErrorException($"In-memory symbol '{parentPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+            prefix = canonicalParent + ".";
+        }
 
-        var prefix = string.IsNullOrEmpty(parentPath) ? string.Empty : parentPath + ".";
         var childNames = _symbols.Keys
             .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
             .Select(k => k.Substring(prefix.Length).Split('.')[0])
@@ -247,10 +251,23 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
         return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
     }
 
-    private bool HasAnySymbolUnder(string path) =>
-        _symbols.Keys.Any(k =>
-            k.Equals(path, StringComparison.OrdinalIgnoreCase) ||
-            k.StartsWith(path + ".", StringComparison.OrdinalIgnoreCase));
+    /// <summary>
+    /// Resolves <paramref name="path"/> to its as-seeded casing by locating a stored key at or
+    /// beneath it, or <see langword="null"/> when nothing is seeded there — mirrors
+    /// <see cref="SimulatedAdsConnection"/>'s equivalent helper; see its remarks.
+    /// </summary>
+    private string? ResolveStoredCasing(string path)
+    {
+        foreach (var key in _symbols.Keys)
+        {
+            if (key.Equals(path, StringComparison.OrdinalIgnoreCase))
+                return key;
+            if (key.Length > path.Length && key[path.Length] == '.' &&
+                key.AsSpan(0, path.Length).Equals(path, StringComparison.OrdinalIgnoreCase))
+                return key[..path.Length];
+        }
+        return null;
+    }
 
     private IEnumerable<string> AllPaths()
     {
