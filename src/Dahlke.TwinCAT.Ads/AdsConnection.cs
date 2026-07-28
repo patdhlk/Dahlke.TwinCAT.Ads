@@ -579,9 +579,7 @@ internal sealed class AdsConnection : IManagedConnection
                 result.ErrorCode);
 
         var info = result.DeviceInfo;
-        return new AdsDeviceInfo(
-            info.Name,
-            $"{info.Version.Version}.{info.Version.Revision}.{info.Version.Build}");
+        return new AdsDeviceInfo(info.Name, AdsVersionFormatter.Format(info.Version));
     }
 
     /// <summary>
