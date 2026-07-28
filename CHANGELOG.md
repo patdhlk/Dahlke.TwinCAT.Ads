@@ -10,11 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **⚠️ Hardware verification pending before publish.** The notification-payload decode described
 > under "Fixed" below was verified by decompiling `Beckhoff.TwinCAT.Ads 7.0.292` and confirming it
 > makes the identical internal call a read would make — **not** by running against a live PLC.
-> Before this package is pushed to NuGet, run `Subscribe_OnChange_ReceivesNotification` and
-> `SubscribeTyped_OnChange_ReceivesTypedNotification` in `tests/Dahlke.TwinCAT.Ads.HardwareTests`
-> against a PLC exposing at least one struct symbol and one array symbol. Those tests are gated
-> behind `HardwareFactAttribute` and skip silently without hardware, so the green CI/local suite
-> does not close this gate. Remove this note once the hardware run is green.
+>
+> Before this package is pushed to NuGet, run `tests/Dahlke.TwinCAT.Ads.HardwareTests` against a
+> live PLC with **all three** symbol variables set — `TWINCAT_TEST_SYMBOL_INT` (writable INT),
+> `TWINCAT_TEST_SYMBOL_STRUCT` (a stable STRUCT or FUNCTION_BLOCK) and `TWINCAT_TEST_SYMBOL_ARRAY`
+> (a stable ARRAY). The facts that close this gate are:
+>
+> - `Subscribe_OnChange_DeliversTheValueThatWasWritten` — the untyped path delivers the value that
+>   was written, not merely a non-null one.
+> - `SubscribeNotification_OnChange_CarriesValueTypeNameAndTimestamp` — the `Action<AdsNotification>`
+>   overload's `Value`, `TypeName` and `Timestamp`.
+> - `SubscribeNotification_StructSymbol_DecodesToTheSameTreeAsARead` and
+>   `SubscribeNotification_ArraySymbol_DecodesToTheSameTreeAsARead` — the decode divergence check:
+>   a notification's decoded tree must equal the tree a fresh read of the same symbol returns. The
+>   array fact is the one that exercises `IAccessorValueFactory.CreateValue` over a container
+>   payload; a struct with sub-symbols reads its members instead.
+> - `ReadValueWithMetadata_StructSymbol_DecodesToAKeyedTree` and
+>   `ReadValueWithMetadata_ArraySymbol_DecodesToAnObjectArray` — container reads carry a decoded
+>   tree plus `TypeName`/`Category`.
+>
+> Every fact is gated behind `HardwareFactAttribute` and skips silently without hardware, and the
+> symbol-gated ones return early (reporting as **passed**) when their variable is unset — so
+> neither the green CI suite nor a hardware run with variables missing closes this gate. Remove
+> this note once the full hardware run is green.
 
 ### Added
 

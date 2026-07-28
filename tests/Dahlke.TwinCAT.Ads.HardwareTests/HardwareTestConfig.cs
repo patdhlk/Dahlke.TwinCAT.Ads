@@ -24,6 +24,39 @@ internal static class HardwareTestConfig
     public static string? SymbolInt =>
         Environment.GetEnvironmentVariable("TWINCAT_TEST_SYMBOL_INT");
 
+    /// <summary>
+    /// Fully-qualified name of a STRUCT (or FUNCTION_BLOCK) symbol. Set via
+    /// TWINCAT_TEST_SYMBOL_STRUCT.
+    /// </summary>
+    /// <remarks>
+    /// Read-only as far as these tests are concerned — nothing writes it, so its declared members
+    /// can be anything. It MUST however be stable for the duration of the run: the struct facts
+    /// compare the value a notification decodes to against the value a fresh read returns, and a
+    /// symbol the PLC program is continuously mutating would make that comparison meaningless.
+    /// Point this at a struct the test program leaves alone.
+    /// </remarks>
+    public static string? SymbolStruct =>
+        Environment.GetEnvironmentVariable("TWINCAT_TEST_SYMBOL_STRUCT");
+
+    /// <summary>
+    /// Fully-qualified name of an ARRAY symbol. Set via TWINCAT_TEST_SYMBOL_ARRAY.
+    /// </summary>
+    /// <remarks>
+    /// Same stability requirement as <see cref="SymbolStruct"/>, and for the same reason. The array
+    /// symbol is the one that matters most: an array notification is the only container shape whose
+    /// raw value comes from <c>IAccessorValueFactory.CreateValue</c> over the notification payload
+    /// (a struct with sub-symbols skips the payload and reads its members), so this is where a
+    /// divergence between the payload decode and a real read would actually show up.
+    /// </remarks>
+    public static string? SymbolArray =>
+        Environment.GetEnvironmentVariable("TWINCAT_TEST_SYMBOL_ARRAY");
+
     /// <summary>Returns true when at least the INT symbol is configured.</summary>
     public static bool HasSymbolInt => !string.IsNullOrWhiteSpace(SymbolInt);
+
+    /// <summary>Returns true when a struct symbol is configured.</summary>
+    public static bool HasSymbolStruct => !string.IsNullOrWhiteSpace(SymbolStruct);
+
+    /// <summary>Returns true when an array symbol is configured.</summary>
+    public static bool HasSymbolArray => !string.IsNullOrWhiteSpace(SymbolArray);
 }
