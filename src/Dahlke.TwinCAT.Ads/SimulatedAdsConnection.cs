@@ -408,6 +408,17 @@ public sealed class SimulatedAdsConnection : IManagedConnection
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
         => Task.FromResult(AdsState.Run);
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Reports a synthetic identity so simulated consumers get a well-formed response. The name
+    /// is deliberately recognisable as simulated rather than imitating a real runtime.
+    /// </remarks>
+    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(new AdsDeviceInfo("Simulated ADS Device", "0.0.0"));
+    }
+
     /// <summary>
     /// Registers a callback that fires each time <paramref name="symbolPath"/> is written
     /// with a value that differs from the previously stored value (on-change semantics).

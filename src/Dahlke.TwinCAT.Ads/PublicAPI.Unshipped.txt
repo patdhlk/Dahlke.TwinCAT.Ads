@@ -4,6 +4,20 @@ Dahlke.TwinCAT.Ads.AdsConnectionUnavailableException.AdsConnectionUnavailableExc
 Dahlke.TwinCAT.Ads.AdsConnectionUnavailableException.AdsConnectionUnavailableException(string! plcId, System.Exception! innerException) -> void
 Dahlke.TwinCAT.Ads.AdsConnectionUnavailableException.AdsConnectionUnavailableException(string! plcId, string! message, System.Exception? innerException) -> void
 Dahlke.TwinCAT.Ads.AdsConnectionUnavailableException.PlcId.get -> string?
+Dahlke.TwinCAT.Ads.AdsDeviceInfo
+Dahlke.TwinCAT.Ads.AdsDeviceInfo.AdsDeviceInfo(string! Name, string! Version) -> void
+Dahlke.TwinCAT.Ads.AdsDeviceInfo.Name.get -> string!
+Dahlke.TwinCAT.Ads.AdsDeviceInfo.Name.init -> void
+Dahlke.TwinCAT.Ads.AdsDeviceInfo.Version.get -> string!
+Dahlke.TwinCAT.Ads.AdsDeviceInfo.Version.init -> void
+Dahlke.TwinCAT.Ads.AdsDeviceInfo.Deconstruct(out string! Name, out string! Version) -> void
+Dahlke.TwinCAT.Ads.AdsDeviceInfo.Equals(Dahlke.TwinCAT.Ads.AdsDeviceInfo? other) -> bool
+override Dahlke.TwinCAT.Ads.AdsDeviceInfo.Equals(object? obj) -> bool
+override Dahlke.TwinCAT.Ads.AdsDeviceInfo.GetHashCode() -> int
+override Dahlke.TwinCAT.Ads.AdsDeviceInfo.ToString() -> string!
+static Dahlke.TwinCAT.Ads.AdsDeviceInfo.operator !=(Dahlke.TwinCAT.Ads.AdsDeviceInfo? left, Dahlke.TwinCAT.Ads.AdsDeviceInfo? right) -> bool
+static Dahlke.TwinCAT.Ads.AdsDeviceInfo.operator ==(Dahlke.TwinCAT.Ads.AdsDeviceInfo? left, Dahlke.TwinCAT.Ads.AdsDeviceInfo? right) -> bool
+Dahlke.TwinCAT.Ads.AdsDeviceInfo.<Clone>$() -> Dahlke.TwinCAT.Ads.AdsDeviceInfo!
 Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions
 Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.AdsDiagnosticsOptions() -> void
 Dahlke.TwinCAT.Ads.AdsDiagnosticsOptions.SymbolDump.get -> Dahlke.TwinCAT.Ads.SymbolDumpOptions!
@@ -80,6 +94,7 @@ Dahlke.TwinCAT.Ads.IAdsConnection
 Dahlke.TwinCAT.Ads.IAdsConnection.ConnectionStateChanged -> System.EventHandler<Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs!>?
 Dahlke.TwinCAT.Ads.IAdsConnection.DisplayName.get -> string!
 Dahlke.TwinCAT.Ads.IAdsConnection.GetAdsStateAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<TwinCAT.Ads.AdsState>!
+Dahlke.TwinCAT.Ads.IAdsConnection.GetDeviceInfoAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.AdsDeviceInfo!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.GetSymbolsAsync(string? parentPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>!>!
 Dahlke.TwinCAT.Ads.IAdsConnection.IsConnected.get -> bool
 Dahlke.TwinCAT.Ads.IAdsConnection.PlcId.get -> string!
@@ -122,6 +137,7 @@ Dahlke.TwinCAT.Ads.SimulatedAdsConnection.ConnectionStateChanged -> System.Event
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.DisplayName.get -> string!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.Dispose() -> void
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.GetAdsStateAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<TwinCAT.Ads.AdsState>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.GetDeviceInfoAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.AdsDeviceInfo!>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.GetSymbolsAsync(string? parentPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>!>!
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.IsConnected.get -> bool
 Dahlke.TwinCAT.Ads.SimulatedAdsConnection.PlcId.get -> string!

@@ -423,6 +423,21 @@ public abstract class AdsConnectionContractTests
     }
 
     // =====================================================================
+    // Device info.
+    // =====================================================================
+
+    [Fact]
+    public async Task GetDeviceInfoAsync_returns_a_non_empty_name_and_version()
+    {
+        await using var h = await CreateHarnessAsync();
+
+        var info = await h.Connection.GetDeviceInfoAsync(CancellationToken.None);
+
+        Assert.False(string.IsNullOrWhiteSpace(info.Name));
+        Assert.False(string.IsNullOrWhiteSpace(info.Version));
+    }
+
+    // =====================================================================
     // Cancellation: pre-cancelled token throws on every operation.
     // =====================================================================
 

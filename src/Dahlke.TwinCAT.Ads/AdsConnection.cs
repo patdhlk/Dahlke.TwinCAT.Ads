@@ -558,6 +558,32 @@ internal sealed class AdsConnection : IManagedConnection
         return result.State.AdsState;
     }
 
+    /// <inheritdoc />
+    public async Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+    {
+        using var cts = CreateTimeoutCts(ct);
+
+        ResultDeviceInfo result;
+        try
+        {
+            result = await _client.ReadDeviceInfoAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw CancellationDisambiguator.CreateException(ct, "<device-info>", PlcId, _options.TimeoutMs);
+        }
+
+        if (result.Failed)
+            throw new AdsErrorException(
+                $"Read of device info on PLC '{PlcId}' failed: {result.ErrorCode}",
+                result.ErrorCode);
+
+        var info = result.DeviceInfo;
+        return new AdsDeviceInfo(
+            info.Name,
+            $"{info.Version.Version}.{info.Version.Revision}.{info.Version.Build}");
+    }
+
     /// <summary>
     /// Checks whether the connection is actually functional (not just IsConnected).
     /// Returns false if ReadState fails.

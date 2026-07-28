@@ -190,6 +190,17 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
         return Task.FromResult(AdsState.Run);
     }
 
+    /// <summary>
+    /// Mirrors <see cref="SimulatedAdsConnection.GetDeviceInfoAsync"/>'s documented synthetic-
+    /// identity semantics — a well-formed, recognisably-not-real name and version, since this
+    /// double has no PLC runtime to read from.
+    /// </summary>
+    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(new AdsDeviceInfo("In-Memory ADS Device", "0.0.0"));
+    }
+
     // ---- Subscriptions ---------------------------------------------------
 
     public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)

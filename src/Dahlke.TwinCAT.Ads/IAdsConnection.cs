@@ -368,6 +368,14 @@ public interface IAdsConnection
     /// </exception>
     Task<AdsState> GetAdsStateAsync(CancellationToken ct);
 
+    /// <summary>Reads the target device's name and version.</summary>
+    /// <param name="ct">Cancels the operation; <see cref="PlcTargetOptions.TimeoutMs"/> applies.</param>
+    /// <returns>The device's <see cref="AdsDeviceInfo"/>.</returns>
+    /// <exception cref="AdsErrorException">Thrown when the read reports a non-success error code.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">Thrown when the per-target timeout elapses first.</exception>
+    Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct);
+
     /// <summary>
     /// Subscribes to value-change notifications for <paramref name="symbolPath"/>,
     /// invoking <paramref name="callback"/> with the symbol path and latest value

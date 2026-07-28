@@ -471,6 +471,11 @@ public class GenericReadWriteTests
         public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
             => Task.FromResult(default(AdsState));
 
+        // Never exercised: these facade-routing tests only assert typed/untyped read-write
+        // delegation, not device info (see the strict stub policy — real only where read).
+        public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+            => throw new NotSupportedException();
+
         public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
             => Task.FromResult<IDisposable>(new DummyDisposable());
 

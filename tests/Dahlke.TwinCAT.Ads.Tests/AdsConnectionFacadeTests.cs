@@ -621,6 +621,11 @@ public class AdsConnectionFacadeTests
         public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
             => Task.FromResult(default(AdsState));
 
+        // Never exercised: these routing tests assert read/write delegation only (see the strict
+        // stub policy — real only where genuinely read).
+        public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+            => throw new NotSupportedException();
+
         public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
             => Task.FromResult<IDisposable>(new DummyDisposable());
 

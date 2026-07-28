@@ -445,6 +445,13 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     }
 
     /// <inheritdoc />
+    public async Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+    {
+        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
+        return await conn.GetDeviceInfoAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// Registers a DURABLE subscription. The record (path, cycle time, callback) is
     /// added to the facade's registry and registered immediately against the current
