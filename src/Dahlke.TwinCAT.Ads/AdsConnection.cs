@@ -723,7 +723,10 @@ internal sealed class AdsConnection : IManagedConnection
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Notification error for {Symbol}", symbolPath);
+                // LogBestEffort, like the typed overload: this runs on the ADS notification thread,
+                // so a throwing logging provider would escape into Beckhoff's event dispatch — and
+                // this catch exists precisely to stop a failure here tearing the subscription down.
+                LogBestEffort(() => _logger.LogWarning(ex, "Notification error for {Symbol}", symbolPath));
             }
         });
 
@@ -733,7 +736,10 @@ internal sealed class AdsConnection : IManagedConnection
         {
             _client.AdsNotification -= handler;
             try { _client.DeleteDeviceNotification(notificationHandle.Handle); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Error deleting notification for {Symbol}", symbolPath); }
+            catch (Exception ex)
+            {
+                LogBestEffort(() => _logger.LogWarning(ex, "Error deleting notification for {Symbol}", symbolPath));
+            }
         });
     }
 
@@ -954,9 +960,32 @@ internal sealed class AdsConnection : IManagedConnection
                 return fromPayload;
 
             if (Interlocked.Exchange(ref fallbackReported, 1) == 0)
-                LogBestEffort(() => _logger.LogInformation(
-                    "Notifications for {Symbol} cannot be served from the notification payload ({Reason}); every one will read the symbol instead",
-                    symbol.InstancePath, refusal));
+            {
+                // NoValueFactory and NotAValueSymbol should both be UNREACHABLE under
+                // SymbolsLoadMode.DynamicTree, the only mode this type loads symbols in — so they
+                // are not "the symbol's shape", they are "the assumption this decode rests on has
+                // stopped holding". That is precisely the signal a breaking Beckhoff change would
+                // produce, and with all 9 hardware facts skipping in CI and the unit tests decoding
+                // against stubs this library defines itself, this log line is the only place it can
+                // surface. Reported at Warning, naming the hypothesis, so it is not filed alongside
+                // the benign ExternalDataReferences case.
+                if (refusal is NotificationPayloadRefusal.NoValueFactory
+                    or NotificationPayloadRefusal.NotAValueSymbol)
+                {
+                    LogBestEffort(() => _logger.LogWarning(
+                        "Notifications for {Symbol} cannot be served from the notification payload ({Reason}); every one will read the symbol instead. This refusal is expected to be UNREACHABLE under SymbolsLoadMode.DynamicTree, which is the only mode this library loads symbols in — the resolved symbol exposed no value accessor, or no raw value at all. The likeliest explanation is a change in the Beckhoff client's symbol or value-accessor contract, so check the resolved Beckhoff.TwinCAT.Ads version before treating this as a deployment or symbol-choice problem.",
+                        symbol.InstancePath, refusal));
+                }
+                else
+                {
+                    // ExternalDataReferences and NotTheWholeValue are the symbol's own declared
+                    // shape: nothing is wrong, the operator's only lever is symbol choice, and the
+                    // cost is a round-trip per notification.
+                    LogBestEffort(() => _logger.LogInformation(
+                        "Notifications for {Symbol} cannot be served from the notification payload ({Reason}); every one will read the symbol instead",
+                        symbol.InstancePath, refusal));
+                }
+            }
         }
         catch (Exception ex)
         {

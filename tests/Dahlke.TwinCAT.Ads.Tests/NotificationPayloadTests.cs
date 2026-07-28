@@ -258,12 +258,45 @@ public class AdsConnectionNotificationValueTests
         Assert.Equal(3, symbol.SynchronousReadCount);
 
         var entry = Assert.Single(logs.Entries);
-        Assert.Equal(LogLevel.Information, entry.Level);
         Assert.Contains("MAIN.Speed", entry.Message);
 
         // Distinguishable: WHICH reason it was, not merely that something happened.
         Assert.Contains(nameof(NotificationPayloadRefusal.NoValueFactory), entry.Message);
         Assert.Null(entry.Exception);
+
+        // NoValueFactory should be UNREACHABLE under SymbolsLoadMode.DynamicTree — the only mode
+        // AdsConnection loads symbols in — so reaching it is not a property of the symbol but a
+        // sign the assumption the payload decode rests on has stopped holding. With every hardware
+        // fact skipping in CI and the unit tests decoding against stubs this library defines
+        // itself, this line is the only place a breaking Beckhoff change would surface, so it must
+        // not be filed at the same level as the benign ExternalDataReferences case.
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Contains("Beckhoff.TwinCAT.Ads", entry.Message);
+    }
+
+    /// <summary>
+    /// The counterpart to the test above: a refusal that IS just the symbol's declared shape stays
+    /// at Information. If both were Warning the distinction would carry no information, and the
+    /// signal the Warning exists to carry would be buried under the benign case.
+    /// </summary>
+    [Fact]
+    public void Reports_a_shape_refusal_at_Information_not_Warning()
+    {
+        var fromRead = new object();
+        var symbol = StubValueSymbol.WithSynchronousReadValue(
+            "MAIN.Speed", DataTypeCategory.Primitive, "DINT", fromRead);
+
+        // Payload is not the symbol's whole storage — NotTheWholeValue, a property of the symbol.
+        symbol.ByteSize = Payload.Length + 4;
+
+        var logs = new CapturingLoggerFactory();
+        var reported = 0;
+
+        Assert.Same(fromRead, CreateConnection(logs).GetNotificationValue(symbol, Payload, PlcTimestamp, ref reported));
+
+        var entry = Assert.Single(logs.Entries);
+        Assert.Equal(LogLevel.Information, entry.Level);
+        Assert.Contains(nameof(NotificationPayloadRefusal.NotTheWholeValue), entry.Message);
     }
 
     [Fact]
