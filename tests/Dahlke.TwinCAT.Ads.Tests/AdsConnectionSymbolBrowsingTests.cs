@@ -158,6 +158,103 @@ public class AdsConnectionSymbolBrowsingTests
             explicitly[0].Children!.Single().Children!.Count);
     }
 
+    // ------------------------------------------------------------------
+    // Walk guards: depth cap and Beckhoff's own recursion flag.
+    //
+    // The walk is unbounded by construction — SubSymbols is followed until it
+    // runs out. Combined with the abandon-on-timeout design, a runaway walk is
+    // never stopped: it keeps allocating on a thread-pool thread after the
+    // caller has given up, and every retry starts another one. These pin the
+    // two cheap guards against that.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetSymbolsAsync_DoesNotDescendIntoASymbolFlaggedRecursive()
+    {
+        var leaf = new StubValueSymbol("Leaf", DataTypeCategory.Primitive, "INT", 1);
+        var node = new StubSymbol(DataTypeCategory.Struct, "ST_Node", leaf)
+        {
+            InstanceName = "MAIN.Node",
+            IsRecursive = true,
+        };
+        var main = new StubSymbol(DataTypeCategory.Struct, "MAIN_PRG", node) { InstanceName = "MAIN" };
+        using var connection = CreateConnection(30_000, main);
+
+        var symbols = await connection.GetSymbolsAsync(null, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        // MAIN itself is walked; the recursive node below it becomes a leaf.
+        var mainInfo = Assert.Single(symbols);
+        var nodeInfo = Assert.Single(mainInfo.Children!);
+        Assert.Equal("MAIN.Node", nodeInfo.InstancePath);
+        Assert.Null(nodeInfo.Children);
+    }
+
+    [Fact]
+    public async Task GetSymbolsAsync_StopsAtTheDepthCap()
+    {
+        // One chain deeper than the cap allows, so the walk must stop on its own.
+        var root = BuildChain(AdsConnection.MaxSymbolWalkDepth + 5);
+        using var connection = CreateConnection(30_000, root);
+
+        var symbols = await connection.GetSymbolsAsync(null, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        var depth = 0;
+        var cursor = Assert.Single(symbols);
+        while (cursor.Children is { Count: > 0 })
+        {
+            depth++;
+            cursor = cursor.Children[0];
+        }
+
+        Assert.Equal(AdsConnection.MaxSymbolWalkDepth, depth);
+    }
+
+    [Fact]
+    public async Task SearchSymbolsAsync_StopsAtTheDepthCap()
+    {
+        var root = BuildChain(AdsConnection.MaxSymbolWalkDepth + 5);
+        using var connection = CreateConnection(30_000, root);
+
+        var matches = await connection.SearchSymbolsAsync("Level", includeChildren: false, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        // The flattening walk is capped too, so it cannot enumerate past the ceiling.
+        Assert.True(
+            matches.Count <= AdsConnection.MaxSymbolWalkDepth + 1,
+            $"Flatten walked {matches.Count} symbols, past the cap of {AdsConnection.MaxSymbolWalkDepth}.");
+    }
+
+    [Fact]
+    public async Task SearchSymbolsAsync_DoesNotDescendIntoASymbolFlaggedRecursive()
+    {
+        var leaf = new StubValueSymbol("Level_Leaf", DataTypeCategory.Primitive, "INT", 1);
+        var node = new StubSymbol(DataTypeCategory.Struct, "ST_Node", leaf)
+        {
+            InstanceName = "Level_Node",
+            IsRecursive = true,
+        };
+        using var connection = CreateConnection(30_000, node);
+
+        var matches = await connection.SearchSymbolsAsync("Level", includeChildren: false, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        // The recursive node matches; the leaf beneath it is never reached.
+        var match = Assert.Single(matches);
+        Assert.Equal("Level_Node", match.InstancePath);
+    }
+
+    /// <summary>Builds a single chain of nested struct symbols <paramref name="length"/> deep.</summary>
+    private static StubSymbol BuildChain(int length)
+    {
+        var current = new StubSymbol(DataTypeCategory.Primitive, "INT") { InstanceName = $"Level{length}" };
+        for (var i = length - 1; i >= 0; i--)
+            current = new StubSymbol(DataTypeCategory.Struct, "ST_Level", current) { InstanceName = $"Level{i}" };
+
+        return current;
+    }
+
     [Fact]
     public async Task GetSymbolsAsync_UnknownParent_ThrowsAdsErrorException_SymbolNotFound()
     {

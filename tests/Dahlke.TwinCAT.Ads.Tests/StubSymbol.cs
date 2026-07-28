@@ -43,6 +43,14 @@ internal class StubSymbol : ISymbol
     public string InstanceName { get; set; } = "Stub";
     public ISymbolCollection<ISymbol> SubSymbols { get; }
 
+    /// <summary>
+    /// Genuinely read by the symbol-tree walk: <c>AdsConnection.MapSymbol</c> and
+    /// <c>FlattenSymbols</c> consult it to avoid descending into a type Beckhoff has flagged as
+    /// self-referential. Settable, defaulting to <see langword="false"/>, so the overwhelming
+    /// majority of tests (non-recursive symbols) need not mention it.
+    /// </summary>
+    public bool IsRecursive { get; set; }
+
     // Genuinely read by AdsSymbolInfo mapping (Task 6): AdsConnection.MapSymbol reads
     // InstancePath, ByteSize and Comment for every browsed/searched symbol. InstancePath mirrors
     // InstanceName — every test that browses a symbol already sets InstanceName to the full
@@ -74,7 +82,6 @@ internal class StubSymbol : ISymbol
     public bool IsPrimitiveType => throw new NotSupportedException();
     public bool IsPersistent => throw new NotSupportedException();
     public bool IsReadOnly => throw new NotSupportedException();
-    public bool IsRecursive => throw new NotSupportedException();
     public bool IsReference => throw new NotSupportedException();
     public bool IsPointer => throw new NotSupportedException();
     public bool IsBitType => throw new NotSupportedException();

@@ -1195,16 +1195,52 @@ internal sealed class AdsConnection : IManagedConnection
     }
 
     /// <summary>
+    /// Hard ceiling on how many levels of <see cref="ISymbol.SubSymbols"/> the two symbol-tree
+    /// walks below will follow.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both walks recurse until <see cref="ISymbol.SubSymbols"/> runs out, which assumes the
+    /// symbol tree the ADS client hands back is finite and shallow. That assumption is unverified:
+    /// whether Beckhoff self-guards a self-referential type's expansion could not be established
+    /// without hardware. This is therefore a cheap guard against a bad failure mode rather than a
+    /// fix for a demonstrated bug — and the failure mode is genuinely bad, because it interacts
+    /// with the abandon-on-timeout design in <see cref="RunBrowseAsync"/>: a runaway walk is never
+    /// interrupted, so it keeps recursing and allocating on a thread-pool thread long after the
+    /// caller has been handed its <see cref="TimeoutException"/>, and each retry adds another one.
+    /// </para>
+    /// <para>
+    /// 32 is far beyond any plausible PLC nesting depth (a deeply nested program structure runs to
+    /// single digits), so reaching it means something is wrong rather than that a legitimate tree
+    /// was truncated. <see cref="ISymbol.IsRecursive"/> — Beckhoff's own flag for a
+    /// self-referential type — is the first line of defence; this cap is the backstop for anything
+    /// that flag does not catch.
+    /// </para>
+    /// <para>
+    /// Internal rather than private so the guard is directly unit-testable against the cap instead
+    /// of against a hard-coded copy of it.
+    /// </para>
+    /// </remarks>
+    internal const int MaxSymbolWalkDepth = 32;
+
+    /// <summary>
     /// Maps a Beckhoff <see cref="ISymbol"/> to the neutral <see cref="AdsSymbolInfo"/> shape,
     /// recursing into <see cref="ISymbol.SubSymbols"/> only when <paramref name="includeChildren"/>
     /// is <see langword="true"/> and there are any — otherwise <see cref="AdsSymbolInfo.Children"/>
     /// is <see langword="null"/>, never an empty list.
     /// </summary>
-    private static AdsSymbolInfo MapSymbol(ISymbol symbol, bool includeChildren)
+    /// <remarks>
+    /// A symbol flagged <see cref="ISymbol.IsRecursive"/>, or one sitting at
+    /// <see cref="MaxSymbolWalkDepth"/>, is mapped as a leaf: its children are not walked and
+    /// <see cref="AdsSymbolInfo.Children"/> is <see langword="null"/>, indistinguishable from a
+    /// genuine leaf. Truncating rather than throwing keeps a browse useful when one branch of an
+    /// otherwise fine tree is pathological.
+    /// </remarks>
+    private static AdsSymbolInfo MapSymbol(ISymbol symbol, bool includeChildren, int depth = 0)
     {
         List<AdsSymbolInfo>? children = null;
-        if (includeChildren && symbol.SubSymbols.Count > 0)
-            children = symbol.SubSymbols.Select(s => MapSymbol(s, includeChildren: true)).ToList();
+        if (includeChildren && CanDescendInto(symbol, depth))
+            children = symbol.SubSymbols.Select(s => MapSymbol(s, includeChildren: true, depth + 1)).ToList();
 
         return new AdsSymbolInfo(
             symbol.InstancePath,
@@ -1215,16 +1251,34 @@ internal sealed class AdsConnection : IManagedConnection
             children);
     }
 
-    /// <summary>Depth-first walk of the entire symbol tree, used by <see cref="SearchSymbolsAsync"/>.</summary>
-    private static IEnumerable<ISymbol> FlattenSymbols(ISymbolCollection<ISymbol> symbols)
+    /// <summary>
+    /// Depth-first walk of the entire symbol tree, used by <see cref="SearchSymbolsAsync"/>. Bound
+    /// by the same two guards as <see cref="MapSymbol"/>; see <see cref="MaxSymbolWalkDepth"/>.
+    /// </summary>
+    private static IEnumerable<ISymbol> FlattenSymbols(ISymbolCollection<ISymbol> symbols, int depth = 0)
     {
         foreach (var symbol in symbols)
         {
             yield return symbol;
-            foreach (var child in FlattenSymbols(symbol.SubSymbols))
+
+            if (!CanDescendInto(symbol, depth))
+                continue;
+
+            foreach (var child in FlattenSymbols(symbol.SubSymbols, depth + 1))
                 yield return child;
         }
     }
+
+    /// <summary>
+    /// Whether the symbol-tree walks may follow <paramref name="symbol"/>'s
+    /// <see cref="ISymbol.SubSymbols"/> from <paramref name="depth"/> — false when there is nothing
+    /// to follow, when Beckhoff has flagged the type self-referential, or when the walk has reached
+    /// <see cref="MaxSymbolWalkDepth"/>.
+    /// </summary>
+    private static bool CanDescendInto(ISymbol symbol, int depth)
+        => depth < MaxSymbolWalkDepth
+           && !symbol.IsRecursive
+           && symbol.SubSymbols.Count > 0;
 
     /// <summary>
     /// Logs the PLC symbol tree for diagnostics.
