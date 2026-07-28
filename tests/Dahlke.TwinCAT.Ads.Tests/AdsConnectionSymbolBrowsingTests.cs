@@ -355,15 +355,18 @@ public class AdsConnectionSymbolBrowsingTests
         // already started).
         var options = new PlcTargetOptions { DisplayName = "PLC 1", TimeoutMs = 3000, SymbolBrowseTimeoutMs = 50 };
         using var connection = new AdsConnection("plc1", options, new NullLoggerFactory());
-        connection.SetSymbolLoaderForTesting(new SlowIterationSymbolLoader(TimeSpan.FromSeconds(1)));
+        var loader = new SlowIterationSymbolLoader(TimeSpan.FromSeconds(1));
+        connection.SetSymbolLoaderForTesting(loader);
 
-        var sw = Stopwatch.StartNew();
         await Assert.ThrowsAsync<TimeoutException>(
             () => connection.SearchSymbolsAsync("anything", includeChildren: false, CancellationToken.None));
-        sw.Stop();
 
-        Assert.True(sw.ElapsedMilliseconds < 800,
-            $"Expected the caller to stop waiting well before the 1s slow browse completed; took {sw.ElapsedMilliseconds}ms.");
+        // The invariant is ordering, not duration: the caller must have given up while the browse
+        // was still running. Asserting on elapsed milliseconds instead would be flaky, because the
+        // fake blocks a thread-pool thread for the full second and a small CI runner can starve the
+        // timeout continuation long past the 50ms budget without the mechanism being wrong.
+        Assert.False(loader.BrowseCompleted,
+            "Expected the caller to stop waiting while the slow browse was still running, but the browse had already completed.");
     }
 
     [Fact]
@@ -476,7 +479,17 @@ public class AdsConnectionSymbolBrowsingTests
     /// </summary>
     private sealed class SlowIterationSymbolLoader(TimeSpan delay, Exception? throwAfterDelay = null) : IDynamicSymbolLoader
     {
-        public ISymbolCollection<ISymbol> Symbols { get; } = new SlowSymbolCollection(delay, throwAfterDelay);
+        private readonly SlowSymbolCollection _symbols = new(delay, throwAfterDelay);
+
+        public ISymbolCollection<ISymbol> Symbols => _symbols;
+
+        /// <summary>
+        /// Whether the blocking enumeration has run to completion. Lets a test assert that the
+        /// caller stopped waiting <b>before</b> the browse finished, which is the actual invariant —
+        /// rather than inferring it from elapsed wall-clock, which is unreliable on a loaded CI
+        /// runner because the fake blocks a thread-pool thread for the whole delay.
+        /// </summary>
+        public bool BrowseCompleted => _symbols.Completed;
 
         public Task<ResultDynamicSymbols> GetDynamicSymbolsAsync(CancellationToken cancel) => throw new NotSupportedException();
         public IDynamicSymbolsEnumerable SymbolsDynamic => throw new NotSupportedException();
@@ -497,9 +510,14 @@ public class AdsConnectionSymbolBrowsingTests
 
         private sealed class SlowSymbolCollection(TimeSpan delay, Exception? throwAfterDelay) : ISymbolCollection<ISymbol>
         {
+            private volatile bool _completed;
+
+            public bool Completed => _completed;
+
             public IEnumerator<ISymbol> GetEnumerator()
             {
                 Thread.Sleep(delay);
+                _completed = true;
                 if (throwAfterDelay is not null)
                     throw throwAfterDelay;
                 return Enumerable.Empty<ISymbol>().GetEnumerator();
