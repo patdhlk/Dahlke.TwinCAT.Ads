@@ -240,19 +240,9 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         }
 
         // Cancel background loops (now the complete set, including any real loops
-        // the router wait task released just before settling).
-        //
-        // Unlike DrainReconnectCts this deliberately does NOT take ownership: the
-        // loops still have to observe cancellation and finish before the drain
-        // below can dispose their sources. That leaves a window a concurrent
-        // Dispose can win — it drains and disposes a source while this enumeration
-        // still holds a reference to it — so the Cancel is guarded exactly as the
-        // stopping source above is. A source the other path already disposed is
-        // one it already cancelled, so skipping it loses nothing.
-        foreach (var (_, cts) in _reconnectCts)
-        {
-            try { cts.Cancel(); } catch (ObjectDisposedException) { }
-        }
+        // the router wait task released just before settling). Cancel only — each
+        // loop disposes its own source once it has exited; see CancelReconnectLoops.
+        CancelReconnectLoops();
 
         // Wait for background loops to finish
         var loopTasks = _loopTasks.Values.ToArray();
@@ -262,7 +252,10 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             catch { /* Timeout or cancellation — clean up anyway */ }
         }
 
-        DrainReconnectCts();
+        // Every loop that finished has already removed and disposed its own source,
+        // so there is nothing left to drain here. Cancel once more to cover a loop
+        // the 10s wait above gave up on: it will dispose its source when it does exit.
+        CancelReconnectLoops();
         _loopTasks.Clear();
 
         // Mark every facade stopped first so that, once the pool is stopping, all
@@ -473,11 +466,12 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
         _logger.LogInformation("ForceReconnect: forcing reconnection to PLC {PlcId}", plcId);
 
-        // Cancel old loop
+        // Cancel the old loop. Removing it first frees the slot for the replacement
+        // registered below; the old loop disposes this source itself once it exits,
+        // so no caller ever disposes a source a live loop still holds a registration on.
         if (_reconnectCts.TryRemove(plcId, out var oldCts))
         {
-            oldCts.Cancel();
-            oldCts.Dispose();
+            try { oldCts.Cancel(); } catch (ObjectDisposedException) { }
         }
 
         // Capture the old loop task before StartConnectionLoop overwrites the
@@ -498,7 +492,10 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
     public void Dispose()
     {
-        DrainReconnectCts();
+        // Cancel only. Dispose cannot await the loops, so disposing their sources here
+        // would race a concurrent StopAsync's Cancel and could strand a loop forever
+        // (see CancelReconnectLoops). Each loop disposes its own source as it exits.
+        CancelReconnectLoops();
 
         // Mark facades stopped before disposing the underlying connections so no
         // facade routes to a disposed instance and any parked waiters fail fast
@@ -547,18 +544,41 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     }
 
     /// <summary>
-    /// Cancels and disposes every per-target reconnect source, removing each from
-    /// the dictionary first so a concurrent teardown cannot dispose it twice.
+    /// Cancels every per-target reconnect source, so each connection loop observes
+    /// cancellation and exits. Deliberately does NOT dispose them.
     /// </summary>
-    private void DrainReconnectCts()
+    /// <remarks>
+    /// <para>
+    /// <b>Why cancel-only.</b> <see cref="CancellationTokenSource.Dispose()"/> is not safe
+    /// to call while another thread is inside <see cref="CancellationTokenSource.Cancel()"/>
+    /// on the same source. Only one caller executes the registered callbacks; a second
+    /// <c>Cancel</c> observes the source already cancelling and returns <em>immediately,
+    /// without waiting for those callbacks to run</em>. If that second caller then disposes,
+    /// it can free the registration list while the winner is still walking it, and a
+    /// pending registration is dropped without ever being invoked.
+    /// </para>
+    /// <para>
+    /// That is exactly what wedged shutdown: the connection loop parks on
+    /// <c>Task.Delay(HealthCheckInterval, _timeProvider, cts.Token)</c>, whose completion
+    /// depends entirely on that token registration. Lose the registration and the delay
+    /// never completes, the loop task never finishes, and <see cref="StopAsync"/> waits on
+    /// it forever. The same race surfaced separately as an
+    /// <see cref="ObjectDisposedException"/> out of <c>Cancel</c> — one root cause, two
+    /// symptoms, which is why guarding the exception alone did not fix the hang.
+    /// </para>
+    /// <para>
+    /// Disposal therefore belongs to the loop that created the source: it disposes in its
+    /// own <c>finally</c>, once it has exited and can no longer hold a registration. See
+    /// <see cref="StartConnectionLoop"/>.
+    /// </para>
+    /// </remarks>
+    private void CancelReconnectLoops()
     {
-        foreach (var plcId in _reconnectCts.Keys.ToArray())
+        foreach (var (_, cts) in _reconnectCts)
         {
-            if (!_reconnectCts.TryRemove(plcId, out var cts))
-                continue; // The other teardown path claimed it.
-
+            // The owning loop may have exited and disposed this source already; a
+            // late cancel of an already-finished loop is a no-op, not an error.
             try { cts.Cancel(); } catch (ObjectDisposedException) { }
-            cts.Dispose();
         }
     }
 
@@ -599,7 +619,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         var cts = new CancellationTokenSource();
         _reconnectCts[plcId] = cts;
 
-        _loopTasks[plcId] = Task.Run(async () =>
+        var loop = Task.Run(async () =>
         {
             // When replacing an existing loop (ForceReconnect), wait for it to
             // finish tearing down its connection first. This serialises the old
@@ -738,5 +758,37 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             // startup. Idempotent with the success-path signal above.
             firstConnectSignal?.TrySetResult();
         }, CancellationToken.None);
+
+        // The tracked task is the loop PLUS its source disposal, so a caller that
+        // awaits _loopTasks (StopAsync) knows the source is gone by the time it returns.
+        _loopTasks[plcId] = DisposeSourceWhenLoopExits(loop, plcId, cts);
+    }
+
+    /// <summary>
+    /// Awaits <paramref name="loop"/>, then retires the reconnect source it owned.
+    /// </summary>
+    /// <remarks>
+    /// The loop is the sole owner of its <see cref="CancellationTokenSource"/>, and this is
+    /// the only place one is disposed. By the time <paramref name="loop"/> completes it can
+    /// no longer hold a token registration, so this disposal cannot race a concurrent
+    /// <see cref="CancellationTokenSource.Cancel()"/> the way a teardown-path dispose could —
+    /// which is what previously stranded a loop's health-check delay and wedged
+    /// <see cref="StopAsync"/>. See <see cref="CancelReconnectLoops"/>.
+    /// <para>
+    /// The removal is a compare-and-remove on the exact instance, so a replacement source
+    /// already registered by <see cref="ForceReconnect"/> is left in place.
+    /// </para>
+    /// </remarks>
+    private async Task DisposeSourceWhenLoopExits(Task loop, string plcId, CancellationTokenSource cts)
+    {
+        try
+        {
+            await loop.ConfigureAwait(false);
+        }
+        finally
+        {
+            _reconnectCts.TryRemove(new KeyValuePair<string, CancellationTokenSource>(plcId, cts));
+            cts.Dispose();
+        }
     }
 }
