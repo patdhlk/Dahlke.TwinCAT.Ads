@@ -72,7 +72,41 @@ internal sealed class AdsConnection : IManagedConnection
         _options = options;
         _logger = loggerFactory.CreateLogger<AdsConnection>();
         _client = new AdsClient();
+
+        // Backstop only — never the effective bound. AdsClient.Timeout is a
+        // PER-CLIENT property, but one connection serves operations bounded by
+        // TimeoutMs and browses bounded by SymbolBrowseTimeoutMs, so no single
+        // value can express both. This library's own CancellationTokenSource and
+        // thread-pool race are the authority; this exists so Beckhoff's invisible
+        // 5000 ms default cannot preempt either of them.
+        //
+        // Leaving it unset shipped through 0.5.3 and made SymbolBrowseTimeoutMs's
+        // 30000 ms default unreachable: every browse aborted at 5 s with
+        // AdsErrorException/ClientSyncTimeOut instead of the documented
+        // TimeoutException.
+        _client.Timeout = ClientTimeoutBackstopMs(_options);
     }
+
+    /// <summary>
+    /// A client-level bound comfortably above every configured per-operation
+    /// bound, so it can never fire first.
+    /// </summary>
+    /// <remarks>
+    /// Options validation only enforces <c>TimeoutMs &gt; 0</c> and does not cap
+    /// either bound, so a configured value near <see cref="int.MaxValue"/> is
+    /// legal input, not just a hypothetical. The doubling is done in
+    /// <see langword="long"/> arithmetic and clamped to <see cref="int.MaxValue"/>
+    /// rather than left to overflow: a bound that large is already nonsense, but
+    /// the constructor must not throw for it.
+    /// </remarks>
+    private static int ClientTimeoutBackstopMs(PlcTargetOptions options)
+    {
+        var doubled = (long)Math.Max(options.TimeoutMs, options.SymbolBrowseTimeoutMs) * 2;
+        return doubled > int.MaxValue ? int.MaxValue : (int)doubled;
+    }
+
+    /// <summary>Test-support: the backstop actually handed to the Beckhoff client.</summary>
+    internal int ClientTimeoutMs => _client.Timeout;
 
     public void Connect()
     {
