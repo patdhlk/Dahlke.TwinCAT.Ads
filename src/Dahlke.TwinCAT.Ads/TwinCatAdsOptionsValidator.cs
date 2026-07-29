@@ -51,8 +51,19 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
 
             ValidateTargetPort(targetId, target, failures);
             ValidateTargetTimeout(targetId, target, failures);
+            ValidateTargetInitialValues(target, failures);
         }
     }
+
+    /// <summary>
+    /// Surfaces problems <see cref="InitialValueBinder"/> found while re-binding config-declared
+    /// seed values. The messages are already target-scoped and actionable, so they are relayed
+    /// verbatim.
+    /// </summary>
+    private static void ValidateTargetInitialValues(
+        PlcTargetOptions target,
+        List<string> failures)
+        => failures.AddRange(target.InitialValueBindingErrors);
 
     private static void ValidateTargetAmsNetId(
         string targetId,

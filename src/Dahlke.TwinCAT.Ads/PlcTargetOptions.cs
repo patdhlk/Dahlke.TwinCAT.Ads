@@ -54,10 +54,38 @@ public sealed class PlcTargetOptions
     /// targets.
     /// </summary>
     /// <remarks>
-    /// Primarily intended for code-first configuration, where values keep their
-    /// CLR types (e.g. <c>int</c>, <c>bool</c>). When populated from JSON/file
-    /// configuration the values bind as <see cref="string"/>, so code that reads a
-    /// seeded value should account for the string representation in that case.
+    /// <para>
+    /// In code-first configuration values keep their CLR types (e.g. <c>int</c>,
+    /// <c>bool</c>) and are seeded verbatim.
+    /// </para>
+    /// <para>
+    /// JSON/file configuration is string-typed, so an entry written as a bare scalar
+    /// (<c>"MAIN.Speed": 1500</c>) is seeded as the <see cref="string"/> <c>"1500"</c> and a
+    /// metadata read reports it as <c>STRING</c>. To seed a config value with the type a real
+    /// PLC would report, declare it:
+    /// <code>
+    /// "InitialValues": {
+    ///   "MAIN.Speed":   { "value": 1500, "type": "DINT"  },
+    ///   "MAIN.Station": "Demo Station"
+    /// }
+    /// </code>
+    /// <c>type</c> is an IEC 61131-3 elementary type name, matched case-insensitively with
+    /// Beckhoff aliases resolved (see <see cref="Iec61131Converter.Beckhoff"/>). Omitting
+    /// <c>value</c> seeds that type's default. A bad entry — unknown type, unconvertible
+    /// value, or a <c>value</c> with no <c>type</c> — fails options validation at startup
+    /// rather than being silently seeded as a string.
+    /// </para>
     /// </remarks>
     public Dictionary<string, object?> InitialValues { get; set; } = new();
+
+    /// <summary>
+    /// Problems found while re-binding <see cref="InitialValues"/> from configuration,
+    /// surfaced as options-validation failures by <see cref="TwinCatAdsOptionsValidator"/>.
+    /// </summary>
+    /// <remarks>
+    /// Collected rather than thrown so the operator sees every bad seed entry in one startup
+    /// failure. Internal: this is a channel between <see cref="InitialValueBinder"/> and the
+    /// validator, not part of the configuration surface.
+    /// </remarks>
+    internal List<string> InitialValueBindingErrors { get; } = [];
 }

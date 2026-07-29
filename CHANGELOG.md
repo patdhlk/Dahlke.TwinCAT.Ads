@@ -5,6 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-07-29
+
+### Fixed
+
+- **`AdsConnectionPool.StopAsync` could still throw `ObjectDisposedException` during concurrent shutdown.** ([#9](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/9))
+
+  A follow-up to the 0.5.1 teardown fix, which missed one call site. `StopAsync` cancels the
+  per-target reconnect sources before draining them:
+
+  ```csharp
+  foreach (var (_, cts) in _reconnectCts)
+      cts.Cancel();                       // unguarded
+  ```
+
+  Unlike `DrainReconnectCts`, this loop deliberately does not take ownership — the loops still
+  have to observe cancellation and finish before their sources can be disposed. That leaves a
+  window a concurrent `Dispose` can win: it drains and disposes a source while this enumeration
+  still holds a reference to it, and the `Cancel` throws with the original issue's signature:
+
+  ```
+  System.ObjectDisposedException : The CancellationTokenSource has been disposed.
+     at System.Threading.CancellationTokenSource.Cancel()
+     at Dahlke.TwinCAT.Ads.AdsConnectionPool.StopAsync(CancellationToken)
+  ```
+
+  The `Cancel` is now guarded exactly as the stopping source above it already was. A source the
+  other path disposed is one it already cancelled, so skipping it loses nothing.
+
+  Reproduction is core-count sensitive, which is why 0.5.1 shipped with it and why the existing
+  `ConcurrentStopAndDispose_DoNotThrow` test passes on a typical dev box: under
+  `DOTNET_PROCESSOR_COUNT=2` it failed 14 times in 25 runs before this change and 0 in 65 after.
+
+- **Config-seeded `InitialValues` lost their type: simulated reads returned `STRING` where a real PLC returns `DINT`/`BOOL`/`LREAL`.** ([#10](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/10))
+
+  `IConfiguration` is string-typed all the way down, so a JSON `1500`, `21.5` and `true` all
+  reach the options binder as the strings `"1500"`, `"21.5"` and `"true"`. Bound into
+  `Dictionary<string, object?>` they stayed strings, and `SimulatedAdsConnection.InferPlcType`
+  — which reads the CLR type and nothing else — reported `STRING` for every one of them:
+
+  | Symbol | Real PLC | Config-seeded simulation (before) |
+  |---|---|---|
+  | `MAIN.Speed` | `1500` / `DINT` | `"1500"` / `STRING` |
+  | `MAIN.Setpoint` | `21.5` / `LREAL` | `"21.5"` / `STRING` |
+  | `MAIN.Running` | `true` / `BOOL` | `"True"` / `STRING` |
+
+  That made a file-configured simulation an unfaithful stand-in for hardware, which is the main
+  reason to use one. Only the config path was affected — `SetInitialValues` called
+  programmatically has always preserved CLR types, which is why a test suite that seeds in code
+  could not catch it.
+
+  An `InitialValues` entry may now declare its PLC type, and is converted to that type at bind
+  time so everything downstream (untyped reads, batch reads, notification metadata, symbol
+  browsing) reports it correctly:
+
+  ```jsonc
+  "InitialValues": {
+    "MAIN.Speed":    { "value": 1500, "type": "DINT"  },
+    "MAIN.Setpoint": { "value": 21.5, "type": "LREAL" },
+    "MAIN.Running":  { "value": true, "type": "BOOL"  },
+    "MAIN.Cycle":    { "type": "TIME" },        // no value → the type's default
+    "MAIN.Station":  "Demo Station"             // bare scalar → seeded as STRING, as before
+  }
+  ```
+
+  `type` accepts any IEC 61131-3 elementary type name, matched case-insensitively with Beckhoff
+  aliases resolved (the same lenient tier the library uses for TwinCAT-reported type names).
+  The type is deliberately **not** inferred from the value's content: a genuine `STRING` symbol
+  whose value happens to look numeric must not silently become a `DINT`.
+
+  Bare scalar entries keep their existing behaviour and are still seeded as strings, so nothing
+  that worked before changes. Code-first seeding is untouched.
+
+  The stock configuration binder cannot express this — a nested `{ "value": …, "type": … }`
+  object bound into a `Dictionary<string, object?>` yields a bare `System.Object` with the
+  children dropped — so the section is re-read directly after `Bind`. Reshaping `InitialValues`
+  into a dedicated entry type would bind natively but would be a source-breaking change for
+  code-first callers, so it was not done. Only keys present in configuration are touched;
+  code-first values layered on afterwards survive.
+
+  A malformed entry — unknown type name, a value that will not convert, a `value` with no
+  `type`, an unrecognised key, or a non-scalar `value` — is now an options-validation failure at
+  startup rather than a silently mistyped symbol. Failures are aggregated with the rest of the
+  validator's, so every bad entry is reported in one go.
+
 ## [0.5.1] - 2026-07-29
 
 ### Fixed
