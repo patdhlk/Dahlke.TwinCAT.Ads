@@ -3,6 +3,30 @@ using TwinCAT.Ads;
 namespace Dahlke.TwinCAT.Ads;
 
 /// <summary>
+/// Receives one raw device notification payload.
+/// </summary>
+/// <param name="data">
+/// The notification's bytes, valid ONLY for the duration of this call.
+/// </param>
+/// <remarks>
+/// <para>
+/// <b>Why a <see cref="ReadOnlySpan{T}"/> and not <see cref="ReadOnlyMemory{T}"/>.</b>
+/// The underlying buffer belongs to the transport and is reused after the handler
+/// returns. A <see cref="ReadOnlyMemory{T}"/> could be captured in a lambda or
+/// stashed in a field, and reading it later would yield silently wrong bytes — a
+/// bug with no exception and no stack trace. A span cannot be captured or stored,
+/// so the compiler rejects that mistake outright. A handler that needs to keep the
+/// data writes an explicit <c>data.ToArray()</c>, which is visible at the call
+/// site.
+/// </para>
+/// <para>
+/// The trade-off is that a handler cannot be <c>async</c>. Raw byte fan-out does
+/// not need it; do the work by copying out and posting to your own queue.
+/// </para>
+/// </remarks>
+public delegate void RawNotificationHandler(ReadOnlySpan<byte> data);
+
+/// <summary>
 /// A low-level ADS channel addressing one <c>(amsNetId, port)</c> pair by index
 /// group and index offset, for targets the symbol API cannot reach — EtherCAT
 /// masters and slaves, and the TwinCAT system service.
@@ -13,9 +37,18 @@ namespace Dahlke.TwinCAT.Ads;
 /// <see cref="IAdsRawChannelFactory.Get"/> and hold it as long as you like: its
 /// identity is stable for the factory's lifetime and it owns nothing the caller
 /// must release. The underlying transport is created lazily, dropped when the
-/// channel goes idle, and re-created on the next operation — all invisibly. This
-/// mirrors <see cref="IAdsConnectionPool.GetConnection"/>, whose facades are
-/// likewise never disposed by consumers.
+/// channel goes idle with no live subscription, and re-created on the next
+/// operation — all invisibly. This mirrors
+/// <see cref="IAdsConnectionPool.GetConnection"/>, whose facades are likewise
+/// never disposed by consumers.
+/// </para>
+/// <para>
+/// <b>A subscription handle IS the caller's to release.</b> The channel needs no
+/// disposal, but the handle returned by
+/// <see cref="SubscribeAsync"/> does: until it is disposed the subscription is
+/// live, and a live subscription deliberately holds the transport open against
+/// idle eviction. Dropping the handle on the floor leaks a connection for the
+/// factory's lifetime.
 /// </para>
 /// <para>
 /// <b>Host shutdown is the one point where that invisibility stops.</b> Once the
@@ -34,7 +67,9 @@ namespace Dahlke.TwinCAT.Ads;
 /// 5000 ms bound can take up to 10 seconds before throwing
 /// <see cref="TimeoutException"/>. The worst case is
 /// <c>TimeoutMs × (RetryCount + 1)</c>. Caller cancellation is exempt: a cancelled
-/// token aborts immediately and no further attempt is made.
+/// token aborts immediately and no further attempt is made. This applies to the
+/// read, write, read-write and state operations; <see cref="SubscribeAsync"/> is
+/// bounded only by its cancellation token, as its remarks explain.
 /// </para>
 /// <para>
 /// <b>Retry applies only to a timeout with no device answer</b>, and re-creates
@@ -59,8 +94,9 @@ public interface IAdsRawChannel
     /// </summary>
     /// <remarks>
     /// Observational only, like <see cref="IAdsConnection.State"/>. Reports
-    /// <see cref="ConnectionState.Disconnected"/> until the first operation
-    /// creates the underlying transport, so a channel that has never been used is
+    /// <see cref="ConnectionState.Disconnected"/> until the first operation or
+    /// subscription creates the underlying transport, so a channel that has never
+    /// been used is
     /// indistinguishable from one whose target is unreachable. It is a hint, not
     /// a guard: the operation methods never consult it.
     /// </remarks>
@@ -148,4 +184,74 @@ public interface IAdsRawChannel
     /// <param name="ct">Cancels the operation.</param>
     /// <returns>The target's ADS state and device state word.</returns>
     Task<StateInfo> ReadStateAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Subscribes to device notifications for the given index group and offset.
+    /// </summary>
+    /// <param name="indexGroup">The index group to watch.</param>
+    /// <param name="indexOffset">The index offset to watch.</param>
+    /// <param name="length">Payload length in bytes to request per notification.</param>
+    /// <param name="cycleTimeMs">Minimum interval between notifications.</param>
+    /// <param name="handler">Invoked on each notification.</param>
+    /// <param name="ct">Cancels the initial registration, not the subscription itself.</param>
+    /// <returns>A handle whose disposal removes the subscription permanently.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Durable across transport drops.</b> The subscription is owned by this
+    /// channel, not by the transport it is first registered on. When an operation
+    /// times out and the channel rebuilds its transport, every live subscription
+    /// is re-registered against the new one — exactly once — and the returned
+    /// handle stays valid throughout. This mirrors
+    /// <see cref="IAdsConnection.SubscribeAsync(string, int, System.Action{string, object?}, CancellationToken)"/>,
+    /// whose subscriptions survive a pool reconnect the same way. A
+    /// re-registration that ITSELF fails is logged at Warning and the subscription
+    /// is retained for the next rebuild rather than discarded — but it delivers
+    /// nothing until one happens.
+    /// </para>
+    /// <para>
+    /// <b>A live subscription pins the channel against idle eviction.</b> The
+    /// sweeper will not release a transport that is serving notifications.
+    /// </para>
+    /// <para>
+    /// <b>Neither the timeout nor the retry policy applies here.</b> Unlike the
+    /// read and write operations, the initial registration — and every
+    /// re-registration after a drop — is bounded only by a cancellation token, not
+    /// by <see cref="AdsRawChannelOptions.TimeoutMs"/>, and a failed registration
+    /// is not retried on a fresh transport. Pass a <paramref name="ct"/> carrying a
+    /// deadline if you need one.
+    /// </para>
+    /// <para>
+    /// <b>Threading.</b> <paramref name="handler"/> is invoked on the transport's
+    /// notification thread: against a real target the ADS notification thread —
+    /// never the caller's, and never the thread that awaited this method. A
+    /// SIMULATED channel has no such thread and fires the handler inline, on
+    /// whichever thread performed the write. Handlers must therefore be
+    /// thread-safe and must not block. An exception thrown by a handler is caught
+    /// and logged at Warning and does NOT tear down the subscription.
+    /// </para>
+    /// <para>
+    /// <b>Disposal</b> is idempotent and thread-safe. As with symbol
+    /// subscriptions, the promise is that a handler never fires after disposal
+    /// COMPLETES — not that it never fires concurrently WITH disposal. A sink that
+    /// cannot tolerate a concurrent late write must guard itself. Disposal does not
+    /// WAIT for the removal round trip to the device: the channel stops delivering
+    /// the moment the handle is disposed, whether or not that round trip succeeds.
+    /// </para>
+    /// <para>
+    /// <b>Host shutdown ends delivery silently.</b> Once the factory has stopped,
+    /// no transport is rebuilt, so a live subscription simply goes quiet: the
+    /// handler stops being called and nothing is raised to it. Disposing the handle
+    /// afterwards remains safe.
+    /// </para>
+    /// <para>
+    /// <b>Simulated channels ignore <paramref name="cycleTimeMs"/></b> and fire on
+    /// every write made THROUGH the channel to the watched slot, with no
+    /// coalescing. Seeding via <see cref="ISimulatedRawChannel.Seed"/> writes the
+    /// slot without firing — it arranges state rather than reporting a change.
+    /// </para>
+    /// </remarks>
+    Task<IDisposable> SubscribeAsync(
+        uint indexGroup, uint indexOffset, int length,
+        int cycleTimeMs, RawNotificationHandler handler, CancellationToken ct);
 }

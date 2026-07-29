@@ -17,6 +17,11 @@ namespace Dahlke.TwinCAT.Ads;
 /// <see cref="RetryCount"/> of 1 permits two attempts of 5000 ms each. The worst
 /// case is <c>TimeoutMs × (RetryCount + 1)</c>.
 /// </para>
+/// <para>
+/// Neither setting applies to <see cref="IAdsRawChannel.SubscribeAsync"/>:
+/// registering a notification is bounded only by its cancellation token and is
+/// never retried.
+/// </para>
 /// </remarks>
 public sealed class AdsRawChannelOptions
 {

@@ -29,3 +29,6 @@ Dahlke.TwinCAT.Ads.IAdsRawChannel.ReadStateAsync(System.Threading.CancellationTo
 Dahlke.TwinCAT.Ads.IAdsRawChannelFactory
 Dahlke.TwinCAT.Ads.IAdsRawChannelFactory.Get(string! amsNetId, int port) -> Dahlke.TwinCAT.Ads.IAdsRawChannel!
 Dahlke.TwinCAT.Ads.IAdsRawChannelFactory.TryGetSimulated(string! amsNetId, int port, out Dahlke.TwinCAT.Ads.ISimulatedRawChannel? simulated) -> bool
+Dahlke.TwinCAT.Ads.RawNotificationHandler
+Dahlke.TwinCAT.Ads.IAdsRawChannel.SubscribeAsync(uint indexGroup, uint indexOffset, int length, int cycleTimeMs, Dahlke.TwinCAT.Ads.RawNotificationHandler! handler, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.IDisposable!>!
+virtual Dahlke.TwinCAT.Ads.RawNotificationHandler.Invoke(System.ReadOnlySpan<byte> data) -> void

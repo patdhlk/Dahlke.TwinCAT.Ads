@@ -21,7 +21,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// <para>
 /// <b>The channel dictionary is never pruned.</b> Channel identity must stay
 /// stable for the factory's lifetime — callers hold references indefinitely, and
-/// Task 7's subscriptions are re-registered through the channel that owns them.
+/// durable subscriptions are re-registered through the channel that owns them.
 /// A disconnected channel holds only its Net ID, port and clock, so the cost is
 /// bounded by the number of distinct targets addressed.
 /// </para>
