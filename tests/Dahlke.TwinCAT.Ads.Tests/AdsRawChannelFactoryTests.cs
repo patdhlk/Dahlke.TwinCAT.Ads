@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -8,14 +9,47 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 public class AdsRawChannelFactoryTests
 {
     private static AdsRawChannelFactory Create(
-        FakeTimeProvider clock, Action<AdsRawChannelOptions>? configure = null)
+        FakeTimeProvider clock,
+        Action<AdsRawChannelOptions>? configure = null,
+        ILoggerFactory? loggerFactory = null)
     {
         var options = new TwinCatAdsOptions();
         options.RawChannels.Mode = ConnectionMode.Simulated;
         configure?.Invoke(options.RawChannels);
 
         return new AdsRawChannelFactory(
-            Options.Create(options), NullLoggerFactory.Instance, clock);
+            Options.Create(options), loggerFactory ?? NullLoggerFactory.Instance, clock);
+    }
+
+    /// <summary>Captures warning-level messages so a log assertion is possible.</summary>
+    private sealed class RecordingLoggerFactory : ILoggerFactory
+    {
+        public List<string> Warnings { get; } = [];
+
+        public ILogger CreateLogger(string categoryName) => new RecordingLogger(Warnings);
+        public void AddProvider(ILoggerProvider provider) { }
+        public void Dispose() { }
+
+        private sealed class RecordingLogger : ILogger
+        {
+            private readonly List<string> _warnings;
+
+            public RecordingLogger(List<string> warnings) => _warnings = warnings;
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (logLevel != LogLevel.Warning)
+                    return;
+
+                lock (_warnings)
+                    _warnings.Add(formatter(state, exception));
+            }
+        }
     }
 
     [Fact]
@@ -108,15 +142,100 @@ public class AdsRawChannelFactoryTests
         Assert.Equal(0x7B, buffer[0]);
     }
 
+    /// <summary>
+    /// An out-of-range octet is silently zeroed by the ADS stack, so the channel
+    /// addresses a different device than the text suggests. <c>Get</c> is total and
+    /// cannot reject it — but it must not stay silent about it either.
+    /// </summary>
+    /// <remarks>
+    /// Warning once per newly created channel, not per lookup, so a polling caller
+    /// cannot flood the log. The benign half is asserted too: a well-formed ID, and
+    /// a merely non-canonical one such as <c>"01.2.3.4.5.6"</c>, must NOT warn —
+    /// otherwise the warning would be noise rather than signal.
+    /// </remarks>
     [Fact]
-    public void Get_IsTotal_ForAnUnreachableTarget()
+    public void Get_WarnsOncePerChannel_WhenAnOctetIsLaundered()
+    {
+        var logs = new RecordingLoggerFactory();
+        using var factory = Create(new FakeTimeProvider(), loggerFactory: logs);
+
+        var channel = factory.Get("999.1.1.1.1.1", 851);
+
+        // 999 is ZEROED, not reduced modulo 256 — so this really is 0.1.1.1.1.1.
+        Assert.Equal("0.1.1.1.1.1", channel.AmsNetId);
+        Assert.Same(channel, factory.Get("0.1.1.1.1.1", 851));
+
+        var warning = Assert.Single(logs.Warnings);
+        Assert.Contains("999.1.1.1.1.1", warning);
+        Assert.Contains("0.1.1.1.1.1", warning);
+
+        factory.Get("999.1.1.1.1.1", 851);      // repeat lookup: no second warning
+        factory.Get("1.2.3.4.5.6", 851);        // well-formed: never warns
+        factory.Get("01.2.3.4.5.6", 852);       // non-canonical but in range: never warns
+
+        Assert.Single(logs.Warnings);
+    }
+
+    /// <summary>
+    /// Totality across every shape of present-but-unusable Net ID.
+    /// </summary>
+    /// <remarks>
+    /// The empty and whitespace rows are the ones that matter: <c>AmsNetId.TryParse</c>
+    /// is itself NOT total — it THROWS <see cref="ArgumentException"/> on an empty
+    /// string instead of returning false, and trimming turns <c>"   "</c> into one —
+    /// so normalising without an emptiness guard breaks the documented contract on
+    /// exactly the input a discovery scan is most likely to hand over.
+    /// </remarks>
+    [Theory]
+    [InlineData("99.99.99.99.1.1", 12345)]      // well-formed but unreachable
+    [InlineData("not-a-net-id", 851)]           // unparseable
+    [InlineData("1.2.3.4.5", 851)]              // too few octets
+    [InlineData("", 851)]                       // empty
+    [InlineData("   ", 851)]                    // whitespace only
+    public void Get_IsTotal_ForAnyPresentNetId(string amsNetId, int port)
     {
         using var factory = Create(new FakeTimeProvider());
 
-        var channel = factory.Get("99.99.99.99.1.1", 12345);
+        var channel = factory.Get(amsNetId, port);
 
         Assert.NotNull(channel);
         Assert.Equal(ConnectionState.Disconnected, channel.State);
+        Assert.Same(channel, factory.Get(amsNetId, port));   // and still cached
+    }
+
+    /// <summary>
+    /// <c>TryGetSimulated</c> normalises through the same helper, so it inherits
+    /// the same totality obligation.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("not-a-net-id")]
+    public void TryGetSimulated_IsTotal_ForAnyPresentNetId(string amsNetId)
+    {
+        using var factory = Create(new FakeTimeProvider());
+
+        Assert.True(factory.TryGetSimulated(amsNetId, 851, out var sim));
+        Assert.NotNull(sim);
+    }
+
+    /// <summary>
+    /// A null Net ID is a caller programming error, not a target that happens not
+    /// to exist, so it is the one input totality does NOT cover.
+    /// </summary>
+    /// <remarks>
+    /// Pinned because the alternative is an accident: before the guard this threw
+    /// <see cref="NullReferenceException"/> from <c>Trim()</c>, and before
+    /// normalisation existed it threw <see cref="ArgumentNullException"/> out of
+    /// the key comparer. Neither was anyone's intended contract.
+    /// </remarks>
+    [Fact]
+    public void NullNetId_ThrowsArgumentNullException()
+    {
+        using var factory = Create(new FakeTimeProvider());
+
+        Assert.Throws<ArgumentNullException>(() => factory.Get(null!, 851));
+        Assert.Throws<ArgumentNullException>(() => factory.TryGetSimulated(null!, 851, out _));
     }
 
     [Fact]

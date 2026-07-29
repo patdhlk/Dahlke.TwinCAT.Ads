@@ -108,18 +108,31 @@ internal static class RawSeedParser
     }
 
     /// <summary>
-    /// Six dot-separated decimal octets, each in 0-255.
+    /// Six dot-separated decimal octets, each in 0-255. The single definition of a
+    /// strictly well-formed AMS Net ID, shared by this parser and
+    /// <see cref="AdsRawChannelFactory"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>Deliberately NOT delegated to <c>TwinCAT.Ads.AmsNetId.TryParse</c>.</b>
     /// That method launders an out-of-range octet instead of rejecting it:
     /// <c>AmsNetId.TryParse("999.1.1.1.1.1")</c> returns <see langword="true"/> and
-    /// yields <c>0.1.1.1.1.1</c>. Delegating would let a typo'd seed key pass
-    /// startup validation and then seed a channel the operator never named —
-    /// silent data corruption rather than a parse failure. Counting six segments,
-    /// as this did before, has the same hole.
+    /// yields <c>0.1.1.1.1.1</c> — the octet is ZEROED, not reduced modulo 256, so
+    /// <c>256</c>, <c>257</c>, <c>300</c>, <c>512</c> and <c>999</c> all collapse to
+    /// the same address. Delegating would let a typo'd seed key pass startup
+    /// validation and then seed a channel the operator never named — silent data
+    /// corruption rather than a parse failure. Counting six segments, as this did
+    /// before, has the same hole.
+    /// </para>
+    /// <para>
+    /// <b>One rule, two proportionate responses.</b> This parser REJECTS such an ID,
+    /// because a configured seed key is a declaration whose typo has no correct
+    /// reading. <see cref="IAdsRawChannelFactory.Get"/> cannot reject — it is
+    /// documented total — so it accepts the laundered key and logs a warning
+    /// instead. Both consult this method, so the two can never drift apart.
+    /// </para>
     /// </remarks>
-    private static bool IsWellFormedNetId(string text)
+    internal static bool IsWellFormedNetId(string text)
     {
         var octets = text.Split('.');
         if (octets.Length != 6)

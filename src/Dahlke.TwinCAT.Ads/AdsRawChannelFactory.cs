@@ -58,15 +58,43 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     /// <summary>Number of channels currently cached. Test-support.</summary>
     internal int ChannelCount => _channels.Count;
 
-    public IAdsRawChannel Get(string amsNetId, int port) =>
-        _channels.GetOrAdd((NormaliseNetId(amsNetId), port), key => new AdsRawChannel(
-            key.NetId, key.Port, CreateTransport, _options,
-            _loggerFactory.CreateLogger<AdsRawChannel>(), _timeProvider));
+    public IAdsRawChannel Get(string amsNetId, int port)
+    {
+        // A null argument is a caller PROGRAMMING ERROR, categorically different
+        // from a malformed-but-present target. Totality covers the latter — an
+        // empty, whitespace or nonsense Net ID yields a channel that simply fails
+        // when operated on — but it was never meant to paper over a null, which
+        // would otherwise surface as a NullReferenceException from Trim().
+        ArgumentNullException.ThrowIfNull(amsNetId);
+
+        var key = (NetId: NormaliseNetId(amsNetId, out var laundered), Port: port);
+
+        return _channels.GetOrAdd(key, k =>
+        {
+            // Inside the factory delegate, so this fires once per NEWLY CREATED
+            // channel rather than on every lookup — a polling caller must not be
+            // able to flood the log.
+            if (laundered)
+            {
+                _logger.LogWarning(
+                    "Raw channel Net ID '{Requested}' has an octet outside 0-255; it resolves to " +
+                    "'{Resolved}', which is the device this channel will actually address. The same " +
+                    "Net ID in a RawChannels:Seed key fails validation at startup instead.",
+                    amsNetId, k.NetId);
+            }
+
+            return new AdsRawChannel(
+                k.NetId, k.Port, CreateTransport, _options,
+                _loggerFactory.CreateLogger<AdsRawChannel>(), _timeProvider);
+        });
+    }
 
     public bool TryGetSimulated(
         string amsNetId, int port,
         [NotNullWhen(true)] out ISimulatedRawChannel? simulated)
     {
+        ArgumentNullException.ThrowIfNull(amsNetId);
+
         simulated = null;
 
         if (_options.Mode != ConnectionMode.Simulated)
@@ -98,20 +126,46 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     /// nothing and discovers reachability by operating.
     /// </para>
     /// <para>
+    /// <b>The emptiness guard is load-bearing, not defensive.</b>
+    /// <c>AmsNetId.TryParse</c> is itself NOT total: it THROWS
+    /// <see cref="ArgumentException"/> on an empty string rather than returning
+    /// <see langword="false"/>, and <c>Trim()</c> turns a whitespace-only argument
+    /// into one. Calling it unguarded would break the totality this method exists
+    /// to preserve, for the very input a discovery scan is most likely to produce.
+    /// </para>
+    /// <para>
     /// Note this deliberately inherits <c>AmsNetId</c>'s out-of-range laundering
-    /// (<c>"999.1.1.1.1.1"</c> becomes <c>"0.1.1.1.1.1"</c>). That is the right
-    /// call HERE, and only here: the transport resolves the ID the same way at
-    /// <c>Connect()</c>, so the two spellings genuinely address one device and
+    /// (<c>"999.1.1.1.1.1"</c> becomes <c>"0.1.1.1.1.1"</c>), reporting it through
+    /// <paramref name="laundered"/> so the caller can warn. That is the right call
+    /// HERE, and only here: the transport resolves the ID the same way at
+    /// <c>Connect()</c> — <c>AmsNetId.Parse</c> launders identically to
+    /// <c>TryParse</c> — so the two spellings genuinely address one device and
     /// collapsing them keeps the key agreeing with the wire. <c>RawSeedParser</c>
     /// takes the opposite line and rejects such an ID outright, because a
     /// configured seed key is an operator's stated intent, not a runtime lookup.
     /// </para>
     /// </remarks>
-    private static string NormaliseNetId(string amsNetId)
+    /// <param name="amsNetId">The caller-supplied Net ID. Must not be null.</param>
+    /// <param name="laundered">
+    /// <see langword="true"/> when the ID parsed but had an octet outside 0-255, so
+    /// the returned key addresses a DIFFERENT device than the text suggests.
+    /// </param>
+    private static string NormaliseNetId(string amsNetId, out bool laundered)
     {
         var trimmed = amsNetId.Trim();
-        return AmsNetId.TryParse(trimmed, out var parsed) ? parsed.ToString() : trimmed;
+
+        if (trimmed.Length > 0 && AmsNetId.TryParse(trimmed, out var parsed))
+        {
+            laundered = !RawSeedParser.IsWellFormedNetId(trimmed);
+            return parsed.ToString();
+        }
+
+        laundered = false;
+        return trimmed;
     }
+
+    /// <inheritdoc cref="NormaliseNetId(string, out bool)"/>
+    private static string NormaliseNetId(string amsNetId) => NormaliseNetId(amsNetId, out _);
 
     /// <summary>
     /// Creates a transport for one channel — always a FRESH instance, in both
