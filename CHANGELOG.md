@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-07-29
+
+### Fixed
+
+- **Pool shutdown could hang forever when `StopAsync` and `Dispose` ran concurrently.** ([#14](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/14))
+
+  The third and final instalment of the #9 teardown race — and the one that explains the
+  other two. `CancellationTokenSource.Dispose()` is not safe to call while another thread is
+  inside `Cancel()` on the same source. Only one caller executes the registered callbacks; a
+  second `Cancel()` sees the source already cancelling and returns **immediately, without
+  waiting for those callbacks to run**. If that second caller then disposes, it frees the
+  registration list while the winner is still walking it, and a pending registration is
+  dropped without ever being invoked.
+
+  Both teardown paths did exactly that: `StopAsync` cancelled the per-target reconnect
+  sources while `Dispose` cancelled *and disposed* them. The connection loop parks on
+
+  ```csharp
+  await Task.Delay(HealthCheckInterval, _timeProvider, cts.Token);
+  ```
+
+  whose completion depends entirely on that token registration. Lose it and the delay never
+  completes, the loop task never finishes, and `StopAsync` waits on it forever.
+
+  This is the same root cause as the `ObjectDisposedException` fixed in 0.5.1 and 0.5.2 —
+  one race, two symptoms. Guarding the exception made the loud symptom quiet without
+  removing the race, which is why the hang survived both earlier fixes.
+
+  Ownership is now unambiguous: **the loop that creates a reconnect source is the only thing
+  that disposes it**, in a `finally` after it has exited and can no longer hold a
+  registration. Every teardown path (`StopAsync`, `Dispose`, `ForceReconnect`) cancels only.
+  The task tracked in `_loopTasks` is the loop plus its disposal, so a caller awaiting it
+  knows the source is retired by the time it returns.
+
+  The hang needed Linux, `--cpus=2`, and the whole test suite in one process before it would
+  reproduce — isolating any one of those gives a false all-clear. Under that harness it hung
+  ~15–20% of runs before this change and 0 of 42 after. The recipe is recorded on
+  `ConcurrentStopAndDispose_DoNotThrow` so it does not have to be rediscovered.
+
 ## [0.5.2] - 2026-07-29
 
 ### Fixed

@@ -455,12 +455,27 @@ public class AdsConnectionPoolTests
         // The real race: the host's StopAsync path and the container's disposal
         // path running at the same time, which is what CI hit.
         //
-        // Reproduction is core-count sensitive: on a many-core dev box the two
-        // paths rarely interleave tightly enough and 50 attempts pass every time,
-        // while on a 2-core CI runner it fails often. Run it under
-        // DOTNET_PROCESSOR_COUNT=2 when working on pool teardown — that turned a
-        // green local run into 14 failures in 25 while the unguarded Cancel in
-        // StopAsync was still there.
+        // This test has caught two distinct symptoms of the same root cause — an
+        // ObjectDisposedException out of StopAsync, and a 15s hang when a loop's
+        // health-check delay lost its cancellation registration. Both trace back to
+        // CancellationTokenSource.Dispose() racing Cancel(); see CancelReconnectLoops.
+        //
+        // REPRODUCING IT is the hard part, and needs all three of these together:
+        //   1. Linux (it has never been seen on macOS, at any core count),
+        //   2. --cpus=2 (a many-core box interleaves too loosely), and
+        //   3. the WHOLE suite in one process — running this test alone never
+        //      reproduces it, because the pressure comes from xunit's other
+        //      parallel collections saturating the thread pool.
+        // Isolating any one of those gives a green run and a false all-clear.
+        //
+        //   docker run --rm --cpus=2 -v "$PWD":/src -w /src \
+        //     mcr.microsoft.com/dotnet/sdk:10.0 bash -c '
+        //       dotnet build tests/Dahlke.TwinCAT.Ads.Tests/Dahlke.TwinCAT.Ads.Tests.csproj -c Release -f net10.0
+        //       for i in $(seq 1 30); do
+        //         dotnet vstest tests/Dahlke.TwinCAT.Ads.Tests/bin/Release/net10.0/Dahlke.TwinCAT.Ads.Tests.dll
+        //       done'
+        //
+        // That harness hung ~15-20% of runs before the fix and 0 of 42 after.
         for (var attempt = 0; attempt < 50; attempt++)
         {
             var (pool, factory, _, signal) = CreatePool("plc1");
