@@ -147,5 +147,50 @@ public class AdsRawChannelIoTests
 
         var ex = await Assert.ThrowsAsync<OperationCanceledException>(() => pending);
         Assert.Equal(cts.Token, ex.CancellationToken);
+
+        // Caller cancellation is NOT treated as a failed attempt: it is never
+        // retried and the transport is never torn down. Cancelling carries no
+        // evidence that the transport is unhealthy, and since the channel is safe
+        // for concurrent use, dropping it would make one caller's private decision
+        // tear down a transport other callers are actively using.
+        Assert.False(transport.Disposed);
+        Assert.Equal(1, transport.ConnectCount);
+    }
+
+    [Fact]
+    public async Task InFlightOperation_IsNotEvictedUnderneath()
+    {
+        var transport = new InMemoryManagedRawConnection();
+        var clock = new FakeTimeProvider();
+        var channel = new AdsRawChannel(
+            "1.2.3.4.5.6", 0xFFFF,
+            (_, _) => transport,
+            // A bound far beyond the idle window, so advancing past the idle window
+            // below cannot trip the operation's own timeout instead.
+            new AdsRawChannelOptions { TimeoutMs = 600_000, RetryCount = 0 },
+            NullLogger.Instance,
+            clock);
+
+        using var cts = new CancellationTokenSource();
+        transport.StallNext = true;
+        var pending = channel.ReadAsync(0x11, 1, new byte[1], cts.Token);
+        await Task.WhenAny(transport.Stalled, pending);   // the call is genuinely in flight
+
+        // The channel now LOOKS idle — LastUseUtc is stamped on entry and the call
+        // has been running longer than the idle window. It is not idle: the sweeper
+        // must leave a live call's transport alone.
+        clock.Advance(TimeSpan.FromMilliseconds(60_001));
+
+        Assert.False(channel.TryEvictIfIdle(TimeSpan.FromMilliseconds(60_000)));
+        Assert.False(transport.Disposed);
+        Assert.Equal(ConnectionState.Connected, channel.State);
+
+        await cts.CancelAsync();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => pending);
+
+        // …and once nothing is in flight, that same sweep does evict — proving the
+        // guard above is about the live call, not a broken sweep.
+        Assert.True(channel.TryEvictIfIdle(TimeSpan.FromMilliseconds(60_000)));
+        Assert.True(transport.Disposed);
     }
 }

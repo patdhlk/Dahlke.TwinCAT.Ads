@@ -78,7 +78,7 @@ public class AdsRawChannelRetryTests
         source.Seed(0x11, 1, [7]);    // which answers, because the device still has the data
 
         var pending = channel.ReadAsync(0x11, 1, new byte[1], CancellationToken.None);
-        await source.Created[0].Stalled;
+        await WaitForParkedAsync(source.Created[0], pending);
         clock.Advance(TimeSpan.FromMilliseconds(5001));
 
         var read = await pending;
@@ -98,7 +98,7 @@ public class AdsRawChannelRetryTests
         var pending = channel.ReadAsync(0x11, 1, new byte[1], CancellationToken.None);
         var retryTransport = source.NextTransport;   // captured before the retry creates it
 
-        await source.Created[0].Stalled;
+        await WaitForParkedAsync(source.Created[0], pending);
         clock.Advance(TimeSpan.FromMilliseconds(5001));
 
         await AdvancePastParkedAttemptAsync(clock, retryTransport, pending);
@@ -139,7 +139,7 @@ public class AdsRawChannelRetryTests
         source.StallFirst = 1;
 
         var pending = channel.ReadAsync(0x11, 1, new byte[1], CancellationToken.None);
-        await source.Created[0].Stalled;
+        await WaitForParkedAsync(source.Created[0], pending);
         clock.Advance(TimeSpan.FromMilliseconds(5001));
 
         await Assert.ThrowsAsync<TimeoutException>(() => pending);
@@ -162,15 +162,32 @@ public class AdsRawChannelRetryTests
     [Fact]
     public async Task ExplicitTimeout_OverridesTheConfiguredBound()
     {
-        var (channel, source, clock) = Create(retryCount: 0, timeoutMs: 60_000);
+        // The explicit bound is the LONGER of the two on purpose. The call then has
+        // to SURVIVE the configured bound and die on the explicit one, so the test
+        // can tell which bound ended it — and every regression ends the call at one
+        // bound or the other, so none of them can hang this test.
+        var (channel, source, clock) = Create(retryCount: 0, timeoutMs: 200);
         source.StallFirst = 1;
 
         var pending = channel.ReadAsync(
-            0x11, 1, new byte[1], TimeSpan.FromMilliseconds(200), CancellationToken.None);
-        await source.Created[0].Stalled;
-        clock.Advance(TimeSpan.FromMilliseconds(201));
+            0x11, 1, new byte[1], TimeSpan.FromMilliseconds(60_000), CancellationToken.None);
+        await WaitForParkedAsync(source.Created[0], pending);
+
+        clock.Advance(TimeSpan.FromMilliseconds(201));     // past the CONFIGURED bound
+        Assert.False(pending.IsCompleted);                 // …which does not apply here
+
+        clock.Advance(TimeSpan.FromMilliseconds(60_000));  // past the EXPLICIT bound
 
         var ex = await Assert.ThrowsAsync<TimeoutException>(() => pending);
-        Assert.Contains("200 ms", ex.Message);
+        Assert.Contains("60000 ms", ex.Message);
     }
+
+    /// <summary>
+    /// Waits for <paramref name="transport"/> to park in its stall, but gives up
+    /// the moment <paramref name="pending"/> completes — a channel that answers
+    /// instead of parking then fails the assertion that follows rather than
+    /// hanging here.
+    /// </summary>
+    private static Task WaitForParkedAsync(InMemoryManagedRawConnection transport, Task pending) =>
+        Task.WhenAny(transport.Stalled, pending);
 }

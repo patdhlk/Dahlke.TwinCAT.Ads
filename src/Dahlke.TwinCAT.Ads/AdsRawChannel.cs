@@ -27,6 +27,7 @@ internal sealed class AdsRawChannel : IAdsRawChannel
 
     private IManagedRawConnection? _transport;
     private long _lastUseTicks;
+    private int _inFlight;
 
     public AdsRawChannel(
         string amsNetId,
@@ -107,10 +108,19 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     /// Runs one operation with the per-attempt timeout and the retry policy.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A timeout with no device answer disposes the transport and re-creates it
     /// before reissuing. That re-creation is the whole point: consumers currently
     /// build a fresh client per retry precisely because it clears the stall, and
     /// reusing the stalled transport would be a regression.
+    /// </para>
+    /// <para>
+    /// The call is registered as in flight for its WHOLE duration, retries
+    /// included. <see cref="LastUseUtc"/> alone is not enough to protect it: that
+    /// is stamped on completion, so a call that runs longer than the idle window
+    /// would look idle while it was still running and the sweeper would dispose
+    /// the transport underneath it.
+    /// </para>
     /// </remarks>
     private async Task<int> ExecuteAsync(
         uint ig, uint io, TimeSpan timeout, CancellationToken ct,
@@ -118,6 +128,26 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     {
         var attempts = _options.RetryCount + 1;
 
+        // Stamp on ENTRY as well as completion, and register the call, before any
+        // transport is obtained. Interlocked gives the full fence the eviction
+        // handshake in TryEvictIfIdle relies on.
+        Touch();
+        Interlocked.Increment(ref _inFlight);
+        try
+        {
+            return await RunAttemptsAsync(ig, io, timeout, ct, operation, attempts).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _inFlight);
+        }
+    }
+
+    private async Task<int> RunAttemptsAsync(
+        uint ig, uint io, TimeSpan timeout, CancellationToken ct,
+        Func<IManagedRawConnection, CancellationToken, Task<int>> operation,
+        int attempts)
+    {
         for (var attempt = 1; ; attempt++)
         {
             var transport = await GetOrCreateTransportAsync(ct).ConfigureAwait(false);
@@ -166,6 +196,8 @@ internal sealed class AdsRawChannel : IAdsRawChannel
 
     private async Task<IManagedRawConnection> GetOrCreateTransportAsync(CancellationToken ct)
     {
+        // Ordered AFTER the caller's Interlocked.Increment of _inFlight — that is
+        // the half of the eviction handshake this read depends on.
         var existing = Volatile.Read(ref _transport);
         if (existing is not null)
             return existing;
@@ -222,13 +254,17 @@ internal sealed class AdsRawChannel : IAdsRawChannel
 
     /// <summary>
     /// Disposes the transport when the channel has been unused for
-    /// <paramref name="idleAfter"/> and has no live subscriptions. Called BY the
-    /// sweeper; the sweeper never disposes anything itself.
+    /// <paramref name="idleAfter"/>, has no live subscriptions, and has no
+    /// operation in flight. Called BY the sweeper; the sweeper never disposes
+    /// anything itself.
     /// </summary>
     /// <returns><see langword="true"/> when a transport was actually evicted.</returns>
     internal bool TryEvictIfIdle(TimeSpan idleAfter)
     {
         if (LiveSubscriptionCount > 0)
+            return false;
+
+        if (Volatile.Read(ref _inFlight) > 0)
             return false;
 
         if (_timeProvider.GetUtcNow() - LastUseUtc < idleAfter)
@@ -239,11 +275,24 @@ internal sealed class AdsRawChannel : IAdsRawChannel
 
         try
         {
-            if (_transport is null)
+            // Claim the transport with a full fence, then re-check the in-flight
+            // count. An operation registers itself with a full fence BEFORE it
+            // reads _transport, so of the two orderings at least one side sees the
+            // other: either the call finds the claim (null) and opens a fresh
+            // transport, or this sees the call and hands the transport back
+            // untouched. Without the re-check, a call that started between the
+            // check above and here would be reading through a disposed transport.
+            var stale = Interlocked.Exchange(ref _transport, null);
+            if (stale is null)
                 return false;
 
-            _transport.Dispose();
-            Volatile.Write(ref _transport, null);
+            if (Volatile.Read(ref _inFlight) > 0)
+            {
+                Volatile.Write(ref _transport, stale);
+                return false;
+            }
+
+            stale.Dispose();
             _logger.LogDebug("Raw channel {NetId}:{Port} evicted after idle timeout.", AmsNetId, Port);
             return true;
         }
