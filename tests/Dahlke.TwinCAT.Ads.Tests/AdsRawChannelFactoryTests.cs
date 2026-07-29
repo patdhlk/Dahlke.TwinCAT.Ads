@@ -148,13 +148,13 @@ public class AdsRawChannelFactoryTests
     /// cannot reject it — but it must not stay silent about it either.
     /// </summary>
     /// <remarks>
-    /// Warning once per newly created channel, not per lookup, so a polling caller
-    /// cannot flood the log. The benign half is asserted too: a well-formed ID, and
-    /// a merely non-canonical one such as <c>"01.2.3.4.5.6"</c>, must NOT warn —
-    /// otherwise the warning would be noise rather than signal.
+    /// Deduped per SPELLING, so a polling caller cannot flood the log. The benign
+    /// half is asserted too: a well-formed ID, and a merely non-canonical one such
+    /// as <c>"01.2.3.4.5.6"</c>, must NOT warn — otherwise the warning would be
+    /// noise rather than signal.
     /// </remarks>
     [Fact]
-    public void Get_WarnsOncePerChannel_WhenAnOctetIsLaundered()
+    public void Get_WarnsOncePerSpelling_WhenAnOctetIsLaundered()
     {
         var logs = new RecordingLoggerFactory();
         using var factory = Create(new FakeTimeProvider(), loggerFactory: logs);
@@ -174,6 +174,40 @@ public class AdsRawChannelFactoryTests
         factory.Get("01.2.3.4.5.6", 852);       // non-canonical but in range: never warns
 
         Assert.Single(logs.Warnings);
+
+        // A DIFFERENT laundered spelling of the SAME device warns on its own
+        // account — dedupe is per spelling, not per channel. (256 zeroes too.)
+        factory.Get("256.1.1.1.1.1", 851);
+
+        Assert.Equal(2, logs.Warnings.Count);
+        Assert.Contains(logs.Warnings, w => w.Contains("256.1.1.1.1.1"));
+    }
+
+    /// <summary>
+    /// The ordering a create-time warning could never catch: the canonical
+    /// spelling is requested first, so by the time the malformed one arrives the
+    /// channel already exists and <c>GetOrAdd</c>'s factory delegate never runs.
+    /// </summary>
+    /// <remarks>
+    /// This is the motivating case for the warning existing at all — a caller with
+    /// both spellings in play, wondering why two "different" targets share state.
+    /// A diagnostic that goes quiet exactly there is not doing its job.
+    /// </remarks>
+    [Fact]
+    public void Get_WarnsAboutLaundering_EvenWhenTheChannelAlreadyExists()
+    {
+        var logs = new RecordingLoggerFactory();
+        using var factory = Create(new FakeTimeProvider(), loggerFactory: logs);
+
+        var canonical = factory.Get("0.1.1.1.1.1", 851);
+        Assert.Empty(logs.Warnings);                    // nothing laundered yet
+
+        var laundered = factory.Get("999.1.1.1.1.1", 851);
+
+        Assert.Same(canonical, laundered);              // one device, one channel
+        var warning = Assert.Single(logs.Warnings);
+        Assert.Contains("999.1.1.1.1.1", warning);
+        Assert.Contains("0.1.1.1.1.1", warning);
     }
 
     /// <summary>

@@ -35,6 +35,12 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     private readonly ConcurrentDictionary<(string NetId, int Port), SimulatedRawStore> _stores =
         new(ChannelKeyComparer.Instance);
 
+    /// <summary>
+    /// Net ID spellings already warned about — see <see cref="WarnOnceAboutLaundering"/>.
+    /// Keyed on the caller's raw string, so each distinct spelling is reported once.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, byte> _warnedNetIds = new(StringComparer.Ordinal);
+
     private readonly AdsRawChannelOptions _options;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<AdsRawChannelFactory> _logger;
@@ -69,24 +75,48 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
         var key = (NetId: NormaliseNetId(amsNetId, out var laundered), Port: port);
 
-        return _channels.GetOrAdd(key, k =>
-        {
-            // Inside the factory delegate, so this fires once per NEWLY CREATED
-            // channel rather than on every lookup — a polling caller must not be
-            // able to flood the log.
-            if (laundered)
-            {
-                _logger.LogWarning(
-                    "Raw channel Net ID '{Requested}' has an octet outside 0-255; it resolves to " +
-                    "'{Resolved}', which is the device this channel will actually address. The same " +
-                    "Net ID in a RawChannels:Seed key fails validation at startup instead.",
-                    amsNetId, k.NetId);
-            }
+        if (laundered)
+            WarnOnceAboutLaundering(amsNetId, key.NetId);
 
-            return new AdsRawChannel(
-                k.NetId, k.Port, CreateTransport, _options,
-                _loggerFactory.CreateLogger<AdsRawChannel>(), _timeProvider);
-        });
+        return _channels.GetOrAdd(key, k => new AdsRawChannel(
+            k.NetId, k.Port, CreateTransport, _options,
+            _loggerFactory.CreateLogger<AdsRawChannel>(), _timeProvider));
+    }
+
+    /// <summary>
+    /// Warns exactly once for each distinct spelling whose octets were laundered.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Deduped on the SPELLING, not on channel creation.</b> Warning from
+    /// <c>GetOrAdd</c>'s factory delegate would miss the one ordering that
+    /// actually confuses people: the canonical spelling requested first and the
+    /// malformed one second, where the channel already exists so the delegate
+    /// never runs. That is precisely the case where a caller sees two "different"
+    /// targets sharing state and cannot work out why — a diagnostic silent in its
+    /// motivating case is not doing its job.
+    /// </para>
+    /// <para>
+    /// <see cref="ConcurrentDictionary{TKey,TValue}.TryAdd"/> also makes this
+    /// exactly-once under contention, which the delegate could not promise:
+    /// <c>GetOrAdd</c> may invoke its factory more than once when several threads
+    /// race to create the same channel.
+    /// </para>
+    /// <para>
+    /// Only laundered spellings are ever inserted, so the set is bounded by the
+    /// number of distinct malformed spellings a caller uses — not by traffic.
+    /// </para>
+    /// </remarks>
+    private void WarnOnceAboutLaundering(string requested, string resolved)
+    {
+        if (!_warnedNetIds.TryAdd(requested, 0))
+            return;
+
+        _logger.LogWarning(
+            "Raw channel Net ID '{Requested}' has an octet outside 0-255; it resolves to " +
+            "'{Resolved}', which is the device this channel will actually address. The same " +
+            "Net ID in a RawChannels:Seed key fails validation at startup instead.",
+            requested, resolved);
     }
 
     public bool TryGetSimulated(
