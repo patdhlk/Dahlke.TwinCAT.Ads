@@ -68,8 +68,9 @@ public delegate void RawNotificationHandler(ReadOnlySpan<byte> data);
 /// <see cref="TimeoutException"/>. The worst case is
 /// <c>TimeoutMs × (RetryCount + 1)</c>. Caller cancellation is exempt: a cancelled
 /// token aborts immediately and no further attempt is made.
-/// <see cref="SubscribeAsync"/> takes the same per-attempt bound but is never
-/// retried, so its worst case is <c>TimeoutMs</c> flat.
+/// <see cref="SubscribeAsync"/> takes the same per-attempt bound and is never
+/// retried, so its own bound is <c>TimeoutMs</c>; a call that triggers a transport
+/// rebuild additionally waits for that rebuild's restore pass.
 /// </para>
 /// <para>
 /// <b>Retry applies only to a timeout with no device answer</b>, and re-creates
@@ -229,11 +230,20 @@ public interface IAdsRawChannel
     /// <b>Bounded by <see cref="AdsRawChannelOptions.TimeoutMs"/>, but never
     /// retried.</b> Registration against an unresponsive target fails with
     /// <see cref="TimeoutException"/> on that bound, the same exception every other
-    /// raw operation raises for the same physical situation. One bound covers the
-    /// whole call, transport build included. <see cref="AdsRawChannelOptions.RetryCount"/>
-    /// deliberately does NOT apply: retrying a registration means dropping and
-    /// rebuilding the transport, which would re-register every OTHER subscription
-    /// on this channel as a side effect of one subscriber's retry.
+    /// raw operation raises for the same physical situation.
+    /// <see cref="AdsRawChannelOptions.RetryCount"/> deliberately does NOT apply:
+    /// retrying a registration means dropping and rebuilding the transport, which
+    /// would re-register every OTHER subscription on this channel as a side effect
+    /// of one subscriber's retry.
+    /// </para>
+    /// <para>
+    /// That bound covers this call's OWN work — the transport build and its own
+    /// registration. A call that also TRIGGERS a rebuild additionally waits for
+    /// that rebuild's restore pass, which re-registers the channel's other
+    /// subscriptions one at a time under their own separate bounds and cannot be
+    /// cut short by this caller. Against a dead target with N live subscriptions
+    /// that is N × <see cref="AdsRawChannelOptions.TimeoutMs"/> before this call's
+    /// own bound is even observed.
     /// </para>
     /// <para>
     /// <b>Threading.</b> <paramref name="handler"/> is invoked on the transport's

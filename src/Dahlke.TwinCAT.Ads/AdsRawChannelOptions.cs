@@ -20,8 +20,10 @@ namespace Dahlke.TwinCAT.Ads;
 /// <para>
 /// <see cref="IAdsRawChannel.SubscribeAsync"/> takes that same per-attempt bound
 /// — for the registration itself and for each re-registration after a transport
-/// drop — but <see cref="RetryCount"/> does not apply to it, so its worst case is
-/// <see cref="TimeoutMs"/> flat.
+/// drop — but <see cref="RetryCount"/> does not apply to it. Its OWN bound is
+/// therefore <see cref="TimeoutMs"/>; a call that triggers a transport rebuild
+/// additionally waits for that rebuild's restore pass, which re-registers the
+/// channel's other subscriptions sequentially under their own separate bounds.
 /// </para>
 /// </remarks>
 public sealed class AdsRawChannelOptions

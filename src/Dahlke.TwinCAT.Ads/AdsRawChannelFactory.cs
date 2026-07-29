@@ -212,7 +212,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     /// window in which a late drop disposes a transport another caller just
     /// installed.
     /// </remarks>
-    private IManagedRawConnection CreateTransport(string amsNetId, int port)
+    internal IManagedRawConnection CreateTransport(string amsNetId, int port)
     {
         // Refuse to mint a transport nothing will ever dispose. The raw factory is
         // registered last so it stops FIRST; a consumer hosted service stopping
@@ -239,7 +239,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
         return _options.Mode == ConnectionMode.Simulated
             ? new SimulatedRawConnection(amsNetId, port, GetOrCreateStore(amsNetId, port))
-            : new BeckhoffManagedRawConnection(amsNetId, port);
+            : new BeckhoffManagedRawConnection(amsNetId, port, _options.TimeoutMs);
     }
 
     /// <summary>

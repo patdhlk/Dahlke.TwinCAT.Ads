@@ -54,15 +54,35 @@ public class AdsRawChannelSubscriptionTests
     }
 
     private static (AdsRawChannel Channel, TransportSource Source, FakeTimeProvider Clock) Create(
-        int idleEvictionMs = 60_000)
+        int idleEvictionMs = 60_000, int timeoutMs = AttemptTimeoutMs)
     {
         var source = new TransportSource();
         var clock = new FakeTimeProvider();
         var channel = new AdsRawChannel(
             "1.2.3.4.5.6", 0xFFFF, source.Create,
-            new AdsRawChannelOptions { IdleEvictionMs = idleEvictionMs, RetryCount = 0 },
+            new AdsRawChannelOptions
+            {
+                IdleEvictionMs = idleEvictionMs, RetryCount = 0, TimeoutMs = timeoutMs,
+            },
             NullLogger.Instance, clock);
         return (channel, source, clock);
+    }
+
+    /// <summary>
+    /// Fails if <paramref name="pending"/> has not completed within a REAL five
+    /// seconds.
+    /// </summary>
+    /// <remarks>
+    /// The fake clock drives the behaviour; this only guards the final await. A
+    /// bug that removes the bound under test makes <paramref name="pending"/> never
+    /// complete, and an unguarded <c>await</c> would hang the run instead of
+    /// failing it — a hang is not a false green, but it is not a clean red either.
+    /// Costs nothing when the code is correct.
+    /// </remarks>
+    private static async Task CompletesPromptlyAsync(Task pending)
+    {
+        var finished = await Task.WhenAny(pending, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.Same(pending, finished);
     }
 
     /// <summary>
@@ -227,25 +247,79 @@ public class AdsRawChannelSubscriptionTests
     [Fact]
     public async Task Subscribe_AgainstAnUnresponsiveTarget_TimesOutOnTheConfiguredBound()
     {
-        var (channel, source, clock) = Create();
-        source.StallEveryOperation = true;   // the target never answers
+        // A NON-default bound on purpose. At 5000 the expected value coincides with
+        // Beckhoff's own invisible AdsClient default, so the two are
+        // indistinguishable — and the asserted message text comes from
+        // _options.TimeoutMs rather than from the token source, so a bound built
+        // with the wrong duration would still read "5000 ms" and still pass.
+        const int timeoutMs = 1500;
+        var (channel, source, clock) = Create(timeoutMs: timeoutMs);
+
+        // Warm the channel FIRST. On a cold one the subscribe's own bound is never
+        // the one that fires: building the transport restores this very
+        // subscription, and that restore's separate token source — same duration,
+        // different object — is what actually parks and expires. The bound under
+        // test would then be unobservable, and a wrong duration here would sail
+        // through. With the transport already up, no restore pass runs and the
+        // subscribe's own bound is the only one in play.
+        await channel.WriteAsync(0x11, 1, new byte[] { 1 }, CancellationToken.None);
+        source.Created[0].StallAlways = true;   // …and now the target stops answering
 
         var pending = channel.SubscribeAsync(
             0x11, 1001, 1, 100, _ => { }, CancellationToken.None);
 
-        // One bound covers the whole registration, so one advance ends it. Without
-        // it the only bound is AdsClient's own 5 s default, which is neither this
-        // value nor a TimeoutException.
         await Task.WhenAny(source.Created[0].Stalled, pending);
-        clock.Advance(TimeSpan.FromMilliseconds(AttemptTimeoutMs + 1));
 
+        // Advance to JUST SHORT of the bound and give a premature completion real
+        // time to surface. Nothing can legitimately end the call here — the fake
+        // clock has not reached the bound — so this costs only the wait, and a
+        // token source built with any shorter duration has already fired by now.
+        clock.Advance(TimeSpan.FromMilliseconds(timeoutMs - 1));
+        await Task.WhenAny(pending, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        Assert.False(pending.IsCompleted);
+
+        clock.Advance(TimeSpan.FromMilliseconds(2));
+
+        await CompletesPromptlyAsync(pending);
         var ex = await Assert.ThrowsAsync<TimeoutException>(() => pending);
-        Assert.Contains($"{AttemptTimeoutMs} ms", ex.Message);
+        Assert.Contains($"{timeoutMs} ms", ex.Message);
 
         // Rolled back: a failed subscribe must not leave a phantom entry pinning
         // the channel against eviction forever.
         Assert.Equal(0, channel.LiveSubscriptionCount);
         Assert.True(channel.TryEvictIfIdle(TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task Shutdown_DoesNotWaitOutARestoreAgainstADeadTarget()
+    {
+        var (channel, source, clock) = Create();
+        source.Seed(0x11, 1001, [1]);
+
+        await channel.SubscribeAsync(0x11, 1001, 1, 100, _ => { }, CancellationToken.None);
+        await ForceDropAsync(channel, source.Created[0], clock);
+
+        // The replacement never answers, so the restore parks on its own bound —
+        // which the fake clock will never reach here.
+        source.StallEveryOperation = true;
+        using var rebuildCts = new CancellationTokenSource();
+        var rebuild = channel.ReadAsync(0x11, 1001, new byte[1], rebuildCts.Token);
+        await Task.WhenAny(source.Created[1].Stalled, rebuild);
+
+        // Shutdown must not wait out that bound — nor one per subscription. It
+        // still TAKES the transport gate the restore is holding, so nothing is
+        // disposed underneath a registration in flight; it just tells the restore
+        // to stop first.
+        var shutdown = Task.Run(channel.Shutdown);
+        await CompletesPromptlyAsync(shutdown);
+        await shutdown;
+
+        Assert.True(source.Created[1].Disposed);
+
+        // The call that triggered the rebuild is collateral — it dies of the
+        // shutdown one way or another. Observe it so nothing is left dangling.
+        await rebuildCts.CancelAsync();
+        await Assert.ThrowsAnyAsync<Exception>(() => rebuild);
     }
 
     [Fact]

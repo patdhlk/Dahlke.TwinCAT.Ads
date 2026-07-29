@@ -531,4 +531,40 @@ public class AdsRawChannelFactoryTests
         Assert.Same(first, second);
         Assert.Same(first.Get("1.2.3.4.5.6", 851), second.Get("1.2.3.4.5.6", 851));
     }
+
+    [Fact]
+    public void RealTransport_CarriesTheConfiguredTimeout()
+    {
+        // Left unassigned, AdsClient keeps Beckhoff's own 5000 ms default, which
+        // silently caps every raw operation: a configured TimeoutMs above 5000
+        // could never be reached, and instead of the documented TimeoutException
+        // the caller would get AdsErrorException/ClientSyncTimeout at 5 s — which
+        // this library's contract defines as a device ANSWER, never retried.
+        //
+        // 30000 is chosen ABOVE that default on purpose: it is the value a
+        // consumer cannot obtain unless the assignment really happens.
+        using var factory = Create(
+            new FakeTimeProvider(),
+            o => { o.Mode = ConnectionMode.Real; o.TimeoutMs = 30_000; });
+
+        // Constructs the client; it does not connect, so no router is involved.
+        using var transport = factory.CreateTransport("1.2.3.4.5.6", 0xFFFF);
+
+        var beckhoff = Assert.IsType<BeckhoffManagedRawConnection>(transport);
+        Assert.Equal(30_000, beckhoff.ClientTimeoutMs);
+    }
+
+    [Fact]
+    public void RealTransport_TimeoutIsTheConfiguredValue_NotBeckhoffsDefault()
+    {
+        // The complement of the test above, below the default rather than above it,
+        // so neither can pass by coincidence with 5000.
+        using var factory = Create(
+            new FakeTimeProvider(),
+            o => { o.Mode = ConnectionMode.Real; o.TimeoutMs = 750; });
+
+        using var transport = factory.CreateTransport("1.2.3.4.5.6", 0xFFFF);
+
+        Assert.Equal(750, Assert.IsType<BeckhoffManagedRawConnection>(transport).ClientTimeoutMs);
+    }
 }

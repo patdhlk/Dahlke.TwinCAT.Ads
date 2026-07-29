@@ -36,6 +36,21 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     /// </summary>
     private readonly ConcurrentDictionary<Guid, RawSubscription> _subscriptions = new();
 
+    /// <summary>
+    /// Set once, at <see cref="Shutdown"/>, so work holding the transport gate can
+    /// abandon what is about to be thrown away.
+    /// </summary>
+    /// <remarks>
+    /// Never disposed, by the same rule <c>AdsRawChannelFactory.RequestSweeperStop</c>
+    /// follows: <see cref="Shutdown"/> runs from BOTH <c>StopAsync</c> and
+    /// <c>Dispose</c>, and <see cref="CancellationTokenSource.Cancel()"/> is not safe
+    /// after disposal. A source nobody disposes cannot be cancelled after disposal.
+    /// It holds no timer and no registration of its own; the linked sources built
+    /// from it are disposed per iteration, which unregisters them here.
+    /// </remarks>
+    private readonly CancellationTokenSource _shutdown = new();
+    private int _shutdownRequested;
+
     private IManagedRawConnection? _transport;
     private long _lastUseTicks;
     private int _inFlight;
@@ -291,10 +306,19 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     {
         foreach (var (id, subscription) in _subscriptions)
         {
+            // Shutting down: stop restoring onto a transport that is about to be
+            // disposed. Without this, a host stopping while N subscriptions cannot
+            // reach a dead target waits out N full per-attempt timeouts, because
+            // Shutdown blocks on the gate this loop holds.
+            if (_shutdown.IsCancellationRequested)
+                break;
+
             using var timeoutCts = new CancellationTokenSource(DefaultTimeout, _timeProvider);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                _shutdown.Token, timeoutCts.Token);
             try
             {
-                await RegisterAsync(id, subscription, transport, timeoutCts.Token).ConfigureAwait(false);
+                await RegisterAsync(id, subscription, transport, linkedCts.Token).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -571,8 +595,24 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     }
 
     /// <summary>Disposes the transport unconditionally, at factory shutdown.</summary>
+    /// <remarks>
+    /// <para>
+    /// The shutdown signal is raised BEFORE the gate is taken, so a restore pass
+    /// holding the gate can abandon its remaining subscriptions instead of making
+    /// the host wait out one per-attempt timeout for each of them.
+    /// </para>
+    /// <para>
+    /// This SHORTENS the wait; it does not skip it. The gate is still taken, so a
+    /// transport is never disposed with a registration still in flight against it.
+    /// Bounding the wait and proceeding anyway would put two owners on one
+    /// transport's teardown, which is the shape that produced #9/#13/#15 — and this
+    /// type's own remarks name single ownership as the mitigation.
+    /// </para>
+    /// </remarks>
     internal void Shutdown()
     {
+        RequestShutdown();
+
         _transportGate.Wait();
         try
         {
@@ -583,6 +623,16 @@ internal sealed class AdsRawChannel : IAdsRawChannel
         {
             _transportGate.Release();
         }
+    }
+
+    /// <summary>
+    /// Raises the shutdown signal, at most once. Never disposes the source — see
+    /// <see cref="_shutdown"/>.
+    /// </summary>
+    private void RequestShutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownRequested, 1) == 0)
+            _shutdown.Cancel();
     }
 
     /// <summary>
