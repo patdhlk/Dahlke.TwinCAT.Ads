@@ -1,0 +1,238 @@
+using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace Dahlke.TwinCAT.Ads;
+
+/// <summary>
+/// Caches one <see cref="AdsRawChannel"/> per <c>(amsNetId, port)</c> and runs the
+/// idle sweeper that releases their transports.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>The sweeper never disposes anything.</b> It asks each channel to evict
+/// itself via <see cref="AdsRawChannel.TryEvictIfIdle"/>; the channel is the sole
+/// owner of its transport. Splitting that ownership is what produced the
+/// three-instalment teardown race in #9/#13/#15.
+/// </para>
+/// <para>
+/// <b>The channel dictionary is never pruned.</b> Channel identity must stay
+/// stable for the factory's lifetime — callers hold references indefinitely, and
+/// Task 7's subscriptions are re-registered through the channel that owns them.
+/// A disconnected channel holds only its Net ID, port and clock, so the cost is
+/// bounded by the number of distinct targets addressed.
+/// </para>
+/// </remarks>
+internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedService, IDisposable
+{
+    private static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(10);
+
+    private readonly ConcurrentDictionary<(string NetId, int Port), AdsRawChannel> _channels =
+        new(ChannelKeyComparer.Instance);
+    private readonly ConcurrentDictionary<(string NetId, int Port), SimulatedRawStore> _stores =
+        new(ChannelKeyComparer.Instance);
+
+    private readonly AdsRawChannelOptions _options;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly ILogger<AdsRawChannelFactory> _logger;
+    private readonly TimeProvider _timeProvider;
+
+    private CancellationTokenSource? _sweeperCts;
+    private Task? _sweeperTask;
+
+    public AdsRawChannelFactory(
+        IOptions<TwinCatAdsOptions> options,
+        ILoggerFactory loggerFactory,
+        TimeProvider timeProvider)
+    {
+        _options = options.Value.RawChannels;
+        _loggerFactory = loggerFactory;
+        _logger = loggerFactory.CreateLogger<AdsRawChannelFactory>();
+        _timeProvider = timeProvider;
+    }
+
+    /// <summary>Number of channels currently cached. Test-support.</summary>
+    internal int ChannelCount => _channels.Count;
+
+    public IAdsRawChannel Get(string amsNetId, int port) =>
+        _channels.GetOrAdd((amsNetId, port), key => new AdsRawChannel(
+            key.NetId, key.Port, CreateTransport, _options,
+            _loggerFactory.CreateLogger<AdsRawChannel>(), _timeProvider));
+
+    public bool TryGetSimulated(
+        string amsNetId, int port,
+        [NotNullWhen(true)] out ISimulatedRawChannel? simulated)
+    {
+        simulated = null;
+
+        if (_options.Mode != ConnectionMode.Simulated)
+            return false;
+
+        // The store exists independently of any transport, so seeding before the
+        // first operation works and survives every later eviction.
+        simulated = GetOrCreateStore(amsNetId, port);
+        return true;
+    }
+
+    /// <summary>
+    /// Creates a transport for one channel — always a FRESH instance, in both
+    /// modes.
+    /// </summary>
+    /// <remarks>
+    /// In simulated mode the freshness is preserved by keeping the durable state
+    /// in a <see cref="SimulatedRawStore"/> the factory owns and handing each new
+    /// connection a reference to it. Seeded fixtures and runtime writes therefore
+    /// outlive an idle eviction, while
+    /// <see cref="AdsRawChannel"/>'s retry (which re-creates the transport) and its
+    /// <c>ReferenceEquals</c> drop guard both keep working. Returning one shared
+    /// connection instead would make retry a no-op in simulation and open an ABA
+    /// window in which a late drop disposes a transport another caller just
+    /// installed.
+    /// </remarks>
+    private IManagedRawConnection CreateTransport(string amsNetId, int port) =>
+        _options.Mode == ConnectionMode.Simulated
+            ? new SimulatedRawConnection(amsNetId, port, GetOrCreateStore(amsNetId, port))
+            : new BeckhoffManagedRawConnection(amsNetId, port);
+
+    /// <summary>
+    /// Returns the durable simulated state for one target, creating it — pre-loaded
+    /// with any matching configured seed — on first request.
+    /// </summary>
+    private SimulatedRawStore GetOrCreateStore(string amsNetId, int port) =>
+        _stores.GetOrAdd((amsNetId, port), key => CreateStore(key.NetId, key.Port));
+
+    private SimulatedRawStore CreateStore(string amsNetId, int port)
+    {
+        var store = new SimulatedRawStore();
+
+        foreach (var (channelKey, slots) in _options.Seed)
+        {
+            if (!RawSeedParser.TryParseChannelKey(channelKey, out var seedNetId, out var seedPort, out _))
+                continue;   // validated at startup; a survivor here is not fatal
+
+            if (!string.Equals(seedNetId, amsNetId, StringComparison.OrdinalIgnoreCase) || seedPort != port)
+                continue;
+
+            foreach (var (slotKey, payload) in slots)
+            {
+                if (RawSeedParser.TryParseSlotKey(slotKey, out var ig, out var io, out _) &&
+                    RawSeedParser.TryParseHex(payload, out var bytes, out _))
+                {
+                    store.Seed(ig, io, bytes);
+                }
+            }
+        }
+
+        return store;
+    }
+
+    public Task StartAsync(CancellationToken ct)
+    {
+        _sweeperCts = new CancellationTokenSource();
+        _sweeperTask = RunSweeperAsync(_sweeperCts);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The sweeper owns the token source it was handed and is the only thing that
+    /// disposes it, in a <c>finally</c> after it has exited and can no longer hold
+    /// a registration. Every other teardown path cancels only. This is the
+    /// ownership discipline #15 established.
+    /// </summary>
+    private async Task RunSweeperAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            while (!cts.Token.IsCancellationRequested)
+            {
+                await Task.Delay(SweepInterval, _timeProvider, cts.Token).ConfigureAwait(false);
+                SweepOnce();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on shutdown.
+        }
+        finally
+        {
+            cts.Dispose();
+        }
+    }
+
+    /// <summary>Runs one eviction pass. Exposed so tests drive it without a timer.</summary>
+    internal void SweepOnce()
+    {
+        var idleAfter = TimeSpan.FromMilliseconds(_options.IdleEvictionMs);
+
+        foreach (var (_, channel) in _channels)
+        {
+            try
+            {
+                channel.TryEvictIfIdle(idleAfter);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Idle eviction of raw channel {NetId}:{Port} failed; it will be retried next sweep.",
+                    channel.AmsNetId, channel.Port);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cancels the sweeper without disposing its source, at most once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The source is taken out of the field with an <see cref="Interlocked"/>
+    /// exchange so exactly ONE teardown path ever cancels it, no matter how many
+    /// run or in what order. The normal host sequence is
+    /// <see cref="StopAsync"/> then <see cref="Dispose"/>: by the time
+    /// <see cref="Dispose"/> runs, <see cref="StopAsync"/> has awaited the sweeper
+    /// and the sweeper has disposed the source in its <c>finally</c>. A second
+    /// <c>Cancel()</c> on that source throws
+    /// <see cref="ObjectDisposedException"/> — <c>Cancel()</c> is NOT
+    /// safe after disposal — so the second path must find nothing to cancel rather
+    /// than be guarded by a swallowed exception.
+    /// </para>
+    /// <para>
+    /// This still never disposes the source: that remains the sweeper's job alone,
+    /// which is the discipline #15 established.
+    /// </para>
+    /// </remarks>
+    private void RequestSweeperStop() =>
+        Interlocked.Exchange(ref _sweeperCts, null)?.Cancel();
+
+    public async Task StopAsync(CancellationToken ct)
+    {
+        RequestSweeperStop();   // cancel only — the sweeper disposes its own source
+
+        if (_sweeperTask is { } task)
+            await task.ConfigureAwait(false);
+
+        foreach (var (_, channel) in _channels)
+            channel.Shutdown();
+    }
+
+    public void Dispose()
+    {
+        RequestSweeperStop();   // cancel only, never dispose: see RunSweeperAsync
+
+        foreach (var (_, channel) in _channels)
+            channel.Shutdown();
+    }
+
+    /// <summary>Case-insensitive on the Net ID, exact on the port.</summary>
+    private sealed class ChannelKeyComparer : IEqualityComparer<(string NetId, int Port)>
+    {
+        public static readonly ChannelKeyComparer Instance = new();
+
+        public bool Equals((string NetId, int Port) x, (string NetId, int Port) y) =>
+            x.Port == y.Port && StringComparer.OrdinalIgnoreCase.Equals(x.NetId, y.NetId);
+
+        public int GetHashCode((string NetId, int Port) obj) =>
+            HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.NetId), obj.Port);
+    }
+}

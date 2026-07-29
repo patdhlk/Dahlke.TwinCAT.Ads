@@ -10,6 +10,13 @@ namespace Dahlke.TwinCAT.Ads;
 /// </summary>
 /// <remarks>
 /// <para>
+/// <b>A fresh instance per <see cref="ManagedRawConnectionFactory"/> call.</b> The
+/// durable slots live in the <see cref="SimulatedRawStore"/> this wraps, which the
+/// factory owns, so seeded fixtures and runtime writes outlive an idle eviction
+/// while <see cref="AdsRawChannel"/>'s retry (which re-creates the transport) and
+/// its <c>ReferenceEquals</c> drop guard both keep working.
+/// </para>
+/// <para>
 /// <b>Pinned semantics.</b> An unseeded read throws
 /// <see cref="AdsErrorException"/> with
 /// <see cref="AdsErrorCode.DeviceInvalidOffset"/> — deliberately the code real
@@ -28,22 +35,33 @@ namespace Dahlke.TwinCAT.Ads;
 /// <para>
 /// <b>Subscriptions fire on write</b> to the watched slot, mirroring
 /// <see cref="SimulatedAdsConnection"/>'s fire-on-change. <c>cycleTimeMs</c> is
-/// ignored and no coalescing is performed.
+/// ignored and no coalescing is performed. They are per-connection, not per-store:
+/// disposing this transport drops them, exactly as disposing a real
+/// <c>AdsClient</c> drops its notification registrations.
+/// </para>
+/// <para>
+/// <b>Disposal is enforced, not advisory.</b> Every operation throws
+/// <see cref="ObjectDisposedException"/> once <see cref="Dispose"/> has run, the
+/// way a disposed <c>AdsClient</c> would. Without that, a transport evicted out
+/// from under an in-flight call would keep serving reads out of the shared store
+/// and a test asserting the call is protected could not fail.
 /// </para>
 /// </remarks>
-internal sealed class SimulatedRawConnection : IManagedRawConnection, ISimulatedRawChannel
+internal sealed class SimulatedRawConnection : IManagedRawConnection
 {
-    private readonly ConcurrentDictionary<(uint Ig, uint Io), byte[]> _store = new();
+    private readonly SimulatedRawStore _store;
     private readonly ConcurrentDictionary<uint, Subscription> _subscriptions = new();
     private readonly string _amsNetId;
     private readonly int _port;
     private readonly object _handleLock = new();
     private uint _nextHandle = 1;
+    private bool _disposed;
 
-    public SimulatedRawConnection(string amsNetId, int port)
+    public SimulatedRawConnection(string amsNetId, int port, SimulatedRawStore store)
     {
         _amsNetId = amsNetId;
         _port = port;
+        _store = store;
     }
 
     private sealed record Subscription(uint Ig, uint Io, Action<ReadOnlyMemory<byte>> OnData);
@@ -52,14 +70,20 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection, ISimulated
 
     public void Connect() => IsConnected = true;
 
-    public void Seed(uint indexGroup, uint indexOffset, ReadOnlySpan<byte> data) =>
-        _store[(indexGroup, indexOffset)] = data.ToArray();
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+            throw new ObjectDisposedException(
+                nameof(SimulatedRawConnection),
+                $"Raw channel {_amsNetId}:{_port} used after its transport was disposed.");
+    }
 
     public Task<int> ReadAsync(uint ig, uint io, Memory<byte> destination, CancellationToken ct)
     {
+        ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
 
-        if (!_store.TryGetValue((ig, io), out var data))
+        if (!_store.Slots.TryGetValue((ig, io), out var data))
         {
             throw new AdsErrorException(
                 $"No simulated data seeded at index group 0x{ig:X} offset {io} " +
@@ -74,8 +98,9 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection, ISimulated
 
     public Task WriteAsync(uint ig, uint io, ReadOnlyMemory<byte> source, CancellationToken ct)
     {
+        ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
-        _store[(ig, io)] = source.ToArray();
+        _store.Slots[(ig, io)] = source.ToArray();
         FireNotifications(ig, io);
         return Task.CompletedTask;
     }
@@ -83,12 +108,14 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection, ISimulated
     public async Task<int> ReadWriteAsync(
         uint ig, uint io, Memory<byte> destination, ReadOnlyMemory<byte> source, CancellationToken ct)
     {
+        ThrowIfDisposed();
         await WriteAsync(ig, io, source, ct).ConfigureAwait(false);
         return await ReadAsync(ig, io, destination, ct).ConfigureAwait(false);
     }
 
     public Task<StateInfo> ReadStateAsync(CancellationToken ct)
     {
+        ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(new StateInfo(AdsState.Run, (ushort)0));
     }
@@ -97,6 +124,7 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection, ISimulated
         uint ig, uint io, int length, int cycleTimeMs,
         Action<ReadOnlyMemory<byte>> onData, CancellationToken ct)
     {
+        ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
 
         uint handle;
@@ -109,6 +137,7 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection, ISimulated
 
     public Task RemoveNotificationAsync(uint handle, CancellationToken ct)
     {
+        ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
         _subscriptions.TryRemove(handle, out _);
         return Task.CompletedTask;
@@ -116,7 +145,7 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection, ISimulated
 
     private void FireNotifications(uint ig, uint io)
     {
-        if (!_store.TryGetValue((ig, io), out var data))
+        if (!_store.Slots.TryGetValue((ig, io), out var data))
             return;
 
         foreach (var (_, subscription) in _subscriptions)
@@ -126,6 +155,7 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection, ISimulated
 
     public void Dispose()
     {
+        _disposed = true;
         IsConnected = false;
         _subscriptions.Clear();
     }

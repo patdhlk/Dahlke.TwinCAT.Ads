@@ -305,7 +305,8 @@ public class ConditionalRouterAndUnifiedSimulationTests
     }
 
     // =========================================================================
-    // 6. Idempotency: AddTwinCatAdsSimulation twice → 2 hosted services (router + pool)
+    // 6. Idempotency: AddTwinCatAdsSimulation twice → 3 hosted services
+    //    (router + pool + raw channel factory)
     // =========================================================================
 
     [Fact]
@@ -324,9 +325,10 @@ public class ConditionalRouterAndUnifiedSimulationTests
             o.Targets["sim1"] = new PlcTargetOptions { Mode = ConnectionMode.Simulated };
         });
 
-        // Now uses core services: router + pool = 2 hosted services (not 4)
+        // Now uses core services: router + pool + raw channel factory = 3 hosted
+        // services (not 6)
         int hostedServiceCount = services.Count(d => d.ServiceType == typeof(IHostedService));
-        Assert.Equal(2, hostedServiceCount);
+        Assert.Equal(3, hostedServiceCount);
     }
 
     [Fact]
@@ -347,9 +349,9 @@ public class ConditionalRouterAndUnifiedSimulationTests
         });
 
         // Core was already registered by AddTwinCatAds, so AddTwinCatAdsSimulation
-        // must not duplicate it: still 2 (router + pool).
+        // must not duplicate it: still 3 (router + pool + raw channel factory).
         int hostedServiceCount = services.Count(d => d.ServiceType == typeof(IHostedService));
-        Assert.Equal(2, hostedServiceCount);
+        Assert.Equal(3, hostedServiceCount);
     }
 
     [Fact]
@@ -372,7 +374,7 @@ public class ConditionalRouterAndUnifiedSimulationTests
         Assert.Equal(ConnectionMode.Simulated, opts.Targets["plc1"].Mode);
 
         int hostedServiceCount = services.Count(d => d.ServiceType == typeof(IHostedService));
-        Assert.Equal(2, hostedServiceCount);
+        Assert.Equal(3, hostedServiceCount);
     }
 
     // =========================================================================

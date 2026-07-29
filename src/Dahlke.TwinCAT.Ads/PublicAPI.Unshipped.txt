@@ -26,3 +26,6 @@ Dahlke.TwinCAT.Ads.IAdsRawChannel.WriteAsync(uint indexGroup, uint indexOffset, 
 Dahlke.TwinCAT.Ads.IAdsRawChannel.ReadWriteAsync(uint indexGroup, uint indexOffset, System.Memory<byte> destination, System.ReadOnlyMemory<byte> source, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<int>!
 Dahlke.TwinCAT.Ads.IAdsRawChannel.ReadWriteAsync(uint indexGroup, uint indexOffset, System.Memory<byte> destination, System.ReadOnlyMemory<byte> source, System.TimeSpan timeout, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<int>!
 Dahlke.TwinCAT.Ads.IAdsRawChannel.ReadStateAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<TwinCAT.Ads.StateInfo>!
+Dahlke.TwinCAT.Ads.IAdsRawChannelFactory
+Dahlke.TwinCAT.Ads.IAdsRawChannelFactory.Get(string! amsNetId, int port) -> Dahlke.TwinCAT.Ads.IAdsRawChannel!
+Dahlke.TwinCAT.Ads.IAdsRawChannelFactory.TryGetSimulated(string! amsNetId, int port, out Dahlke.TwinCAT.Ads.ISimulatedRawChannel? simulated) -> bool

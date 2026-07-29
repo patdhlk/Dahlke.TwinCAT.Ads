@@ -265,7 +265,8 @@ public static class ServiceCollectionExtensions
     /// <c>AddTwinCatAds</c> overloads: <see cref="TimeProvider"/>, the router
     /// ready signal, <see cref="AdsRouterService"/>, the connection factory, and
     /// the connection pool (both as <see cref="AdsConnectionPool"/> and as
-    /// <see cref="IAdsConnectionPool"/>).
+    /// <see cref="IAdsConnectionPool"/>), and the raw channel factory (both as
+    /// <see cref="AdsRawChannelFactory"/> and as <see cref="IAdsRawChannelFactory"/>).
     /// </summary>
     private static void RegisterCoreServices(IServiceCollection services)
     {
@@ -291,6 +292,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AdsConnectionPool>();
         services.AddSingleton<IAdsConnectionPool>(sp => sp.GetRequiredService<AdsConnectionPool>());
         services.AddHostedService(sp => sp.GetRequiredService<AdsConnectionPool>());
+        services.AddSingleton<AdsRawChannelFactory>();
+        services.AddSingleton<IAdsRawChannelFactory>(sp => sp.GetRequiredService<AdsRawChannelFactory>());
+        services.AddHostedService(sp => sp.GetRequiredService<AdsRawChannelFactory>());
     }
 
     /// <summary>
