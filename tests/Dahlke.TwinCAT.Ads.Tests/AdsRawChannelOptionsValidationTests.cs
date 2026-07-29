@@ -51,30 +51,50 @@ public class AdsRawChannelOptionsValidationTests
         Assert.Contains(result.Failures, f => f.Contains("RawChannels:IdleEvictionMs"));
     }
 
-    [Fact]
-    public void MalformedSeedChannelKey_FailsAtStartup()
-    {
-        var result = Validate(o => o.Seed["not-a-netid"] = new() { ["0x11:1"] = "00" });
-        Assert.True(result.Failed);
-        Assert.Contains(result.Failures, f => f.Contains("not-a-netid"));
-    }
+    // ------------------------------------------------------------------
+    // Seed
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// A seed entry with one slot, defaulted to well-formed so each test below
+    /// breaks exactly one thing.
+    /// </summary>
+    private static AdsRawChannelSeed Seed(
+        string amsNetId = "1.2.3.4.5.6",
+        int port = 851,
+        string indexGroup = "0x11",
+        string indexOffset = "1001",
+        string bytes = "02000000410C0000") =>
+        new()
+        {
+            AmsNetId = amsNetId,
+            Port = port,
+            Slots = [new AdsRawChannelSeedSlot
+            {
+                IndexGroup = indexGroup,
+                IndexOffset = indexOffset,
+                Bytes = bytes,
+            }],
+        };
 
     [Fact]
-    public void MalformedSeedSlotKey_FailsAtStartup()
+    public void WellFormedSeed_Passes()
     {
-        var result = Validate(o =>
-            o.Seed["1.2.3.4.5.6:851"] = new() { ["nonsense"] = "00" });
-        Assert.True(result.Failed);
-        Assert.Contains(result.Failures, f => f.Contains("nonsense"));
+        var result = Validate(o => o.Seed.Add(Seed(amsNetId: "192.168.1.10.3.1", port: 65535)));
+        Assert.False(result.Failed);
     }
 
-    [Fact]
-    public void MalformedSeedPayload_FailsAtStartup()
+    [Theory]
+    [InlineData("not-a-netid")]
+    [InlineData("1.2.3.4.5")]     // five octets
+    [InlineData("")]              // omitted in configuration
+    public void MalformedSeedNetId_FailsAtStartup(string amsNetId)
     {
-        var result = Validate(o =>
-            o.Seed["1.2.3.4.5.6:851"] = new() { ["0x11:1"] = "ABC" });
+        var result = Validate(o => o.Seed.Add(Seed(amsNetId: amsNetId)));
+
         Assert.True(result.Failed);
-        Assert.Contains(result.Failures, f => f.Contains("ABC"));
+        Assert.Contains(result.Failures, f => f.Contains($"'{amsNetId}'"));
+        Assert.Contains(result.Failures, f => f.Contains("RawChannels:Seed:0:AmsNetId"));
     }
 
     /// <summary>
@@ -83,24 +103,107 @@ public class AdsRawChannelOptionsValidationTests
     /// <remarks>
     /// <c>AmsNetId.TryParse("999.1.1.1.1.1")</c> returns <see langword="true"/> and
     /// yields <c>0.1.1.1.1.1</c>, so a validator delegating to it would accept this
-    /// key and seed a channel the operator never named — silent corruption rather
+    /// entry and seed a channel the operator never named — silent corruption rather
     /// than a startup failure.
     /// </remarks>
     [Theory]
-    [InlineData("999.1.1.1.1.1:851")]
-    [InlineData("1.2.3.4.5.256:851")]
-    public void SeedChannelKeyWithOutOfRangeOctet_FailsAtStartup(string key)
+    [InlineData("999.1.1.1.1.1")]
+    [InlineData("1.2.3.4.5.256")]
+    public void SeedNetIdWithOutOfRangeOctet_FailsAtStartup(string amsNetId)
     {
-        var result = Validate(o => o.Seed[key] = new() { ["0x11:1"] = "00" });
+        var result = Validate(o => o.Seed.Add(Seed(amsNetId: amsNetId)));
+
         Assert.True(result.Failed);
-        Assert.Contains(result.Failures, f => f.Contains(key));
+        Assert.Contains(result.Failures, f => f.Contains(amsNetId));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(65536)]
+    public void SeedPortOutOfRange_FailsAtStartup(int port)
+    {
+        var result = Validate(o => o.Seed.Add(Seed(port: port)));
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, f => f.Contains("RawChannels:Seed:0:Port"));
     }
 
     [Fact]
-    public void WellFormedSeed_Passes()
+    public void MalformedSeedIndexGroup_FailsAtStartup()
+    {
+        var result = Validate(o => o.Seed.Add(Seed(indexGroup: "nonsense")));
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, f => f.Contains("nonsense"));
+        Assert.Contains(result.Failures, f => f.Contains("Slots:0:IndexGroup"));
+    }
+
+    [Fact]
+    public void MalformedSeedIndexOffset_FailsAtStartup()
+    {
+        var result = Validate(o => o.Seed.Add(Seed(indexOffset: "-1")));
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, f => f.Contains("Slots:0:IndexOffset"));
+    }
+
+    [Fact]
+    public void MalformedSeedPayload_FailsAtStartup()
+    {
+        var result = Validate(o => o.Seed.Add(Seed(bytes: "ABC")));
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, f => f.Contains("ABC"));
+        Assert.Contains(result.Failures, f => f.Contains("Slots:0:Bytes"));
+    }
+
+    /// <summary>
+    /// The failure names the LIST INDEX, because that is the configuration path an
+    /// operator edits: two entries that are both wrong must be distinguishable.
+    /// </summary>
+    [Fact]
+    public void EverySeedEntryIsReported_AndNamedByItsIndex()
     {
         var result = Validate(o =>
-            o.Seed["192.168.1.10.3.1:0xFFFF"] = new() { ["0x11:1001"] = "02000000410C0000" });
+        {
+            o.Seed.Add(Seed(amsNetId: "1.2.3.4.5.6"));       // valid
+            o.Seed.Add(Seed(amsNetId: "bad-one"));
+            o.Seed.Add(Seed(amsNetId: "bad-two"));
+        });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, f => f.Contains("RawChannels:Seed:1:AmsNetId") && f.Contains("bad-one"));
+        Assert.Contains(result.Failures, f => f.Contains("RawChannels:Seed:2:AmsNetId") && f.Contains("bad-two"));
+    }
+
+    /// <summary>
+    /// A seed entry with no slots is legitimate: it declares a reachable but empty
+    /// target. Only a MALFORMED slot is a failure.
+    /// </summary>
+    [Fact]
+    public void SeedEntryWithNoSlots_Passes()
+    {
+        var result = Validate(o =>
+            o.Seed.Add(new AdsRawChannelSeed { AmsNetId = "1.2.3.4.5.6", Port = 851 }));
+
         Assert.False(result.Failed);
+    }
+
+    /// <summary>
+    /// The seed is validated in BOTH modes, so a malformed entry left behind after
+    /// switching to <see cref="ConnectionMode.Real"/> still fails the host rather
+    /// than sitting silently broken until someone switches back.
+    /// </summary>
+    [Fact]
+    public void MalformedSeed_FailsEvenInRealMode()
+    {
+        var result = Validate(o =>
+        {
+            o.Mode = ConnectionMode.Real;
+            o.Seed.Add(Seed(amsNetId: "not-a-netid"));
+        });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, f => f.Contains("not-a-netid"));
     }
 }

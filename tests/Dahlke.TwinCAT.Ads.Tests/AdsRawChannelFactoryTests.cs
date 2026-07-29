@@ -124,7 +124,7 @@ public class AdsRawChannelFactoryTests
     }
 
     /// <summary>
-    /// A configured seed key must reach the channel it names regardless of how
+    /// A configured seed entry must reach the channel it names regardless of how
     /// either side spells the Net ID — <c>Get</c> normalises, so the seed lookup
     /// has to normalise too or the two never meet.
     /// </summary>
@@ -132,7 +132,15 @@ public class AdsRawChannelFactoryTests
     public async Task ConfiguredSeed_MatchesAcrossSpellings()
     {
         using var factory = Create(new FakeTimeProvider(), o =>
-            o.Seed["01.2.3.4.5.6:851"] = new() { ["0x11:1001"] = "7B" });
+            o.Seed.Add(new AdsRawChannelSeed
+            {
+                AmsNetId = "01.2.3.4.5.6",   // non-canonical spelling
+                Port = 851,
+                Slots = [new AdsRawChannelSeedSlot
+                {
+                    IndexGroup = "0x11", IndexOffset = "1001", Bytes = "7B",
+                }],
+            }));
 
         var channel = factory.Get("1.2.3.4.5.6", 851);
         var buffer = new byte[1];
@@ -505,7 +513,15 @@ public class AdsRawChannelFactoryTests
     {
         var clock = new FakeTimeProvider();
         using var factory = Create(clock, o =>
-            o.Seed["1.2.3.4.5.6:0xFFFF"] = new() { ["0x11:1001"] = "02000000" });
+            o.Seed.Add(new AdsRawChannelSeed
+            {
+                AmsNetId = "1.2.3.4.5.6",
+                Port = 0xFFFF,
+                Slots = [new AdsRawChannelSeedSlot
+                {
+                    IndexGroup = "0x11", IndexOffset = "1001", Bytes = "02000000",
+                }],
+            }));
 
         var channel = factory.Get("1.2.3.4.5.6", 0xFFFF);
         var buffer = new byte[4];
@@ -513,6 +529,78 @@ public class AdsRawChannelFactoryTests
 
         Assert.Equal(4, read);
         Assert.Equal([0x02, 0x00, 0x00, 0x00], buffer);
+    }
+
+    /// <summary>
+    /// A seed entry naming a DIFFERENT target must not leak into this one.
+    /// </summary>
+    /// <remarks>
+    /// Both axes are broken separately: same Net ID with the wrong port, and the
+    /// wrong Net ID with the same port. Without this a <c>CreateStore</c> that
+    /// dropped the match condition would still pass every other seed test.
+    /// </remarks>
+    [Theory]
+    [InlineData("1.2.3.4.5.6", 852)]
+    [InlineData("9.9.9.9.9.9", 851)]
+    public async Task ConfiguredSeed_ForAnotherTarget_IsNotMaterialised(
+        string seedNetId, int seedPort)
+    {
+        using var factory = Create(new FakeTimeProvider(), o =>
+            o.Seed.Add(new AdsRawChannelSeed
+            {
+                AmsNetId = seedNetId,
+                Port = seedPort,
+                Slots = [new AdsRawChannelSeedSlot
+                {
+                    IndexGroup = "0x11", IndexOffset = "1001", Bytes = "02000000",
+                }],
+            }));
+
+        var channel = factory.Get("1.2.3.4.5.6", 851);
+
+        // An unseeded slot is a device error, not an empty read.
+        await Assert.ThrowsAsync<global::TwinCAT.Ads.AdsErrorException>(
+            () => channel.ReadAsync(0x11, 1001, new byte[4], CancellationToken.None));
+    }
+
+    /// <summary>
+    /// Several entries and several slots all land, so the walk is a loop over both
+    /// levels rather than a first-match shortcut.
+    /// </summary>
+    [Fact]
+    public async Task ConfiguredSeed_MaterialisesEverySlotOfEveryMatchingEntry()
+    {
+        using var factory = Create(new FakeTimeProvider(), o =>
+        {
+            o.Seed.Add(new AdsRawChannelSeed
+            {
+                AmsNetId = "1.2.3.4.5.6",
+                Port = 851,
+                Slots =
+                [
+                    new AdsRawChannelSeedSlot { IndexGroup = "0x11", IndexOffset = "1", Bytes = "0A" },
+                    new AdsRawChannelSeedSlot { IndexGroup = "17",   IndexOffset = "2", Bytes = "0B" },
+                ],
+            });
+            o.Seed.Add(new AdsRawChannelSeed
+            {
+                AmsNetId = "1.2.3.4.5.6",
+                Port = 851,
+                Slots = [new AdsRawChannelSeedSlot
+                {
+                    IndexGroup = "0x11", IndexOffset = "0x3", Bytes = "0C",
+                }],
+            });
+        });
+
+        var channel = factory.Get("1.2.3.4.5.6", 851);
+
+        foreach (var (offset, expected) in new (uint, byte)[] { (1, 0x0A), (2, 0x0B), (3, 0x0C) })
+        {
+            var buffer = new byte[1];
+            Assert.Equal(1, await channel.ReadAsync(0x11, offset, buffer, CancellationToken.None));
+            Assert.Equal(expected, buffer[0]);
+        }
     }
 
     [Fact]

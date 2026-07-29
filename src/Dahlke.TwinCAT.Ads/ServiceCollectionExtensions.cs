@@ -15,7 +15,8 @@ namespace Dahlke.TwinCAT.Ads;
 /// (<c>AddTwinCatAds</c> / <c>AddTwinCatAdsSimulation</c>):
 /// <list type="number">
 ///   <item><b>Config-only</b> — <c>AddTwinCatAds(IConfiguration)</c>: existing
-///   behaviour; reads targets and router settings from the supplied configuration.</item>
+///   behaviour; reads targets, router, diagnostics and raw-channel settings from
+///   the supplied configuration.</item>
 ///   <item><b>Code-first</b> — <c>AddTwinCatAds(Action&lt;TwinCatAdsOptions&gt;)</c>:
 ///   no <see cref="IConfiguration"/> required; suitable for pure code-first
 ///   applications, unit tests, and worker services that do not use
@@ -47,7 +48,8 @@ public static class ServiceCollectionExtensions
     /// Registers the embedded ADS router and connection pool with health checks
     /// and automatic reconnection.
     /// <para>Reads options from the supplied <paramref name="configuration"/>
-    /// (expects the <c>AmsRouter</c> and <c>PlcTargets</c> sections).</para>
+    /// (the <c>PlcTargets</c>, <c>AmsRouter</c>, <c>AdsSymbolDump</c> and
+    /// <c>RawChannels</c> sections; each is optional).</para>
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
     /// <param name="configuration">The application configuration root.</param>
@@ -126,12 +128,20 @@ public static class ServiceCollectionExtensions
     /// that forces every target into simulation mode for offline development.
     /// No ADS router or TwinCAT installation is required.
     /// <para>
-    /// Reads options from the supplied <paramref name="configuration"/>
-    /// (expects the <c>PlcTargets</c> section), then applies a
-    /// <see cref="IServiceCollection"/> PostConfigure delegate that sets every
-    /// target's <see cref="PlcTargetOptions.Mode"/> to
+    /// Reads options from the supplied <paramref name="configuration"/> exactly as
+    /// <see cref="AddTwinCatAds(IServiceCollection,IConfiguration)"/> does, then
+    /// applies a PostConfigure delegate that sets every target's
+    /// <see cref="PlcTargetOptions.Mode"/> — and
+    /// <see cref="AdsRawChannelOptions.Mode"/> — to
     /// <see cref="ConnectionMode.Simulated"/> after all other Configure delegates
     /// have run.
+    /// </para>
+    /// <para>
+    /// <b>That PostConfigure BEATS configuration.</b> Binding is a Configure
+    /// delegate and therefore runs first, so a host that writes
+    /// <c>"RawChannels": { "Mode": "Real" }</c> and calls this method still gets
+    /// simulation — which is the point, since this overload's whole promise is that
+    /// no hardware is needed.
     /// </para>
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
@@ -241,6 +251,13 @@ public static class ServiceCollectionExtensions
                 var symbolDumpSection = configuration.GetSection("AdsSymbolDump");
                 if (symbolDumpSection.Exists())
                     symbolDumpSection.Bind(o.Diagnostics.SymbolDump);
+
+                // RawChannels ← the whole section. Unlike the sections above there is
+                // no legacy layout to reconcile, so a plain Bind covers every member.
+                // Seed is an ARRAY of objects precisely so this works: a dictionary
+                // keyed on "amsNetId:port" flattened into nested sections, because ':'
+                // is the hierarchy separator, and bound with no slots at all.
+                configuration.GetSection("RawChannels").Bind(o.RawChannels);
             })
             .ValidateOnStart();
     }
@@ -301,10 +318,13 @@ public static class ServiceCollectionExtensions
     /// Registers the PostConfigure delegate used by all
     /// <c>AddTwinCatAdsSimulation</c> overloads.
     /// <para>
-    /// The delegate flips every target's <see cref="PlcTargetOptions.Mode"/> to
+    /// The delegate flips every target's <see cref="PlcTargetOptions.Mode"/>, and
+    /// <see cref="AdsRawChannelOptions.Mode"/>, to
     /// <see cref="ConnectionMode.Simulated"/> after all other Configure delegates
     /// have run, ensuring that config-bound or lambda-added targets are all in
-    /// simulation mode regardless of how they were originally declared.
+    /// simulation mode regardless of how they were originally declared. Binding is
+    /// itself a Configure delegate, so this deliberately overrides a
+    /// <c>RawChannels:Mode</c> of <c>Real</c> read from configuration.
     /// </para>
     /// <para>
     /// This method is intentionally NOT guarded by an idempotency check — the

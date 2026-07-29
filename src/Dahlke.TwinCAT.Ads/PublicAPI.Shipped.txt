@@ -38,10 +38,26 @@ Dahlke.TwinCAT.Ads.AdsRawChannelOptions.Mode.get -> Dahlke.TwinCAT.Ads.Connectio
 Dahlke.TwinCAT.Ads.AdsRawChannelOptions.Mode.set -> void
 Dahlke.TwinCAT.Ads.AdsRawChannelOptions.RetryCount.get -> int
 Dahlke.TwinCAT.Ads.AdsRawChannelOptions.RetryCount.set -> void
-Dahlke.TwinCAT.Ads.AdsRawChannelOptions.Seed.get -> System.Collections.Generic.Dictionary<string!, System.Collections.Generic.Dictionary<string!, string!>!>!
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.Seed.get -> System.Collections.Generic.List<Dahlke.TwinCAT.Ads.AdsRawChannelSeed!>!
 Dahlke.TwinCAT.Ads.AdsRawChannelOptions.Seed.set -> void
 Dahlke.TwinCAT.Ads.AdsRawChannelOptions.TimeoutMs.get -> int
 Dahlke.TwinCAT.Ads.AdsRawChannelOptions.TimeoutMs.set -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelSeed
+Dahlke.TwinCAT.Ads.AdsRawChannelSeed.AdsRawChannelSeed() -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelSeed.AmsNetId.get -> string!
+Dahlke.TwinCAT.Ads.AdsRawChannelSeed.AmsNetId.set -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelSeed.Port.get -> int
+Dahlke.TwinCAT.Ads.AdsRawChannelSeed.Port.set -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelSeed.Slots.get -> System.Collections.Generic.List<Dahlke.TwinCAT.Ads.AdsRawChannelSeedSlot!>!
+Dahlke.TwinCAT.Ads.AdsRawChannelSeed.Slots.set -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelSeedSlot
+Dahlke.TwinCAT.Ads.AdsRawChannelSeedSlot.AdsRawChannelSeedSlot() -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelSeedSlot.Bytes.get -> string!
+Dahlke.TwinCAT.Ads.AdsRawChannelSeedSlot.Bytes.set -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelSeedSlot.IndexGroup.get -> string!
+Dahlke.TwinCAT.Ads.AdsRawChannelSeedSlot.IndexGroup.set -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelSeedSlot.IndexOffset.get -> string!
+Dahlke.TwinCAT.Ads.AdsRawChannelSeedSlot.IndexOffset.set -> void
 Dahlke.TwinCAT.Ads.AdsSymbolInfo
 Dahlke.TwinCAT.Ads.AdsSymbolInfo.<Clone>$() -> Dahlke.TwinCAT.Ads.AdsSymbolInfo!
 Dahlke.TwinCAT.Ads.AdsSymbolInfo.AdsSymbolInfo(string! InstancePath, string! TypeName, string! Category, int ByteSize, string? Comment, System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.AdsSymbolInfo!>? Children) -> void

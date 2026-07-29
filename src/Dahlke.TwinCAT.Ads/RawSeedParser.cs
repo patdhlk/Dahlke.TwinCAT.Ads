@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Dahlke.TwinCAT.Ads;
 
 /// <summary>
-/// Parses the <c>RawChannels:Seed</c> configuration keys and payloads.
+/// Parses the values of a <c>RawChannels:Seed</c> entry.
 /// </summary>
 /// <remarks>
 /// Exposed as <see langword="internal"/> so <c>Dahlke.TwinCAT.Ads.Tests</c> (via
@@ -14,66 +14,24 @@ namespace Dahlke.TwinCAT.Ads;
 /// </remarks>
 internal static class RawSeedParser
 {
-    /// <summary>Parses an outer seed key of the form <c>netId:port</c>.</summary>
-    internal static bool TryParseChannelKey(
-        string key, out string amsNetId, out int port, out string? error)
-    {
-        amsNetId = string.Empty;
-        port = 0;
-
-        var split = key.LastIndexOf(':');
-        if (split <= 0 || split == key.Length - 1)
-        {
-            error = $"Raw channel seed key '{key}' must have the form 'amsNetId:port'.";
-            return false;
-        }
-
-        var netIdPart = key[..split];
-        if (!IsWellFormedNetId(netIdPart))
-        {
-            error = $"Raw channel seed key '{key}' has an AMS Net ID that is not six dot-separated octets in the range 0-255.";
-            return false;
-        }
-
-        if (!TryParseNumber(key[(split + 1)..], out var parsedPort) ||
-            parsedPort is < 0 or > 65535)
-        {
-            error = $"Raw channel seed key '{key}' has a port outside the range 0-65535.";
-            return false;
-        }
-
-        amsNetId = netIdPart;
-        port = (int)parsedPort;
-        error = null;
-        return true;
-    }
-
-    /// <summary>Parses an inner seed key of the form <c>indexGroup:indexOffset</c>.</summary>
-    internal static bool TryParseSlotKey(
-        string key, out uint indexGroup, out uint indexOffset, out string? error)
-    {
-        indexGroup = 0;
-        indexOffset = 0;
-
-        var parts = key.Split(':');
-        if (parts.Length != 2)
-        {
-            error = $"Raw channel seed slot key '{key}' must have the form 'indexGroup:indexOffset'.";
-            return false;
-        }
-
-        if (!TryParseNumber(parts[0], out var ig) || !TryParseNumber(parts[1], out var io) ||
-            ig < 0 || io < 0 || ig > uint.MaxValue || io > uint.MaxValue)
-        {
-            error = $"Raw channel seed slot key '{key}' is not a pair of numbers (decimal or 0x-prefixed hex).";
-            return false;
-        }
-
-        indexGroup = (uint)ig;
-        indexOffset = (uint)io;
-        error = null;
-        return true;
-    }
+    /// <summary>
+    /// Parses an index group or index offset: decimal (<c>17</c>) or
+    /// <c>0x</c>-prefixed hex (<c>0x11</c>).
+    /// </summary>
+    /// <remarks>
+    /// Both number styles are deliberately restrictive — <see cref="NumberStyles.None"/>
+    /// for decimal and a bare <see cref="NumberStyles.AllowHexSpecifier"/> for hex —
+    /// so a sign or surrounding whitespace is a parse FAILURE rather than something
+    /// silently tolerated. An ADS index is unsigned, and <c>"-1"</c> in a
+    /// configuration file is a typo with no correct reading.
+    /// </remarks>
+    internal static bool TryParseIndex(string text, out uint value) =>
+        text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? uint.TryParse(
+                text.AsSpan(2), NumberStyles.AllowHexSpecifier,
+                CultureInfo.InvariantCulture, out value)
+            : uint.TryParse(
+                text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
 
     /// <summary>Parses a hex byte payload, with or without a <c>0x</c> prefix.</summary>
     internal static bool TryParseHex(string value, out byte[] bytes, out string? error)
@@ -119,16 +77,16 @@ internal static class RawSeedParser
     /// <c>AmsNetId.TryParse("999.1.1.1.1.1")</c> returns <see langword="true"/> and
     /// yields <c>0.1.1.1.1.1</c> — the octet is ZEROED, not reduced modulo 256, so
     /// <c>256</c>, <c>257</c>, <c>300</c>, <c>512</c> and <c>999</c> all collapse to
-    /// the same address. Delegating would let a typo'd seed key pass startup
+    /// the same address. Delegating would let a typo'd seed entry pass startup
     /// validation and then seed a channel the operator never named — silent data
     /// corruption rather than a parse failure. Counting six segments, as this did
     /// before, has the same hole.
     /// </para>
     /// <para>
     /// <b>One rule, two proportionate responses.</b> This parser REJECTS such an ID,
-    /// because a configured seed key is a declaration whose typo has no correct
+    /// because a configured seed entry is a declaration whose typo has no correct
     /// reading. <see cref="IAdsRawChannelFactory.Get"/> cannot reject — it is
-    /// documented total — so it accepts the laundered key and logs a warning
+    /// documented total — so it accepts the laundered ID and logs a warning
     /// instead. Both consult this method, so the two can never drift apart.
     /// </para>
     /// </remarks>
@@ -148,9 +106,4 @@ internal static class RawSeedParser
 
         return true;
     }
-
-    private static bool TryParseNumber(string text, out long value) =>
-        text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-            ? long.TryParse(text.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out value)
-            : long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
 }

@@ -267,7 +267,7 @@ public class TwinCatAdsOptionsValidatorTests
     // wired to it, so Beckhoff's invisible 5000 ms default made a bad value
     // inert. Task 12 makes both true at once — reachable and now validated at
     // startup, matching the standard this validator already applies elsewhere
-    // (e.g. raw-channel seed keys).
+    // (e.g. raw-channel seed entries).
 
     [Fact]
     public void Target_SymbolBrowseTimeoutMs_Zero_Fails_Naming_TargetId_And_Value()

@@ -18,7 +18,7 @@ A .NET library for TwinCAT ADS with durable connections, typed symbol access, si
 - **Raw ADS channels** — `IAdsRawChannelFactory` addresses any `(amsNetId, port)` by index group and index offset for targets the symbol API cannot reach (EtherCAT, the TwinCAT system service); cached, never disposed by the caller, with durable device notifications and a seedable simulation store
 - **Per-target simulation** — `ConnectionMode.Real | Simulated` per target; mixed fleets supported; `InitialValues` seeding; `AddTwinCatAdsSimulation` forces all targets — and raw channels — to simulated
 - **Health check** — Healthy / Degraded / Unhealthy with per-target data via `AddTwinCatAdsHealthCheck()`
-- **Options validation at startup** — malformed AMS Net IDs, invalid ports, non-positive timeouts, and malformed raw-channel seed keys fail boot with actionable messages
+- **Options validation at startup** — malformed AMS Net IDs, invalid ports, non-positive timeouts, and malformed raw-channel seed entries fail boot with actionable messages
 - **Embedded ADS router with retry** — retries with backoff (2 s → 30 s cap); pool startup never blocks on the router
 
 ## Installation
@@ -366,9 +366,9 @@ public sealed class EtherCatDiagnostics(IAdsRawChannelFactory channels)
 
 Channels are cached per `(amsNetId, port)` and **never disposed by you** — hold the reference as long as you like. `Get` never blocks and never throws for a present Net ID, however malformed; an unreachable target simply reports `Disconnected` until you operate on it. Only a `null` Net ID throws (`ArgumentNullException`), because that is a caller bug rather than a target that happens not to exist.
 
-The Net ID is trimmed and canonicalised before it is used as a key, so `"1.2.3.4.5.6"`, `"01.2.3.4.5.6"` and `" 1.2.3.4.5.6"` are one channel. An octet outside 0–255 is **zeroed rather than rejected** — `Get("999.1.1.1.1.1", 851)` addresses `0.1.1.1.1.1`, and a warning is logged once per distinct spelling — because that is how the ADS stack resolves the address on the wire. Simulation seed keys are stricter and reject the same value at startup; see [Simulation](#simulation).
+The Net ID is trimmed and canonicalised before it is used as a key, so `"1.2.3.4.5.6"`, `"01.2.3.4.5.6"` and `" 1.2.3.4.5.6"` are one channel. An octet outside 0–255 is **zeroed rather than rejected** — `Get("999.1.1.1.1.1", 851)` addresses `0.1.1.1.1.1`, and a warning is logged once per distinct spelling — because that is how the ADS stack resolves the address on the wire. Simulation seed entries are stricter and reject the same value at startup; see [Simulation](#simulation).
 
-Raw channels are unrelated to `PlcTargets`: they are not declared in configuration and need no configured target. Because a real raw channel cannot route without the embedded AMS router, leaving `RawChannels.Mode` at its default `Real` starts the router even when every configured PLC target is simulated. `AddTwinCatAdsSimulation` forces `RawChannels.Mode` to `Simulated` so it never does.
+Raw channels are unrelated to `PlcTargets`: they need no configured target, and `RawChannels:Seed` names targets only to pre-load their simulated contents, never to declare which ones are reachable. Because a real raw channel cannot route without the embedded AMS router, leaving `RawChannels.Mode` at its default `Real` starts the router even when every configured PLC target is simulated. `AddTwinCatAdsSimulation` forces `RawChannels.Mode` to `Simulated` so it never does.
 
 ### What to expect when things go wrong
 
@@ -400,20 +400,48 @@ Subscriptions survive a transport drop and are re-registered automatically, exac
 
 ### Simulation
 
-Raw-channel options are set **in code**, on `TwinCatAdsOptions.RawChannels`:
+Raw-channel options bind from the `RawChannels` section, alongside `PlcTargets` and `AmsRouter`:
+
+```jsonc
+{
+  "RawChannels": {
+    "Mode": "Simulated",
+    "Seed": [
+      {
+        "AmsNetId": "192.168.1.10.3.1",
+        "Port": 65535,
+        "Slots": [
+          { "IndexGroup": "0x11", "IndexOffset": 1001, "Bytes": "02000000410C0000" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`Seed` is an **array of objects** rather than a dictionary keyed on `amsNetId:port`, because `:` is the configuration hierarchy separator — such a key flattens into nested sections and loses everything after the Net ID.
+
+The same options are settable in code, which is what a host with no configuration file wants:
 
 ```csharp
 builder.Services.AddTwinCatAds(o =>
 {
     o.RawChannels.Mode = ConnectionMode.Simulated;
-    o.RawChannels.Seed["192.168.1.10.3.1:65535"] = new()
+    o.RawChannels.Seed.Add(new AdsRawChannelSeed
     {
-        ["0x11:1001"] = "02000000410C0000",
-    };
+        AmsNetId = "192.168.1.10.3.1",
+        Port = 65535,
+        Slots = [new AdsRawChannelSeedSlot
+        {
+            IndexGroup = "0x11", IndexOffset = "1001", Bytes = "02000000410C0000",
+        }],
+    });
 });
 ```
 
-> **Note.** Unlike `PlcTargets`, the `RawChannels` section is **not bound from `IConfiguration`** in this release — a `"RawChannels"` block in `appsettings.json` is read by nothing and leaves every value at its default. Use the code-first form above, or the `AddTwinCatAds(configuration, o => …)` combo overload if you also bind PLC targets from configuration.
+`IndexGroup` and `IndexOffset` accept decimal or `0x`-prefixed hex, which is why they are strings. A seed entry's Net ID is matched against the channel **after normalisation**, so `01.2.3.4.5.6` still seeds the channel for `1.2.3.4.5.6`.
+
+> **Note.** `AddTwinCatAdsSimulation` forces `Mode` to `Simulated` *after* binding, so a host that sets `"Mode": "Real"` in configuration and calls that helper still gets simulation.
 
 Seeding is also available at runtime, which is what tests and demo hosts usually want:
 
@@ -426,7 +454,7 @@ The store knows nothing about EtherCAT, CoE or files — seed the bytes your own
 
 Simulated subscriptions ignore `cycleTimeMs` and fire on every write made *through the channel* to the watched slot, with no coalescing, on whichever thread performed the write. `Seed` writes the slot **without** firing — it arranges state rather than reporting a change.
 
-Seed keys are validated at startup in **both** modes, so a malformed entry left behind after switching to `Real` still fails the host instead of sitting silently broken. A seed key's AMS Net ID must be six dot-separated octets each in 0–255 — stricter than `Get`, deliberately, because a declaration's typo has no correct reading.
+Seed entries are validated at startup in **both** modes, so a malformed entry left behind after switching to `Real` still fails the host instead of sitting silently broken. A seed entry's AMS Net ID must be six dot-separated octets each in 0–255 — stricter than `Get`, deliberately, because a declaration's typo has no correct reading.
 
 ## Health Check
 
@@ -465,11 +493,9 @@ Each key is a PLC identifier used with `GetConnection(plcId)`.
 | `Mode` | `ConnectionMode` | `Real` | `Real` or `Simulated` |
 | `InitialValues` | `Dictionary<string, object?>` | `{}` | Symbol seed values for simulated targets. A bare scalar seeds a `string`; `{ "value": …, "type": "DINT" }` seeds the declared PLC type — see [Seeding initial values](#seeding-initial-values) |
 
-### `TwinCatAdsOptions.RawChannels` (code-first only)
+### `RawChannels` section
 
 Global policy for [raw ADS channels](#raw-ads-channels). There is nothing per-target to configure, because a raw channel addresses whatever AMS target the caller names.
-
-**These options are not bound from `IConfiguration`** — there is no `RawChannels` JSON section in this release. Set them through an `AddTwinCatAds(o => …)` delegate.
 
 | Property | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -477,7 +503,25 @@ Global policy for [raw ADS channels](#raw-ads-channels). There is nothing per-ta
 | `TimeoutMs` | `int` | `5000` | Timeout for each **attempt**, not for the retry sequence. Must be greater than zero |
 | `RetryCount` | `int` | `1` | Retries after a failed attempt, so `1` means up to two attempts. Must not be negative. Applies only to a timeout with no device answer |
 | `IdleEvictionMs` | `int` | `60000` | How long a channel may go unused before its transport is disposed. Must be greater than zero. A channel with a live subscription is never evicted |
-| `Seed` | `Dictionary<string, Dictionary<string, string>>` | `{}` | Simulation seed data. Outer key `amsNetId:port`, inner key `indexGroup:indexOffset` (decimal or `0x`-prefixed hex), value a hex byte payload with an even number of digits. Keys and payloads are validated at startup in **both** modes |
+| `Seed` | `AdsRawChannelSeed[]` | `[]` | Simulation seed data — see below. Validated at startup in **both** modes |
+
+Each `Seed` entry:
+
+| Property | Type | Default | Description |
+|-----|------|---------|-------------|
+| `AmsNetId` | `string` | `""` | Six dot-separated octets each in 0–255. Matched against a channel after normalisation, so `01.2.3.4.5.6` seeds `1.2.3.4.5.6` |
+| `Port` | `int` | `0` | ADS port, 0–65535 |
+| `Slots` | `AdsRawChannelSeedSlot[]` | `[]` | The slots to pre-load. An entry with none declares a reachable but empty target |
+
+Each `Slots` entry:
+
+| Property | Type | Default | Description |
+|-----|------|---------|-------------|
+| `IndexGroup` | `string` | `""` | Decimal (`17`) or `0x`-prefixed hex (`0x11`). A string because configuration cannot express the hex form as a number |
+| `IndexOffset` | `string` | `""` | Same form as `IndexGroup` |
+| `Bytes` | `string` | `""` | Hex payload, optional `0x` prefix, even number of digits |
+
+The Net ID here is validated **more strictly than `IAdsRawChannelFactory.Get`**, which accepts an out-of-range octet and resolves it the way the ADS stack does. A seed entry is a declaration whose typo has no correct reading, so `999.1.1.1.1.1` fails the host at startup rather than silently seeding `0.1.1.1.1.1`.
 
 ### `AdsSymbolDump` section (optional diagnostics)
 

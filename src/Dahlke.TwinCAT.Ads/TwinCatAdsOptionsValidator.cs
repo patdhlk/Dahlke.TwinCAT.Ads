@@ -122,7 +122,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
     /// the first symbol browse, and <see cref="Task.Delay(int,CancellationToken)"/>
     /// throws <see cref="ArgumentOutOfRangeException"/> for any negative value
     /// other than <c>-1</c>. Catching a bad value here, at startup, is the same
-    /// standard this validator already applies to raw-channel seed keys: a typo
+    /// standard this validator already applies to raw-channel seed entries: a typo
     /// fails the host instead of a poll hours later.
     /// </summary>
     private static void ValidateTargetSymbolBrowseTimeout(
@@ -180,9 +180,9 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// Validates <see cref="AdsRawChannelOptions"/>. Seed keys and payloads are
-    /// parsed HERE, at startup, so a malformed AMS Net ID or index group fails
-    /// the host rather than a poll hours later.
+    /// Validates <see cref="AdsRawChannelOptions"/>. Seed entries are parsed HERE,
+    /// at startup, so a malformed AMS Net ID or index group fails the host rather
+    /// than a poll hours later.
     /// </summary>
     private static void ValidateRawChannels(TwinCatAdsOptions options, List<string> failures)
     {
@@ -197,19 +197,54 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
         if (raw.IdleEvictionMs <= 0)
             failures.Add($"RawChannels:IdleEvictionMs must be greater than 0 (was {raw.IdleEvictionMs}).");
 
-        foreach (var (channelKey, slots) in raw.Seed)
+        for (var i = 0; i < raw.Seed.Count; i++)
+            ValidateRawSeed(raw.Seed[i], i, failures);
+    }
+
+    /// <summary>
+    /// Validates one <see cref="AdsRawChannelSeed"/>. Messages carry BOTH the list
+    /// index — the configuration path an operator edits is
+    /// <c>RawChannels:Seed:{index}:…</c> — and the offending value, because an
+    /// index alone is unsearchable and a value alone is ambiguous across entries.
+    /// </summary>
+    private static void ValidateRawSeed(
+        AdsRawChannelSeed seed,
+        int index,
+        List<string> failures)
+    {
+        if (!RawSeedParser.IsWellFormedNetId(seed.AmsNetId))
         {
-            if (!RawSeedParser.TryParseChannelKey(channelKey, out _, out _, out var channelError))
-                failures.Add(channelError!);
+            failures.Add(
+                $"RawChannels:Seed:{index}:AmsNetId '{seed.AmsNetId}' is not six dot-separated " +
+                $"octets in the range 0-255 (e.g. '192.168.1.10.3.1').");
+        }
 
-            foreach (var (slotKey, payload) in slots)
+        if (seed.Port is < 0 or > 65535)
+        {
+            failures.Add(
+                $"RawChannels:Seed:{index}:Port '{seed.Port}' is outside the range 0-65535.");
+        }
+
+        for (var s = 0; s < seed.Slots.Count; s++)
+        {
+            var slot = seed.Slots[s];
+
+            if (!RawSeedParser.TryParseIndex(slot.IndexGroup, out _))
             {
-                if (!RawSeedParser.TryParseSlotKey(slotKey, out _, out _, out var slotError))
-                    failures.Add(slotError!);
-
-                if (!RawSeedParser.TryParseHex(payload, out _, out var payloadError))
-                    failures.Add(payloadError!);
+                failures.Add(
+                    $"RawChannels:Seed:{index}:Slots:{s}:IndexGroup '{slot.IndexGroup}' is not a " +
+                    $"number (decimal or 0x-prefixed hex, no sign, no whitespace).");
             }
+
+            if (!RawSeedParser.TryParseIndex(slot.IndexOffset, out _))
+            {
+                failures.Add(
+                    $"RawChannels:Seed:{index}:Slots:{s}:IndexOffset '{slot.IndexOffset}' is not a " +
+                    $"number (decimal or 0x-prefixed hex, no sign, no whitespace).");
+            }
+
+            if (!RawSeedParser.TryParseHex(slot.Bytes, out _, out var payloadError))
+                failures.Add($"RawChannels:Seed:{index}:Slots:{s}:Bytes — {payloadError}");
         }
     }
 }

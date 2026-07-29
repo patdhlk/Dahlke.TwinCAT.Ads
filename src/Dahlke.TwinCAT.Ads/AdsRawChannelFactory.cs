@@ -115,7 +115,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
         _logger.LogWarning(
             "Raw channel Net ID '{Requested}' has an octet outside 0-255; it resolves to " +
             "'{Resolved}', which is the device this channel will actually address. The same " +
-            "Net ID in a RawChannels:Seed key fails validation at startup instead.",
+            "Net ID in a RawChannels:Seed entry fails validation at startup instead.",
             requested, resolved);
     }
 
@@ -172,7 +172,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     /// <c>TryParse</c> — so the two spellings genuinely address one device and
     /// collapsing them keeps the key agreeing with the wire. <c>RawSeedParser</c>
     /// takes the opposite line and rejects such an ID outright, because a
-    /// configured seed key is an operator's stated intent, not a runtime lookup.
+    /// configured seed entry is an operator's stated intent, not a runtime lookup.
     /// </para>
     /// </remarks>
     /// <param name="amsNetId">The caller-supplied Net ID. Must not be null.</param>
@@ -253,22 +253,23 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     {
         var store = new SimulatedRawStore();
 
-        foreach (var (channelKey, slots) in _options.Seed)
+        foreach (var seed in _options.Seed)
         {
-            if (!RawSeedParser.TryParseChannelKey(channelKey, out var seedNetId, out var seedPort, out _))
-                continue;   // validated at startup; a survivor here is not fatal
-
             // Normalise the CONFIGURED id too: amsNetId arrives already normalised
-            // from Get/TryGetSimulated, so a seed key spelled "01.2.3.4.5.6:851"
+            // from Get/TryGetSimulated, so a seed entry spelled "01.2.3.4.5.6"
             // would otherwise never match the "1.2.3.4.5.6" channel it names.
-            if (!string.Equals(NormaliseNetId(seedNetId), amsNetId, StringComparison.OrdinalIgnoreCase) ||
-                seedPort != port)
+            if (seed.Port != port ||
+                !string.Equals(NormaliseNetId(seed.AmsNetId), amsNetId, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            foreach (var (slotKey, payload) in slots)
+            foreach (var slot in seed.Slots)
             {
-                if (RawSeedParser.TryParseSlotKey(slotKey, out var ig, out var io, out _) &&
-                    RawSeedParser.TryParseHex(payload, out var bytes, out _))
+                // Malformed slots were rejected at startup; a survivor here is one
+                // added in code after validation ran, and is skipped rather than
+                // thrown on — a bad fixture must not take down a running host.
+                if (RawSeedParser.TryParseIndex(slot.IndexGroup, out var ig) &&
+                    RawSeedParser.TryParseIndex(slot.IndexOffset, out var io) &&
+                    RawSeedParser.TryParseHex(slot.Bytes, out var bytes, out _))
                 {
                     store.Seed(ig, io, bytes);
                 }

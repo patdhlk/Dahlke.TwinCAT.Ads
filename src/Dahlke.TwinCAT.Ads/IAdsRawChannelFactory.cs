@@ -17,7 +17,9 @@ namespace Dahlke.TwinCAT.Ads;
 /// <para>
 /// Unlike <see cref="IAdsConnectionPool"/>, targets are NOT declared in
 /// configuration — a raw channel addresses whatever AMS target the caller names,
-/// which is what discovery-driven use cases such as EtherCAT need.
+/// which is what discovery-driven use cases such as EtherCAT need. The
+/// <c>RawChannels:Seed</c> section names targets too, but only to PRE-LOAD their
+/// simulated contents; a target absent from it is reached just the same.
 /// </para>
 /// </remarks>
 public interface IAdsRawChannelFactory
@@ -68,9 +70,9 @@ public interface IAdsRawChannelFactory
     /// method: the ADS stack resolves the
     /// address the same way when the transport connects, so the channel really does
     /// reach the device the key names. Note the deliberate asymmetry with
-    /// configuration — the identical Net ID in a
-    /// <see cref="AdsRawChannelOptions.Seed"/> key FAILS the host at startup,
-    /// because a seed key is a declaration whose typo has no correct reading,
+    /// configuration — the identical Net ID in an
+    /// <see cref="AdsRawChannelOptions.Seed"/> entry FAILS the host at startup,
+    /// because a seed entry is a declaration whose typo has no correct reading,
     /// whereas this is a lookup whose only correct answer is what the wire will do.
     /// </para>
     /// <para>

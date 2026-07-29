@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   851)` returns the channel for `0.1.1.1.1.1` — because that is how the ADS stack itself
   resolves the address when the transport connects, so the channel really does reach the device
   the key names. A warning is logged once per distinct spelling. The same Net ID used as an
-  `AdsRawChannelOptions.Seed` key **fails the host at startup** instead: a seed key is a
+  `AdsRawChannelOptions.Seed` entry **fails the host at startup** instead: a seed entry is a
   declaration whose typo has no correct reading, whereas a lookup's only correct answer is what
   the wire will do.
 
@@ -85,13 +85,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deliberately the code real hardware gives for a bad offset, so error-classification paths run
   in simulation rather than only against a device.
 
-  Seed keys and payloads are validated at startup in **both** modes, so a malformed entry left
+  Seed entries are validated at startup in **both** modes, so a malformed entry left
   behind after a switch to `Real` still fails the host rather than sitting silently broken.
 
-  **`AdsRawChannelOptions` is configured in code, not from `IConfiguration`.** Unlike
-  `PlcTargets`, no binding for a `RawChannels` section is wired up in this release: set
-  `TwinCatAdsOptions.RawChannels` through an `AddTwinCatAds(…)` options delegate. A
-  `"RawChannels"` block in `appsettings.json` is read by nothing.
+  **`RawChannels` binds from `IConfiguration`**, alongside `PlcTargets` and `AmsRouter`, and is
+  equally settable through an `AddTwinCatAds(…)` options delegate. `Seed` is an **array of
+  objects** — `{ AmsNetId, Port, Slots: [{ IndexGroup, IndexOffset, Bytes }] }` — rather than a
+  dictionary keyed on `amsNetId:port`: `:` is the configuration hierarchy separator, so such a
+  key flattens into nested sections and loses the port and both slot indices. `IndexGroup` and
+  `IndexOffset` are strings so that `0x`-prefixed hex keeps working; both decimal and hex are
+  accepted. A seed entry's Net ID is matched against the channel after normalisation, so
+  `01.2.3.4.5.6` still seeds `1.2.3.4.5.6`.
+
+  A seed Net ID is validated more strictly than `IAdsRawChannelFactory.Get` accepts: `Get`
+  resolves an out-of-range octet the way the ADS stack does, whereas a seed entry with the same
+  typo fails the host at startup, because a declaration's typo has no correct reading.
 
 ### Changed
 

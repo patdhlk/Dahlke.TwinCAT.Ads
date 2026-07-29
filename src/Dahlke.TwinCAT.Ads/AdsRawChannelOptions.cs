@@ -59,27 +59,107 @@ public sealed class AdsRawChannelOptions
     public int IdleEvictionMs { get; set; } = 60_000;
 
     /// <summary>
-    /// Simulation seed data. Outer key is <c>amsNetId:port</c>, inner key is
-    /// <c>indexGroup:indexOffset</c> (decimal or <c>0x</c>-prefixed hex for
-    /// each), value is a hex byte payload.
+    /// Simulation seed data: one entry per target, each carrying the slots to
+    /// pre-load. Empty by default.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The DATA is used only when <see cref="Mode"/> is
-    /// <see cref="ConnectionMode.Simulated"/>; a real channel never reads it. The
-    /// KEYS and payloads are nonetheless validated at startup in BOTH modes, so a
-    /// malformed entry left behind after switching to
-    /// <see cref="ConnectionMode.Real"/> still fails the host rather than sitting
-    /// silently broken until someone switches back.
+    /// Binds from a <c>RawChannels:Seed</c> JSON ARRAY:
+    /// </para>
+    /// <code language="json">
+    /// "RawChannels": {
+    ///   "Mode": "Simulated",
+    ///   "Seed": [
+    ///     {
+    ///       "AmsNetId": "192.168.1.10.3.1",
+    ///       "Port": 65535,
+    ///       "Slots": [
+    ///         { "IndexGroup": "0x11", "IndexOffset": 1001, "Bytes": "02000000410C0000" }
+    ///       ]
+    ///     }
+    ///   ]
+    /// }
+    /// </code>
+    /// <para>
+    /// <b>An array rather than a keyed dictionary because <c>:</c> is the
+    /// configuration hierarchy separator.</b> This was once a
+    /// <c>Dictionary&lt;string, Dictionary&lt;string, string&gt;&gt;</c> keyed on
+    /// <c>amsNetId:port</c>; a key like <c>"1.2.3.4.5.6:851"</c> flattens into
+    /// nested SECTIONS, so the port and both slot indices were swallowed into the
+    /// hierarchy and the entry bound with no slots at all. No spelling of that
+    /// shape could have survived <see cref="Microsoft.Extensions.Configuration.IConfiguration"/>.
     /// </para>
     /// <para>
-    /// An AMS Net ID here must be six octets each in 0-255. Note this is STRICTER
-    /// than <see cref="IAdsRawChannelFactory.Get"/>, which accepts an out-of-range
-    /// octet and resolves it the way the ADS stack does: a seed key is a
-    /// declaration whose typo has no correct reading, whereas a lookup's only
-    /// correct answer is what the wire will do.
+    /// The DATA is used only when <see cref="Mode"/> is
+    /// <see cref="ConnectionMode.Simulated"/>; a real channel never reads it. Every
+    /// entry is nonetheless validated at startup in BOTH modes, so a malformed one
+    /// left behind after switching to <see cref="ConnectionMode.Real"/> still fails
+    /// the host rather than sitting silently broken until someone switches back.
     /// </para>
     /// </remarks>
-    public Dictionary<string, Dictionary<string, string>> Seed { get; set; } =
-        new(StringComparer.OrdinalIgnoreCase);
+    public List<AdsRawChannelSeed> Seed { get; set; } = [];
+}
+
+/// <summary>
+/// One entry of <see cref="AdsRawChannelOptions.Seed"/>: the simulated contents of
+/// a single <c>(amsNetId, port)</c> target.
+/// </summary>
+public sealed class AdsRawChannelSeed
+{
+    /// <summary>
+    /// The target's AMS Net ID, as six dot-separated octets each in 0-255 — for
+    /// example <c>192.168.1.10.3.1</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Matched against a channel on the NORMALISED Net ID, so a non-canonical
+    /// spelling such as <c>01.2.3.4.5.6</c> still seeds the channel for
+    /// <c>1.2.3.4.5.6</c>.
+    /// </para>
+    /// <para>
+    /// The octet range is enforced STRICTLY at startup, which is stricter than
+    /// <see cref="IAdsRawChannelFactory.Get"/>: that method accepts an out-of-range
+    /// octet and resolves it the way the ADS stack does, because a lookup's only
+    /// correct answer is what the wire will do. A seed entry is a declaration whose
+    /// typo has no correct reading, so it is rejected instead.
+    /// </para>
+    /// </remarks>
+    public string AmsNetId { get; set; } = string.Empty;
+
+    /// <summary>The target's ADS port, in the range 0-65535.</summary>
+    public int Port { get; set; }
+
+    /// <summary>
+    /// The slots to pre-load into this target's store. Empty by default, which
+    /// seeds a reachable but empty target.
+    /// </summary>
+    public List<AdsRawChannelSeedSlot> Slots { get; set; } = [];
+}
+
+/// <summary>
+/// One pre-loaded <c>(indexGroup, indexOffset)</c> slot of an
+/// <see cref="AdsRawChannelSeed"/>.
+/// </summary>
+public sealed class AdsRawChannelSeedSlot
+{
+    /// <summary>
+    /// The ADS index group. Accepts decimal (<c>17</c>) or <c>0x</c>-prefixed hex
+    /// (<c>0x11</c>) — hence <see cref="string"/> rather than
+    /// <see cref="uint"/>, since configuration cannot express the hex form as a
+    /// number. No sign and no surrounding whitespace.
+    /// </summary>
+    public string IndexGroup { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The ADS index offset, in the same decimal-or-<c>0x</c>-hex form as
+    /// <see cref="IndexGroup"/>.
+    /// </summary>
+    public string IndexOffset { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The slot's contents as hexadecimal, with an optional <c>0x</c> prefix and
+    /// an even number of digits — <c>02000000</c> and <c>0x02FF</c> are both
+    /// valid. Empty seeds a zero-length slot.
+    /// </summary>
+    public string Bytes { get; set; } = string.Empty;
 }
