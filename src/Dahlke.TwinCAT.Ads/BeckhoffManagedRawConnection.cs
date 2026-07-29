@@ -37,7 +37,7 @@ internal sealed class BeckhoffManagedRawConnection : IManagedRawConnection
 #pragma warning disable CS0618 // index-group overloads: see type remarks
         var result = await _client.ReadAsync(ig, io, destination, ct).ConfigureAwait(false);
 #pragma warning restore CS0618
-        ThrowIfFailed(result.Failed, result.ErrorCode, "Read", ig, io);
+        ThrowIfFailed(result.Failed, result.ErrorCode, "Read", $"at index group 0x{ig:X} offset {io}");
         return result.ReadBytes;
     }
 
@@ -46,7 +46,7 @@ internal sealed class BeckhoffManagedRawConnection : IManagedRawConnection
 #pragma warning disable CS0618
         var result = await _client.WriteAsync(ig, io, source, ct).ConfigureAwait(false);
 #pragma warning restore CS0618
-        ThrowIfFailed(result.Failed, result.ErrorCode, "Write", ig, io);
+        ThrowIfFailed(result.Failed, result.ErrorCode, "Write", $"at index group 0x{ig:X} offset {io}");
     }
 
     public async Task<int> ReadWriteAsync(
@@ -55,14 +55,14 @@ internal sealed class BeckhoffManagedRawConnection : IManagedRawConnection
 #pragma warning disable CS0618
         var result = await _client.ReadWriteAsync(ig, io, destination, source, ct).ConfigureAwait(false);
 #pragma warning restore CS0618
-        ThrowIfFailed(result.Failed, result.ErrorCode, "ReadWrite", ig, io);
+        ThrowIfFailed(result.Failed, result.ErrorCode, "ReadWrite", $"at index group 0x{ig:X} offset {io}");
         return result.ReadBytes;
     }
 
     public async Task<StateInfo> ReadStateAsync(CancellationToken ct)
     {
         var result = await _client.ReadStateAsync(ct).ConfigureAwait(false);
-        ThrowIfFailed(result.Failed, result.ErrorCode, "ReadState", 0, 0);
+        ThrowIfFailed(result.Failed, result.ErrorCode, "ReadState");
         return result.State;
     }
 
@@ -76,7 +76,7 @@ internal sealed class BeckhoffManagedRawConnection : IManagedRawConnection
         var result = await _client
             .AddDeviceNotificationAsync(ig, io, length, settings, userData: null!, ct)
             .ConfigureAwait(false);
-        ThrowIfFailed(result.Failed, result.ErrorCode, "AddDeviceNotification", ig, io);
+        ThrowIfFailed(result.Failed, result.ErrorCode, "AddDeviceNotification", $"at index group 0x{ig:X} offset {io}");
 
         _handlers[result.Handle] = onData;
         return result.Handle;
@@ -86,7 +86,7 @@ internal sealed class BeckhoffManagedRawConnection : IManagedRawConnection
     {
         _handlers.TryRemove(handle, out _);
         var result = await _client.DeleteDeviceNotificationAsync(handle, ct).ConfigureAwait(false);
-        ThrowIfFailed(result.Failed, result.ErrorCode, "DeleteDeviceNotification", 0, 0);
+        ThrowIfFailed(result.Failed, result.ErrorCode, "DeleteDeviceNotification", $"for handle {handle}");
     }
 
     /// <summary>
@@ -94,14 +94,22 @@ internal sealed class BeckhoffManagedRawConnection : IManagedRawConnection
     /// <c>ThrowOnError()</c>; this mirrors the throw shape used throughout
     /// <see cref="AdsConnection"/> so raw failures read like every other ADS failure.
     /// </summary>
-    private void ThrowIfFailed(bool failed, AdsErrorCode errorCode, string operation, uint ig, uint io)
+    /// <param name="failed">Whether the operation's result reported failure.</param>
+    /// <param name="errorCode">The ADS error code to report and to embed in the thrown exception.</param>
+    /// <param name="operation">The operation name, e.g. <c>"Read"</c> or <c>"DeleteDeviceNotification"</c>.</param>
+    /// <param name="location">
+    /// Optional operation-specific detail (index group/offset, handle, ...) appended
+    /// to the message. Omitted entirely for operations, such as
+    /// <see cref="ReadStateAsync"/>, that have no such target.
+    /// </param>
+    private void ThrowIfFailed(bool failed, AdsErrorCode errorCode, string operation, string? location = null)
     {
         if (!failed)
             return;
 
+        var where = location is null ? string.Empty : $" {location}";
         throw new AdsErrorException(
-            $"{operation} on raw channel {_amsNetId}:{_port} at index group 0x{ig:X} " +
-            $"offset {io} failed: {errorCode}",
+            $"{operation} on raw channel {_amsNetId}:{_port}{where} failed: {errorCode}",
             errorCode);
     }
 

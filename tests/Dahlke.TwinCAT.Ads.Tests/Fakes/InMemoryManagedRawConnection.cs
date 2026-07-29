@@ -79,7 +79,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
         Action<ReadOnlyMemory<byte>> onData, CancellationToken ct)
     {
         await GateAsync(ct).ConfigureAwait(false);
-        var handle = _nextHandle++;
+        var handle = Interlocked.Increment(ref _nextHandle) - 1;
         _subs[handle] = (ig, io, onData);
         return handle;
     }
