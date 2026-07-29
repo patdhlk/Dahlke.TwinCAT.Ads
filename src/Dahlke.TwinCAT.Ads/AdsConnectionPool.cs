@@ -222,7 +222,16 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         // the wait task may be mid-flight starting real loops — letting it finish
         // ensures every real loop it spawns is registered in _loopTasks before we
         // cancel and drain them, so none is orphaned.
-        _stoppingCts?.Cancel();
+        //
+        // Read once into a local: Dispose may null the field concurrently, and a
+        // bare `_stoppingCts?.Cancel()` re-reads it between the null check and the
+        // call. Cancel on a source another path already disposed is a no-op here,
+        // not an error — the point is that shutdown is already under way.
+        var stoppingCts = Volatile.Read(ref _stoppingCts);
+        if (stoppingCts is not null)
+        {
+            try { stoppingCts.Cancel(); } catch (ObjectDisposedException) { }
+        }
 
         if (_routerWaitTask is not null)
         {
@@ -243,9 +252,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             catch { /* Timeout or cancellation — clean up anyway */ }
         }
 
-        foreach (var (_, cts) in _reconnectCts)
-            cts.Dispose();
-        _reconnectCts.Clear();
+        DrainReconnectCts();
         _loopTasks.Clear();
 
         // Mark every facade stopped first so that, once the pool is stopping, all
@@ -259,13 +266,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         foreach (var (_, facade) in _facades)
             facade.MarkStopped();
 
-        foreach (var (plcId, connection) in _connections)
-        {
-            try { connection.Disconnect(); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Error disconnecting from PLC {PlcId}", plcId); }
-            connection.Dispose();
-            SetState(plcId, ConnectionState.Disconnected);
-        }
+        DrainConnections();
 
         // Any target whose loop was torn down mid-attempt (e.g. cancelled while
         // Connecting, before it ever published a connection) must also settle on
@@ -273,11 +274,8 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         foreach (var plcId in _states.Keys)
             SetState(plcId, ConnectionState.Disconnected);
 
-        _connections.Clear();
         _routerWaitTask = null;
-        _stoppingCts?.Cancel();
-        _stoppingCts?.Dispose();
-        _stoppingCts = null;
+        DisposeStoppingCts();
     }
 
     /// <inheritdoc/>
@@ -490,19 +488,87 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
     public void Dispose()
     {
-        foreach (var (_, cts) in _reconnectCts)
-        {
-            try { cts.Cancel(); } catch { }
-            cts.Dispose();
-        }
+        DrainReconnectCts();
+
         // Mark facades stopped before disposing the underlying connections so no
         // facade routes to a disposed instance and any parked waiters fail fast
         // (mirrors StopAsync).
         foreach (var (_, facade) in _facades)
             facade.MarkStopped();
-        foreach (var (_, connection) in _connections)
+
+        DrainConnections();
+        DisposeStoppingCts();
+    }
+
+    // ---------------------------------------------------------------------
+    // Teardown helpers.
+    //
+    // A pool registered through AddDahlkeTwinCatAds is BOTH an IHostedService and
+    // a disposable singleton, so shutdown runs two independent paths against the
+    // same fields with nothing serialising them: the host calls StopAsync, and the
+    // DI container disposes the singleton. Each helper below therefore transfers
+    // ownership atomically, so exactly one caller ever cancels or disposes a given
+    // object and the loser is a no-op.
+    //
+    // The previous code guarded these with `?.`, which reads as thread-safety but
+    // is not: the null check and the use are separate reads of a mutable field, so
+    // the other path can dispose in between. In practice that surfaced as
+    // "ObjectDisposedException: The CancellationTokenSource has been disposed"
+    // thrown from StopAsync during host shutdown.
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Cancels and disposes the stopping source exactly once, whichever teardown
+    /// path arrives first. Cancelling is part of the transfer, not a separate step,
+    /// so the winner always cancels before disposing and the loser never touches a
+    /// disposed source.
+    /// </summary>
+    private void DisposeStoppingCts()
+    {
+        var cts = Interlocked.Exchange(ref _stoppingCts, null);
+        if (cts is null)
+            return;
+
+        // Between the Exchange above and this call the source is owned solely by
+        // this thread, but a token registration can still race Cancel with an
+        // already-completed shutdown; treat that as already-cancelled.
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        cts.Dispose();
+    }
+
+    /// <summary>
+    /// Cancels and disposes every per-target reconnect source, removing each from
+    /// the dictionary first so a concurrent teardown cannot dispose it twice.
+    /// </summary>
+    private void DrainReconnectCts()
+    {
+        foreach (var plcId in _reconnectCts.Keys.ToArray())
+        {
+            if (!_reconnectCts.TryRemove(plcId, out var cts))
+                continue; // The other teardown path claimed it.
+
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+            cts.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Disconnects and disposes every live connection, settling each target on
+    /// <see cref="ConnectionState.Disconnected"/>. TryRemove is the ownership
+    /// transfer: only the caller that removes a given connection disposes it.
+    /// </summary>
+    private void DrainConnections()
+    {
+        foreach (var plcId in _connections.Keys.ToArray())
+        {
+            if (!_connections.TryRemove(plcId, out var connection))
+                continue; // The other teardown path claimed it.
+
+            try { connection.Disconnect(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Error disconnecting from PLC {PlcId}", plcId); }
             connection.Dispose();
-        _stoppingCts?.Dispose();
+            SetState(plcId, ConnectionState.Disconnected);
+        }
     }
 
     /// <summary>

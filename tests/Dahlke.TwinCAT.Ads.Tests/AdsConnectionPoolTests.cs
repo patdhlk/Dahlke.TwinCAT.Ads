@@ -394,6 +394,96 @@ public class AdsConnectionPoolTests
     }
 
     [Fact]
+    public async Task Dispose_ThenStopAsync_DoesNotThrow()
+    {
+        // A pool registered by AddDahlkeTwinCatAds is both an IHostedService and a
+        // disposable singleton, so shutdown runs StopAsync and Dispose against the
+        // same fields with nothing serialising them. Dispose landing first used to
+        // leave StopAsync cancelling an already-disposed CancellationTokenSource:
+        //   System.ObjectDisposedException: The CancellationTokenSource has been disposed.
+        var (pool, factory, _, signal) = CreatePool("plc1");
+
+        var conn = new FakeManagedConnection("plc1");
+        factory.Enqueue(conn);
+
+        signal.SetReady();
+        await pool.StartAsync(CancellationToken.None);
+        await Await(conn.ConnectCalled);
+        await WaitForConnection(pool, "plc1", conn);
+
+        pool.Dispose();
+
+        await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);
+
+        // And repeat calls in both orders must be equally inert.
+        pool.Dispose();
+        await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);
+
+        // The connection is disposed, and the pool has settled. Note this is
+        // "at least once", not "exactly once": the connection loop owns its own
+        // reference and disposes it on cancellation independently of either
+        // teardown path, so a connection can legitimately see two Dispose calls.
+        // IDisposable.Dispose is required to be idempotent, so that is safe — the
+        // defect being pinned here is the exception, not the extra call.
+        Assert.True(conn.DisposeCount >= 1, $"expected the connection to be disposed, saw {conn.DisposeCount}");
+        Assert.False(pool.GetConnection("plc1").IsConnected);
+    }
+
+    [Fact]
+    public async Task StopAsync_ThenDispose_DisposesConnectionExactlyOnce()
+    {
+        var (pool, factory, _, signal) = CreatePool("plc1");
+
+        var conn = new FakeManagedConnection("plc1");
+        factory.Enqueue(conn);
+
+        signal.SetReady();
+        await pool.StartAsync(CancellationToken.None);
+        await Await(conn.ConnectCalled);
+        await WaitForConnection(pool, "plc1", conn);
+
+        await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);
+        pool.Dispose();
+        pool.Dispose();
+
+        Assert.True(conn.DisposeCount >= 1, $"expected the connection to be disposed, saw {conn.DisposeCount}");
+    }
+
+    [Fact]
+    public async Task ConcurrentStopAndDispose_DoNotThrow()
+    {
+        // The real race: the host's StopAsync path and the container's disposal
+        // path running at the same time, which is what CI hit.
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            var (pool, factory, _, signal) = CreatePool("plc1");
+
+            var conn = new FakeManagedConnection("plc1");
+            factory.Enqueue(conn);
+
+            signal.SetReady();
+            await pool.StartAsync(CancellationToken.None);
+            await Await(conn.ConnectCalled);
+
+            using var barrier = new Barrier(2);
+            var stop = Task.Run(async () =>
+            {
+                barrier.SignalAndWait();
+                await pool.StopAsync(CancellationToken.None);
+            });
+            var dispose = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                pool.Dispose();
+            });
+
+            // Neither task may fault. Before the fix this threw
+            // ObjectDisposedException from StopAsync on a fraction of iterations.
+            await Task.WhenAll(stop, dispose).WaitAsync(RealTimeout);
+        }
+    }
+
+    [Fact]
     public async Task ForceReconnect_ReplacesLoop_TearsDownOldConnection()
     {
         var (pool, factory, time, signal) = CreatePool("plc1");

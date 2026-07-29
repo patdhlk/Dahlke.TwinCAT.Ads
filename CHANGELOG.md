@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-07-29
+
+### Fixed
+
+- **`AdsConnectionPool` threw `ObjectDisposedException` during host shutdown.** ([#9](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/9))
+
+  A pool registered through `AddDahlkeTwinCatAds` is both an `IHostedService` and a disposable
+  singleton, so shutdown runs two independent paths against the same fields with nothing
+  serialising them: the host calls `StopAsync`, and the DI container disposes the singleton.
+  `StopAsync` could then reach `_stoppingCts.Cancel()` on a source `Dispose` had already disposed:
+
+  ```
+  System.ObjectDisposedException : The CancellationTokenSource has been disposed.
+     at System.Threading.CancellationTokenSource.Cancel()
+     at Dahlke.TwinCAT.Ads.AdsConnectionPool.StopAsync(CancellationToken)
+  ```
+
+  The `?.` guards read as thread-safety but are not — the null check and the use are separate
+  reads of a mutable field, so the other path can dispose in between. Teardown now transfers
+  ownership atomically (`Interlocked.Exchange` for the stopping source, `TryRemove` for the
+  per-target reconnect sources and live connections), so exactly one caller cancels or disposes
+  a given object and the loser is a no-op. `StopAsync` and `Dispose` are now safe to call
+  concurrently, repeatedly, and in either order.
+
+  This surfaced most visibly in `WebApplicationFactory`-based integration tests, where xUnit
+  reports a teardown exception as a test-class cleanup failure and fails the run.
+
+  Note that a connection may still legitimately see more than one `Dispose` call: the connection
+  loop owns its own reference and disposes it on cancellation, independently of either teardown
+  path. `IDisposable.Dispose` is required to be idempotent, so this is safe.
+
 ## [0.5.0] - 2026-07-28
 
 > **Hardware verification — complete.** The notification-payload decode described under "Fixed" was
