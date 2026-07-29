@@ -53,9 +53,25 @@ public sealed class AdsRawChannelOptions
     /// <summary>
     /// Simulation seed data. Outer key is <c>amsNetId:port</c>, inner key is
     /// <c>indexGroup:indexOffset</c> (decimal or <c>0x</c>-prefixed hex for
-    /// each), value is a hex byte payload. Ignored when <see cref="Mode"/> is
-    /// <see cref="ConnectionMode.Real"/>.
+    /// each), value is a hex byte payload.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The DATA is used only when <see cref="Mode"/> is
+    /// <see cref="ConnectionMode.Simulated"/>; a real channel never reads it. The
+    /// KEYS and payloads are nonetheless validated at startup in BOTH modes, so a
+    /// malformed entry left behind after switching to
+    /// <see cref="ConnectionMode.Real"/> still fails the host rather than sitting
+    /// silently broken until someone switches back.
+    /// </para>
+    /// <para>
+    /// An AMS Net ID here must be six octets each in 0-255. Note this is STRICTER
+    /// than <see cref="IAdsRawChannelFactory.Get"/>, which accepts an out-of-range
+    /// octet and resolves it the way the ADS stack does: a seed key is a
+    /// declaration whose typo has no correct reading, whereas a lookup's only
+    /// correct answer is what the wire will do.
+    /// </para>
+    /// </remarks>
     public Dictionary<string, Dictionary<string, string>> Seed { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 }

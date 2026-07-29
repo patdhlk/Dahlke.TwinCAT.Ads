@@ -8,9 +8,11 @@ namespace Dahlke.TwinCAT.Ads;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One channel exists per <c>(amsNetId, port)</c> pair, created on demand and
-/// cached for the factory's lifetime. Callers never dispose a channel; the
-/// factory owns every underlying transport and releases them at host shutdown.
+/// One channel exists per <c>(amsNetId, port)</c> pair — with the Net ID
+/// normalised as <see cref="Get"/> describes — created on demand and cached for
+/// the factory's lifetime. Callers never dispose a channel; the factory owns
+/// every underlying transport and releases them at host shutdown, after which
+/// operating on any channel fails fast rather than opening a new one.
 /// </para>
 /// <para>
 /// Unlike <see cref="IAdsConnectionPool"/>, targets are NOT declared in
@@ -60,8 +62,10 @@ public interface IAdsRawChannelFactory
     /// <para>
     /// <b>An octet outside 0-255 is zeroed, not rejected — and that changes which
     /// device you address.</b> <c>Get("999.1.1.1.1.1", 851)</c> returns the channel
-    /// for <c>0.1.1.1.1.1</c> and a warning is logged the first time such a channel
-    /// is created. This is not a quirk of this method: the ADS stack resolves the
+    /// for <c>0.1.1.1.1.1</c>, and a warning is logged once for each distinct
+    /// spelling the caller writes — on whichever lookup first uses that spelling,
+    /// whether or not the channel already existed. This is not a quirk of this
+    /// method: the ADS stack resolves the
     /// address the same way when the transport connects, so the channel really does
     /// reach the device the key names. Note the deliberate asymmetry with
     /// configuration — the identical Net ID in a

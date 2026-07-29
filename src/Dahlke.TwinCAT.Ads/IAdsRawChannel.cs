@@ -18,6 +18,14 @@ namespace Dahlke.TwinCAT.Ads;
 /// likewise never disposed by consumers.
 /// </para>
 /// <para>
+/// <b>Host shutdown is the one point where that invisibility stops.</b> Once the
+/// factory has been stopped or disposed the channel object remains perfectly
+/// usable, but the transport is NOT re-created: every operation throws
+/// <see cref="AdsConnectionUnavailableException"/> immediately rather than
+/// opening a connection nothing would ever release. This matters for a consumer
+/// hosted service that stops after the factory does.
+/// </para>
+/// <para>
 /// <b>Thread safety.</b> All members are safe for concurrent use from any thread.
 /// </para>
 /// <para>
