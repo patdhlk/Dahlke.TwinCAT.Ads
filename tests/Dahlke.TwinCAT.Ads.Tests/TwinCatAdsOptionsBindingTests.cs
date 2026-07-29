@@ -230,7 +230,7 @@ public class TwinCatAdsOptionsBindingTests
     }
 
     // ------------------------------------------------------------------
-    // InitialValues — config-binding caveat (values come back as strings)
+    // InitialValues — config-binding caveat (bare scalars come back as strings)
     // ------------------------------------------------------------------
 
     [Fact]
@@ -240,6 +240,9 @@ public class TwinCatAdsOptionsBindingTests
         // Microsoft.Extensions.Configuration binder stores every scalar as a
         // string, regardless of the original JSON type.  This test documents that
         // caveat so a future refactor does not silently change the contract.
+        // The declared-type form — { "value": 1500, "type": "DINT" } — is the way
+        // to seed a config value with a PLC-faithful CLR type; see
+        // InitialValueTypeSeedingTests.
         var opts = Resolve(
             new()
             {

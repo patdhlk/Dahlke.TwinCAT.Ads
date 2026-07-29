@@ -220,7 +220,14 @@ public static class ServiceCollectionExtensions
             .Configure(o =>
             {
                 // Targets ← PlcTargets section (existing layout, unchanged).
-                configuration.GetSection("PlcTargets").Bind(o.Targets);
+                var plcTargets = configuration.GetSection("PlcTargets");
+                plcTargets.Bind(o.Targets);
+
+                // InitialValues ← re-read from the section so declared-type seed entries
+                // ({ "value": 1500, "type": "DINT" }) keep a PLC-faithful CLR type. The stock
+                // binder cannot: configuration is string-typed and a nested entry has no target
+                // type to bind onto. See InitialValueBinder.
+                InitialValueBinder.Bind(plcTargets, o.Targets);
 
                 // Router.NetId ← AmsRouter:NetId (existing layout).
                 o.Router.NetId = configuration.GetSection("AmsRouter").GetValue<string>("NetId");

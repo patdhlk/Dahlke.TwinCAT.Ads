@@ -309,7 +309,33 @@ builder.Services.AddTwinCatAds(o =>
 
 ### Seeding initial values
 
-`InitialValues` are applied at connection creation. In code-first configuration values keep their CLR types; values from JSON configuration arrive as strings (plan reads to handle `Convert.ChangeType` conversion). Writes fire subscriptions on changed values; `SetInitialValues` seeds the store silently without triggering callbacks.
+`InitialValues` are applied at connection creation. Writes fire subscriptions on changed values; `SetInitialValues` seeds the store silently without triggering callbacks.
+
+In code-first configuration values keep their CLR types and are seeded verbatim. JSON configuration is string-typed, so a bare scalar entry is seeded as a `string` — a metadata read reports it as `STRING` where a real PLC would report `DINT`. Declare the PLC type to get a faithful stand-in:
+
+```jsonc
+"PlcTargets": {
+  "sim-plc": {
+    "Mode": "Simulated",
+    "InitialValues": {
+      "MAIN.Speed":    { "value": 1500, "type": "DINT"  },
+      "MAIN.Setpoint": { "value": 21.5, "type": "LREAL" },
+      "MAIN.Running":  { "value": true, "type": "BOOL"  },
+      "MAIN.Cycle":    { "type": "TIME" },        // no value → the type's default
+      "MAIN.Station":  "Demo Station"             // bare scalar → seeded as STRING
+    }
+  }
+}
+```
+
+| Symbol | `ReadValueWithMetadataAsync` |
+|---|---|
+| `MAIN.Speed` | `1500` / `DINT` |
+| `MAIN.Setpoint` | `21.5` / `LREAL` |
+| `MAIN.Running` | `true` / `BOOL` |
+| `MAIN.Station` | `"Demo Station"` / `STRING` |
+
+`type` is any IEC 61131-3 elementary type name (`BOOL`, `BYTE`, `WORD`, `DWORD`, `LWORD`, `SINT`, `INT`, `DINT`, `LINT`, `USINT`, `UINT`, `UDINT`, `ULINT`, `REAL`, `LREAL`, `TIME`, `DT`, `STRING`, `WSTRING`), matched case-insensitively with Beckhoff aliases resolved. The type is never inferred from the value's content, so a `STRING` symbol holding `"1500"` stays a string. An unknown type, an unconvertible value, or a `value` with no `type` fails options validation at startup with every bad entry listed at once.
 
 ### Test-code direct access to `SimulatedAdsConnection`
 
@@ -352,7 +378,7 @@ Each key is a PLC identifier used with `GetConnection(plcId)`.
 | `DisplayName` | `string` | `""` | Human-readable name for logging |
 | `TimeoutMs` | `int` | `5000` | Per-operation timeout in milliseconds |
 | `Mode` | `ConnectionMode` | `Real` | `Real` or `Simulated` |
-| `InitialValues` | `Dictionary<string, object?>` | `{}` | Symbol seed values for simulated targets |
+| `InitialValues` | `Dictionary<string, object?>` | `{}` | Symbol seed values for simulated targets. A bare scalar seeds a `string`; `{ "value": …, "type": "DINT" }` seeds the declared PLC type — see [Seeding initial values](#seeding-initial-values) |
 
 ### `AdsSymbolDump` section (optional diagnostics)
 
