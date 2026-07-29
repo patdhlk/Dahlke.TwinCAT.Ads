@@ -240,6 +240,14 @@ public static class ServiceCollectionExtensions
                 InitialValueBinder.Bind(plcTargets, o.Targets);
 
                 // Router.NetId ← AmsRouter:NetId (existing layout).
+                //
+                // ONE PROPERTY, not the section. A second property added to
+                // AmsRouterOptions is NOT picked up here and would stay at its default
+                // however a host spells it in configuration — the same way RawChannels
+                // shipped dead. OptionsSectionsAreBoundTests does not cover this: it
+                // guards new sections on TwinCatAdsOptions, not new members of a section
+                // bound property-by-property. Extend this line, or switch to a
+                // whole-section Bind as RawChannels below does.
                 o.Router.NetId = configuration.GetSection("AmsRouter").GetValue<string>("NetId");
 
                 // SymbolDump: bind legacy key first (lower precedence), then
@@ -278,16 +286,38 @@ public static class ServiceCollectionExtensions
     /// </para>
     /// <para>
     /// <b>A count comparison rather than a re-validation of each value</b>, so it
-    /// cannot go stale: it fires for ANY member whose conversion fails, including one
-    /// added later. Only <see cref="AdsRawChannelSeed.Port"/> is convertible-typed
-    /// today — every other member is a <see cref="string"/>, which never fails to
-    /// convert — which is why the message names it as the likely cause.
+    /// cannot drift from the binder's own conversion rules: it fires for any member of
+    /// a SEED ENTRY whose conversion fails, whichever member that is.
+    /// <see cref="AdsRawChannelSeed.Port"/> is the only convertible-typed one today,
+    /// which is why the message names it as the likely cause.
+    /// </para>
+    /// <para>
+    /// <b>It compares the OUTER list only, and slot-level discards are therefore NOT
+    /// covered.</b> A slot is itself a collection element, so the binder drops an
+    /// unconvertible slot exactly the same way — leaving the entry silently one slot
+    /// short while the outer counts still agree (verified: outer 1/1, slots 2/1).
+    /// That is unreachable today because every member of
+    /// <see cref="AdsRawChannelSeedSlot"/> is a <see cref="string"/>, which never
+    /// fails to convert, and <c>SeedTypesStayStringOnly…</c> in
+    /// <c>RawChannelConfigurationBindingTests</c> fails the moment that stops being
+    /// true, pointing here. Extending this to slots without such a member to test
+    /// against would have meant shipping a check nothing could exercise.
     /// </para>
     /// <para>
     /// Deliberately <c>bound &lt; configured</c> rather than <c>!=</c>. A host that
     /// calls <c>AddTwinCatAds(configuration)</c> twice registers this delegate twice,
     /// and <c>Bind</c> APPENDS to a list, so the bound count legitimately exceeds the
     /// configured one. Only a SHORTFALL means something was thrown away.
+    /// </para>
+    /// <para>
+    /// <b>Deliberately does NOT clear <see cref="AdsRawChannelOptions.SeedBindingErrors"/>
+    /// first</b>, unlike <c>InitialValueBinder.Bind</c>, which recomputes its errors
+    /// from scratch on every pass. This check cannot: on a second registration pass the
+    /// bound count is already doubled, so the comparison is no longer meaningful and
+    /// the pass stays silent. Clearing would then ERASE a shortfall the first pass
+    /// correctly found — turning a cosmetic duplicate line into a silent miss. The
+    /// duplicate is the lesser fault, and it only occurs for a double-registering host
+    /// whose every entry is bad.
     /// </para>
     /// </remarks>
     private static void RecordDiscardedSeedEntries(

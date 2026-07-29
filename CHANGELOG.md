@@ -101,7 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolves an out-of-range octet the way the ADS stack does, whereas a seed entry with the same
   typo fails the host at startup, because a declaration's typo has no correct reading. A seed
   `Port` takes decimal or `0x`-prefixed hex, so the conventional `0xFFFF` for an EtherCAT master
-  works in configuration as well as at a call site.
+  works in configuration as well as at a call site. Note the corollary: `"0x851"` is **2129**, not
+  851 — the canonical TC3 runtime port is decimal `851` and must be written that way.
 
   **A seed entry the configuration binder cannot convert now fails the host instead of
   disappearing.** `ConfigurationBinder` reports a bad *scalar* by throwing with the offending

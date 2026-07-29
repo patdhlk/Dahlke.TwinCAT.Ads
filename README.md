@@ -510,7 +510,7 @@ Each `Seed` entry:
 | Property | Type | Default | Description |
 |-----|------|---------|-------------|
 | `AmsNetId` | `string` | `""` | Six dot-separated octets each in 0–255. Matched against a channel after normalisation, so `01.2.3.4.5.6` seeds `1.2.3.4.5.6` |
-| `Port` | `int` | `0` | ADS port, 0–65535. Decimal or `0x`-prefixed hex — `65535` and `"0xFFFF"` both bind |
+| `Port` | `int` | `0` | ADS port, 0–65535. Decimal or `0x`-prefixed hex — `65535` and `"0xFFFF"` both bind. **`"0x851"` is 2129, not 851** — the canonical TC3 runtime port is decimal `851` |
 | `Slots` | `List<AdsRawChannelSeedSlot>` | `[]` | The slots to pre-load. An entry with none declares a reachable but empty target |
 
 Each `Slots` entry:

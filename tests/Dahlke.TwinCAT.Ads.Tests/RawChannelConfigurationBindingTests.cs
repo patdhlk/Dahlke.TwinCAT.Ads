@@ -475,6 +475,55 @@ public class RawChannelConfigurationBindingTests
     }
 
     /// <summary>
+    /// The same protection through the JSON provider, for the two forms a host is
+    /// most likely to produce by accident: a <c>null</c> and an empty string.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Written against JSON specifically, because the providers do NOT agree and only
+    /// this one matters to a host with an <c>appsettings.json</c>. The JSON provider
+    /// represents a JSON <c>null</c> as an EMPTY STRING, which fails to convert to
+    /// <see cref="int"/> and so drops the element — caught here. An in-memory
+    /// collection holding a CLR <see langword="null"/> for the same key behaves
+    /// differently: the binder skips the property and <c>Port</c> keeps its default of
+    /// <c>0</c>, with no drop and no failure. Probed, because an in-memory test would
+    /// have quietly proved the wrong thing.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"\"")]
+    [InlineData("\"typo\"")]
+    public void SeedEntryWithAnUnconvertiblePortInJson_FailsAtStartup(string portLiteral)
+    {
+        var json = $$"""
+            {
+              "PlcTargets": { "plc1": { "AmsNetId": "1.2.3.4.5.6" } },
+              "RawChannels": {
+                "Mode": "Simulated",
+                "Seed": [ { "AmsNetId": "1.2.3.4.5.6", "Port": {{portLiteral}} } ]
+              }
+            }
+            """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var configuration = new ConfigurationBuilder().AddJsonStream(stream).Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAds(configuration);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<TwinCatAdsOptions>>();
+
+        var ex = Assert.Throws<OptionsValidationException>(() => _ = options.Value);
+
+        Assert.Contains(
+            ex.Failures,
+            f => f.Contains("RawChannels:Seed") && f.Contains("DISCARDED"));
+    }
+
+    /// <summary>
     /// The shortfall check must not fire when nothing was discarded — including for
     /// the one case that legitimately produces MORE bound entries than configured
     /// ones.
@@ -510,5 +559,69 @@ public class RawChannelConfigurationBindingTests
 
         Assert.NotEmpty(options.RawChannels.Seed);
         Assert.All(options.RawChannels.Seed, s => Assert.Equal("1.2.3.4.5.6", s.AmsNetId));
+    }
+
+    /// <summary>
+    /// Fails when a convertible-typed member is added to a seed type, because the
+    /// discard check covers the OUTER seed list only.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A slot is itself a collection element, so the binder drops an unconvertible slot
+    /// exactly as it drops an unconvertible entry — leaving the entry one slot short
+    /// while the outer counts still agree. Verified by temporarily adding an
+    /// <see cref="int"/> slot member: outer configured 1 / bound 1, slots configured 2 /
+    /// bound 1, and <c>RecordDiscardedSeedEntries</c> silent.
+    /// </para>
+    /// <para>
+    /// <b>It is unreachable today, which is why this guard exists instead of a slot-level
+    /// check.</b> Every <see cref="AdsRawChannelSeedSlot"/> member is a
+    /// <see cref="string"/>, and a string never fails to convert, so no configuration
+    /// can trigger a slot discard — a slot-level check would have been code no test
+    /// could exercise. This test is the alternative: it converts a latent trap into a
+    /// loud one at the moment the assumption stops holding.
+    /// </para>
+    /// <para>
+    /// <see cref="AdsRawChannelSeed.Port"/> is the one permitted exception; it is
+    /// covered, being a member of an OUTER entry.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void SeedTypesStayStringOnly_SoTheDiscardCheckRemainsComplete()
+    {
+        var offenders = new List<string>();
+
+        foreach (var type in new[] { typeof(AdsRawChannelSeed), typeof(AdsRawChannelSeedSlot) })
+        {
+            foreach (var property in type.GetProperties(
+                         System.Reflection.BindingFlags.Public |
+                         System.Reflection.BindingFlags.Instance))
+            {
+                if (property.SetMethod is not { IsPublic: true })
+                    continue;
+
+                // Strings never fail to convert; a List<T> of them is walked as its own
+                // collection. Anything else is convertible-typed and needs thought.
+                if (property.PropertyType == typeof(string) ||
+                    property.PropertyType.IsGenericType)
+                    continue;
+
+                // The known, covered exception.
+                if (type == typeof(AdsRawChannelSeed) && property.Name == nameof(AdsRawChannelSeed.Port))
+                    continue;
+
+                offenders.Add($"{type.Name}.{property.Name} ({property.PropertyType.Name})");
+            }
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            $"A convertible-typed member was added to a seed type: {string.Join(", ", offenders)}. " +
+            "ConfigurationBinder DISCARDS a collection element whose value will not convert, " +
+            "silently. RecordDiscardedSeedEntries in ServiceCollectionExtensions compares the " +
+            "OUTER seed list only, so a bad value on a SLOT member is not caught — the entry " +
+            "binds one slot short with no error. Extend that check to slot counts, add a test " +
+            "for it (now possible, since a convertible-typed member exists to break), and add " +
+            "the member here if it is on an outer entry and therefore already covered.");
     }
 }
