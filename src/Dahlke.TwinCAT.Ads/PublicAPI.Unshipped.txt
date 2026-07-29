@@ -13,3 +13,5 @@ Dahlke.TwinCAT.Ads.AdsRawChannelOptions.TimeoutMs.get -> int
 Dahlke.TwinCAT.Ads.AdsRawChannelOptions.TimeoutMs.set -> void
 Dahlke.TwinCAT.Ads.TwinCatAdsOptions.RawChannels.get -> Dahlke.TwinCAT.Ads.AdsRawChannelOptions!
 Dahlke.TwinCAT.Ads.TwinCatAdsOptions.RawChannels.set -> void
+Dahlke.TwinCAT.Ads.ISimulatedRawChannel
+Dahlke.TwinCAT.Ads.ISimulatedRawChannel.Seed(uint indexGroup, uint indexOffset, System.ReadOnlySpan<byte> data) -> void
