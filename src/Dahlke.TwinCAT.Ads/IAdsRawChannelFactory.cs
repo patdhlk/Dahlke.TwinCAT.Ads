@@ -24,17 +24,39 @@ public interface IAdsRawChannelFactory
     /// Returns the channel for <paramref name="amsNetId"/>/<paramref name="port"/>,
     /// creating it on first request.
     /// </summary>
-    /// <param name="amsNetId">The target AMS Net ID, e.g. <c>"1.2.3.4.5.6"</c>.</param>
+    /// <param name="amsNetId">
+    /// The target AMS Net ID, e.g. <c>"1.2.3.4.5.6"</c>. Normalised before lookup
+    /// — see the remarks.
+    /// </param>
     /// <param name="port">The target AMS port.</param>
     /// <returns>
     /// The channel. Never <see langword="null"/>. Its identity is stable for the
     /// factory's lifetime, so it is safe to hold indefinitely.
     /// </returns>
     /// <remarks>
-    /// <b>Total by design.</b> This never throws for a well-formed target and
-    /// never blocks: reachability is discovered by operating on the channel, not
-    /// by obtaining it. A channel for an unreachable target is returned happily
-    /// and reports <see cref="ConnectionState.Disconnected"/>.
+    /// <para>
+    /// <b>Total by design.</b> This never throws and never blocks: reachability is
+    /// discovered by operating on the channel, not by obtaining it. A channel for
+    /// an unreachable target — or for a malformed Net ID — is returned happily and
+    /// reports <see cref="ConnectionState.Disconnected"/> until an operation says
+    /// otherwise.
+    /// </para>
+    /// <para>
+    /// <b>The Net ID is normalised, so one device is one channel.</b> The value is
+    /// trimmed and canonicalised before it is used as a key, so
+    /// <c>"1.2.3.4.5.6"</c>, <c>"01.2.3.4.5.6"</c> and <c>" 1.2.3.4.5.6"</c> all
+    /// return the SAME channel — and, in simulation, share one seedable store, so
+    /// a seed applied through one spelling is visible through another. The port
+    /// is matched exactly; only the Net ID is normalised. A Net ID that cannot be
+    /// parsed at all is used as-is (trimmed) rather than rejected.
+    /// </para>
+    /// <para>
+    /// <b>After the host has shut down this still returns a channel, but operating
+    /// on it fails fast</b> with <see cref="AdsConnectionUnavailableException"/>
+    /// rather than opening a transport nothing would ever dispose. This mirrors
+    /// <see cref="IAdsConnection"/>'s rule for a stopped pool: a transport will
+    /// never be published again, so waiting would only delay shutdown.
+    /// </para>
     /// </remarks>
     IAdsRawChannel Get(string amsNetId, int port);
 

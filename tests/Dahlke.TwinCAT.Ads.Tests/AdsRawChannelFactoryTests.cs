@@ -46,6 +46,68 @@ public class AdsRawChannelFactoryTests
         Assert.Equal(2, factory.ChannelCount);
     }
 
+    /// <summary>
+    /// Every spelling of one physical device must land on ONE channel.
+    /// </summary>
+    /// <remarks>
+    /// Keying on the caller's raw string made <c>"1.2.3.4.5.6"</c>,
+    /// <c>"01.2.3.4.5.6"</c> and <c>" 1.2.3.4.5.6"</c> three channels addressing
+    /// one target. <c>AmsNetId.TryParse</c> canonicalises the leading zero but does
+    /// NOT trim, so the trim has to happen first — both halves are asserted here.
+    /// </remarks>
+    [Theory]
+    [InlineData("01.2.3.4.5.6")]        // canonicalised by AmsNetId
+    [InlineData(" 1.2.3.4.5.6")]        // leading whitespace: AmsNetId won't parse it
+    [InlineData("1.2.3.4.5.6 ")]
+    [InlineData("001.002.3.4.5.6")]
+    public void Get_NormalisesTheNetId_SoOneDeviceIsOneChannel(string spelling)
+    {
+        using var factory = Create(new FakeTimeProvider());
+
+        var canonical = factory.Get("1.2.3.4.5.6", 851);
+
+        Assert.Same(canonical, factory.Get(spelling, 851));
+        Assert.Equal(1, factory.ChannelCount);
+    }
+
+    /// <summary>
+    /// The consequence that actually bites: a seed applied through one spelling
+    /// must be readable through another, or seeding "silently doesn't work".
+    /// </summary>
+    [Fact]
+    public async Task SeedThroughOneSpelling_IsReadableThroughAnother()
+    {
+        using var factory = Create(new FakeTimeProvider());
+
+        Assert.True(factory.TryGetSimulated("01.2.3.4.5.6", 851, out var sim));
+        sim.Seed(0x11, 1, [99]);
+
+        var channel = factory.Get("1.2.3.4.5.6", 851);
+        var buffer = new byte[1];
+        await channel.ReadAsync(0x11, 1, buffer, CancellationToken.None);
+
+        Assert.Equal(99, buffer[0]);
+    }
+
+    /// <summary>
+    /// A configured seed key must reach the channel it names regardless of how
+    /// either side spells the Net ID — <c>Get</c> normalises, so the seed lookup
+    /// has to normalise too or the two never meet.
+    /// </summary>
+    [Fact]
+    public async Task ConfiguredSeed_MatchesAcrossSpellings()
+    {
+        using var factory = Create(new FakeTimeProvider(), o =>
+            o.Seed["01.2.3.4.5.6:851"] = new() { ["0x11:1001"] = "7B" });
+
+        var channel = factory.Get("1.2.3.4.5.6", 851);
+        var buffer = new byte[1];
+        var read = await channel.ReadAsync(0x11, 1001, buffer, CancellationToken.None);
+
+        Assert.Equal(1, read);
+        Assert.Equal(0x7B, buffer[0]);
+    }
+
     [Fact]
     public void Get_IsTotal_ForAnUnreachableTarget()
     {
@@ -177,6 +239,67 @@ public class AdsRawChannelFactoryTests
 
         Assert.Equal(ConnectionState.Disconnected, first.State);
         Assert.Equal(ConnectionState.Disconnected, second.State);
+    }
+
+    /// <summary>
+    /// After teardown, <c>Get</c> stays total but operating fails fast instead of
+    /// opening a transport nothing would ever dispose.
+    /// </summary>
+    /// <remarks>
+    /// The raw factory is registered last so it stops FIRST; a consumer hosted
+    /// service stopping afterwards can still reach <c>Get</c>. Without the guard
+    /// its next operation mints a live <c>AdsClient</c> after the shutdown sweep
+    /// has already passed — the same ownership family as #9/#13/#15. Failing fast
+    /// rather than waiting mirrors the pool's documented rule for a stopped pool.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]      // via StopAsync
+    [InlineData(false)]     // via Dispose
+    public async Task AfterTeardown_GetIsStillTotal_ButOperatingFailsFast(bool viaStopAsync)
+    {
+        var clock = new FakeTimeProvider();
+        using var factory = Create(clock);
+        await factory.StartAsync(CancellationToken.None);
+
+        if (viaStopAsync)
+            await factory.StopAsync(CancellationToken.None);
+        else
+            factory.Dispose();
+
+        var channel = factory.Get("1.2.3.4.5.6", 851);
+        Assert.NotNull(channel);                                    // Get never throws
+        Assert.Equal(ConnectionState.Disconnected, channel.State);
+
+        factory.TryGetSimulated("1.2.3.4.5.6", 851, out var sim);
+        sim!.Seed(0x11, 1, [1]);
+
+        await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
+            () => channel.ReadAsync(0x11, 1, new byte[1], CancellationToken.None));
+
+        // Still no transport: the delegate refused rather than constructing one.
+        Assert.Equal(ConnectionState.Disconnected, channel.State);
+    }
+
+    /// <summary>
+    /// A channel obtained and connected BEFORE teardown must also refuse to
+    /// re-open afterwards — its transport was released, and reconnecting would
+    /// leak exactly as a fresh one would.
+    /// </summary>
+    [Fact]
+    public async Task AfterTeardown_APreviouslyConnectedChannel_DoesNotReconnect()
+    {
+        var clock = new FakeTimeProvider();
+        using var factory = Create(clock);
+
+        var (first, _) = await ConnectTwoAsync(factory);
+
+        factory.Dispose();
+        Assert.Equal(ConnectionState.Disconnected, first.State);
+
+        await Assert.ThrowsAsync<AdsConnectionUnavailableException>(
+            () => first.ReadAsync(0x11, 1, new byte[1], CancellationToken.None));
+
+        Assert.Equal(ConnectionState.Disconnected, first.State);
     }
 
     /// <summary>

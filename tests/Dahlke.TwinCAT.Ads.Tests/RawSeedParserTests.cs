@@ -6,6 +6,8 @@ public class RawSeedParserTests
     [InlineData("192.168.1.10.3.1:65535", "192.168.1.10.3.1", 65535)]
     [InlineData("5.1.2.3.4.5:851", "5.1.2.3.4.5", 851)]
     [InlineData("5.1.2.3.4.5:0xFFFF", "5.1.2.3.4.5", 65535)]
+    [InlineData("0.0.0.0.0.0:851", "0.0.0.0.0.0", 851)]         // 0 and 255 are the
+    [InlineData("255.255.255.255.255.255:1", "255.255.255.255.255.255", 1)] // boundaries
     public void TryParseChannelKey_AcceptsNetIdAndPort(string key, string netId, int port)
     {
         Assert.True(RawSeedParser.TryParseChannelKey(key, out var n, out var p, out var err));
@@ -20,6 +22,16 @@ public class RawSeedParserTests
     [InlineData("1.2.3.4.5.6:70000")]       // port out of range
     [InlineData("1.2.3.4.5.6:-1")]
     [InlineData("1.2.3.4.5.6:")]
+    // Octets must be 0-255. AmsNetId.TryParse would LAUNDER both of these —
+    // "999.1.1.1.1.1" parses true and silently becomes "0.1.1.1.1.1" — so a seed
+    // key naming a device that does not exist would pass startup validation and
+    // then seed a channel the operator never named. Hence the parser validates
+    // octets itself rather than delegating.
+    [InlineData("999.1.1.1.1.1:851")]
+    [InlineData("1.2.3.4.5.256:851")]
+    [InlineData("1.2.3.4.5.-1:851")]
+    [InlineData("1.2.3.4.5.0x10:851")]      // hex is not an AMS octet
+    [InlineData("abc.d.e.f.g.h:851")]
     public void TryParseChannelKey_RejectsMalformed(string key)
     {
         Assert.False(RawSeedParser.TryParseChannelKey(key, out _, out _, out var err));

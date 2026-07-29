@@ -77,6 +77,25 @@ public class AdsRawChannelOptionsValidationTests
         Assert.Contains(result.Failures, f => f.Contains("ABC"));
     }
 
+    /// <summary>
+    /// An octet outside 0-255 must fail the host, not be laundered.
+    /// </summary>
+    /// <remarks>
+    /// <c>AmsNetId.TryParse("999.1.1.1.1.1")</c> returns <see langword="true"/> and
+    /// yields <c>0.1.1.1.1.1</c>, so a validator delegating to it would accept this
+    /// key and seed a channel the operator never named — silent corruption rather
+    /// than a startup failure.
+    /// </remarks>
+    [Theory]
+    [InlineData("999.1.1.1.1.1:851")]
+    [InlineData("1.2.3.4.5.256:851")]
+    public void SeedChannelKeyWithOutOfRangeOctet_FailsAtStartup(string key)
+    {
+        var result = Validate(o => o.Seed[key] = new() { ["0x11:1"] = "00" });
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, f => f.Contains(key));
+    }
+
     [Fact]
     public void WellFormedSeed_Passes()
     {

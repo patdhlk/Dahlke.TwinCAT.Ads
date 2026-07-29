@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TwinCAT.Ads;
 
 namespace Dahlke.TwinCAT.Ads;
 
@@ -41,6 +42,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
     private CancellationTokenSource? _sweeperCts;
     private Task? _sweeperTask;
+    private bool _stopped;
 
     public AdsRawChannelFactory(
         IOptions<TwinCatAdsOptions> options,
@@ -57,7 +59,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     internal int ChannelCount => _channels.Count;
 
     public IAdsRawChannel Get(string amsNetId, int port) =>
-        _channels.GetOrAdd((amsNetId, port), key => new AdsRawChannel(
+        _channels.GetOrAdd((NormaliseNetId(amsNetId), port), key => new AdsRawChannel(
             key.NetId, key.Port, CreateTransport, _options,
             _loggerFactory.CreateLogger<AdsRawChannel>(), _timeProvider));
 
@@ -72,8 +74,43 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
         // The store exists independently of any transport, so seeding before the
         // first operation works and survives every later eviction.
-        simulated = GetOrCreateStore(amsNetId, port);
+        simulated = GetOrCreateStore(NormaliseNetId(amsNetId), port);
         return true;
+    }
+
+    /// <summary>
+    /// Canonicalises a caller-supplied AMS Net ID so every spelling of one
+    /// physical device lands on ONE channel and ONE store.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Without this the dictionary key is whatever string the caller typed, so
+    /// <c>"1.2.3.4.5.6"</c>, <c>"01.2.3.4.5.6"</c> and <c>" 1.2.3.4.5.6"</c>
+    /// become three channels with three stores addressing one target — and in
+    /// simulation a seed applied under one spelling is invisible under another,
+    /// which reads as "seeding silently doesn't work".
+    /// </para>
+    /// <para>
+    /// Trim first: <c>AmsNetId.TryParse</c> canonicalises <c>"01.2.3.4.5.6"</c> to
+    /// <c>"1.2.3.4.5.6"</c> but does NOT tolerate leading whitespace. An
+    /// unparseable ID keys on the trimmed original rather than throwing, because
+    /// <see cref="IAdsRawChannelFactory.Get"/> is documented total — it validates
+    /// nothing and discovers reachability by operating.
+    /// </para>
+    /// <para>
+    /// Note this deliberately inherits <c>AmsNetId</c>'s out-of-range laundering
+    /// (<c>"999.1.1.1.1.1"</c> becomes <c>"0.1.1.1.1.1"</c>). That is the right
+    /// call HERE, and only here: the transport resolves the ID the same way at
+    /// <c>Connect()</c>, so the two spellings genuinely address one device and
+    /// collapsing them keeps the key agreeing with the wire. <c>RawSeedParser</c>
+    /// takes the opposite line and rejects such an ID outright, because a
+    /// configured seed key is an operator's stated intent, not a runtime lookup.
+    /// </para>
+    /// </remarks>
+    private static string NormaliseNetId(string amsNetId)
+    {
+        var trimmed = amsNetId.Trim();
+        return AmsNetId.TryParse(trimmed, out var parsed) ? parsed.ToString() : trimmed;
     }
 
     /// <summary>
@@ -91,10 +128,35 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     /// window in which a late drop disposes a transport another caller just
     /// installed.
     /// </remarks>
-    private IManagedRawConnection CreateTransport(string amsNetId, int port) =>
-        _options.Mode == ConnectionMode.Simulated
+    private IManagedRawConnection CreateTransport(string amsNetId, int port)
+    {
+        // Refuse to mint a transport nothing will ever dispose. The raw factory is
+        // registered last so it stops FIRST; a consumer hosted service stopping
+        // after us can still call Get and operate, and without this that operation
+        // would open a live AdsClient after the shutdown sweep had already passed.
+        //
+        // Fails fast rather than waiting, mirroring the pool's documented rule for
+        // the same situation: a transport will never be published again, so burning
+        // the timeout would only delay shutdown.
+        //
+        // The check is ordered by AdsRawChannel's transport gate, which both this
+        // (via GetOrCreateTransportAsync) and Shutdown hold: because _stopped is set
+        // BEFORE the shutdown loop, whichever side takes the gate first, the other
+        // sees a consistent answer — either we install and Shutdown disposes it, or
+        // Shutdown ran and we throw. Neither ordering leaks.
+        if (Volatile.Read(ref _stopped))
+        {
+            throw new AdsConnectionUnavailableException(
+                $"{amsNetId}:{port}",
+                $"Raw channel {amsNetId}:{port} cannot open a transport: " +
+                "the raw channel factory has shut down.",
+                null);
+        }
+
+        return _options.Mode == ConnectionMode.Simulated
             ? new SimulatedRawConnection(amsNetId, port, GetOrCreateStore(amsNetId, port))
             : new BeckhoffManagedRawConnection(amsNetId, port);
+    }
 
     /// <summary>
     /// Returns the durable simulated state for one target, creating it — pre-loaded
@@ -112,7 +174,11 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
             if (!RawSeedParser.TryParseChannelKey(channelKey, out var seedNetId, out var seedPort, out _))
                 continue;   // validated at startup; a survivor here is not fatal
 
-            if (!string.Equals(seedNetId, amsNetId, StringComparison.OrdinalIgnoreCase) || seedPort != port)
+            // Normalise the CONFIGURED id too: amsNetId arrives already normalised
+            // from Get/TryGetSimulated, so a seed key spelled "01.2.3.4.5.6:851"
+            // would otherwise never match the "1.2.3.4.5.6" channel it names.
+            if (!string.Equals(NormaliseNetId(seedNetId), amsNetId, StringComparison.OrdinalIgnoreCase) ||
+                seedPort != port)
                 continue;
 
             foreach (var (slotKey, payload) in slots)
@@ -217,6 +283,9 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
     public async Task StopAsync(CancellationToken ct)
     {
+        // Ordered BEFORE the shutdown loop, and load-bearing: see CreateTransport.
+        Volatile.Write(ref _stopped, true);
+
         RequestSweeperStop();   // cancel only — the sweeper disposes its own source
 
         if (_sweeperTask is { } task)
@@ -228,6 +297,8 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
     public void Dispose()
     {
+        Volatile.Write(ref _stopped, true);   // before the loop: see CreateTransport
+
         RequestSweeperStop();   // cancel only, never dispose: see RunSweeperAsync
 
         foreach (var (_, channel) in _channels)

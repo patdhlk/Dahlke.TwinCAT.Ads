@@ -29,9 +29,9 @@ internal static class RawSeedParser
         }
 
         var netIdPart = key[..split];
-        if (netIdPart.Split('.').Length != 6)
+        if (!IsWellFormedNetId(netIdPart))
         {
-            error = $"Raw channel seed key '{key}' has an AMS Net ID that is not six dot-separated octets.";
+            error = $"Raw channel seed key '{key}' has an AMS Net ID that is not six dot-separated octets in the range 0-255.";
             return false;
         }
 
@@ -104,6 +104,35 @@ internal static class RawSeedParser
 
         bytes = buffer;
         error = null;
+        return true;
+    }
+
+    /// <summary>
+    /// Six dot-separated decimal octets, each in 0-255.
+    /// </summary>
+    /// <remarks>
+    /// <b>Deliberately NOT delegated to <c>TwinCAT.Ads.AmsNetId.TryParse</c>.</b>
+    /// That method launders an out-of-range octet instead of rejecting it:
+    /// <c>AmsNetId.TryParse("999.1.1.1.1.1")</c> returns <see langword="true"/> and
+    /// yields <c>0.1.1.1.1.1</c>. Delegating would let a typo'd seed key pass
+    /// startup validation and then seed a channel the operator never named —
+    /// silent data corruption rather than a parse failure. Counting six segments,
+    /// as this did before, has the same hole.
+    /// </remarks>
+    private static bool IsWellFormedNetId(string text)
+    {
+        var octets = text.Split('.');
+        if (octets.Length != 6)
+            return false;
+
+        foreach (var octet in octets)
+        {
+            // NumberStyles.None: no sign, no whitespace, no hex — "+1", " 1" and
+            // "0x1" are all malformed in an AMS Net ID.
+            if (!byte.TryParse(octet, NumberStyles.None, CultureInfo.InvariantCulture, out _))
+                return false;
+        }
+
         return true;
     }
 
