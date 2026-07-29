@@ -503,15 +503,15 @@ Global policy for [raw ADS channels](#raw-ads-channels). There is nothing per-ta
 | `TimeoutMs` | `int` | `5000` | Timeout for each **attempt**, not for the retry sequence. Must be greater than zero |
 | `RetryCount` | `int` | `1` | Retries after a failed attempt, so `1` means up to two attempts. Must not be negative. Applies only to a timeout with no device answer |
 | `IdleEvictionMs` | `int` | `60000` | How long a channel may go unused before its transport is disposed. Must be greater than zero. A channel with a live subscription is never evicted |
-| `Seed` | `AdsRawChannelSeed[]` | `[]` | Simulation seed data — see below. Validated at startup in **both** modes |
+| `Seed` | `List<AdsRawChannelSeed>` | `[]` | Simulation seed data — see below. Validated at startup in **both** modes |
 
 Each `Seed` entry:
 
 | Property | Type | Default | Description |
 |-----|------|---------|-------------|
 | `AmsNetId` | `string` | `""` | Six dot-separated octets each in 0–255. Matched against a channel after normalisation, so `01.2.3.4.5.6` seeds `1.2.3.4.5.6` |
-| `Port` | `int` | `0` | ADS port, 0–65535 |
-| `Slots` | `AdsRawChannelSeedSlot[]` | `[]` | The slots to pre-load. An entry with none declares a reachable but empty target |
+| `Port` | `int` | `0` | ADS port, 0–65535. Decimal or `0x`-prefixed hex — `65535` and `"0xFFFF"` both bind |
+| `Slots` | `List<AdsRawChannelSeedSlot>` | `[]` | The slots to pre-load. An entry with none declares a reachable but empty target |
 
 Each `Slots` entry:
 
@@ -522,6 +522,8 @@ Each `Slots` entry:
 | `Bytes` | `string` | `""` | Hex payload, optional `0x` prefix, even number of digits |
 
 The Net ID here is validated **more strictly than `IAdsRawChannelFactory.Get`**, which accepts an out-of-range octet and resolves it the way the ADS stack does. A seed entry is a declaration whose typo has no correct reading, so `999.1.1.1.1.1` fails the host at startup rather than silently seeding `0.1.1.1.1.1`.
+
+A `Port` the configuration binder cannot convert to a number also fails the host at startup. It has to be caught deliberately: the binder reports a bad *scalar* by throwing, but silently **drops the whole entry** when the bad value is inside a collection element, so `"Port": "typo"` would otherwise leave that one target unseeded with no error anywhere.
 
 ### `AdsSymbolDump` section (optional diagnostics)
 

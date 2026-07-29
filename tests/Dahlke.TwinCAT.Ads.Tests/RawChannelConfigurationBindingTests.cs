@@ -398,4 +398,117 @@ public class RawChannelConfigurationBindingTests
         Assert.Contains(ex.Failures, f => f.Contains("RawChannels:Seed:0:AmsNetId"));
         Assert.Contains(ex.Failures, f => f.Contains("RawChannels:Seed:1:AmsNetId"));
     }
+
+    // ------------------------------------------------------------------
+    // Port: hex works, and a value the binder cannot convert is not silent
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// A configured <c>Port</c> accepts <c>0x</c>-prefixed hex as well as decimal.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Pinned because it is easy to assume otherwise — <c>Port</c> is an
+    /// <see cref="int"/>, and this task's own report initially claimed the hex form
+    /// had been lost in the move from the composite key. It has not:
+    /// <c>ConfigurationBinder</c> converts through
+    /// <see cref="System.ComponentModel.Int32Converter"/>, which honours a <c>0x</c>
+    /// prefix. That matters here specifically, because <c>0xFFFF</c> is how this
+    /// domain writes the EtherCAT master port and how the README writes it two
+    /// sections above the JSON example.
+    /// </para>
+    /// <para>
+    /// It is behaviour inherited from the binder rather than chosen here, which is
+    /// exactly why it needs a test: nothing in this repository would otherwise notice
+    /// it changing.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("65535", 65535)]
+    [InlineData("0xFFFF", 65535)]
+    [InlineData("0XFFFF", 65535)]
+    [InlineData("851", 851)]
+    public void SeedPort_AcceptsDecimalAndHex(string configured, int expected)
+    {
+        var options = Resolve(new()
+        {
+            ["RawChannels:Mode"]            = "Simulated",
+            ["RawChannels:Seed:0:AmsNetId"] = "1.2.3.4.5.6",
+            ["RawChannels:Seed:0:Port"]     = configured,
+        });
+
+        Assert.Equal(expected, Assert.Single(options.RawChannels.Seed).Port);
+    }
+
+    /// <summary>
+    /// A <c>Port</c> the binder cannot convert must fail the host by name, not vanish.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The binder discards it silently.</b> A failed conversion in a SCALAR throws
+    /// <see cref="InvalidOperationException"/> naming the path; the same failure
+    /// inside a COLLECTION ELEMENT is swallowed and the element is dropped, so this
+    /// configuration binds to an empty <c>Seed</c> with no error at all. That is the
+    /// silent-seed-loss this task exists to eliminate, arriving by a different route
+    /// than the one the brief described.
+    /// </para>
+    /// <para>
+    /// Note the good entry survives, which is what makes the bare version of this so
+    /// hard to notice: seeding appears to work, just not for one target.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void SeedEntryDiscardedByTheBinder_FailsAtStartup()
+    {
+        var ex = Assert.Throws<OptionsValidationException>(() => Resolve(new()
+        {
+            ["RawChannels:Mode"]            = "Simulated",
+            ["RawChannels:Seed:0:AmsNetId"] = "1.2.3.4.5.6",
+            ["RawChannels:Seed:0:Port"]     = "not-a-port",
+            ["RawChannels:Seed:1:AmsNetId"] = "9.9.9.9.9.9",
+            ["RawChannels:Seed:1:Port"]     = "852",
+        }));
+
+        Assert.Contains(
+            ex.Failures,
+            f => f.Contains("RawChannels:Seed") && f.Contains("DISCARDED"));
+    }
+
+    /// <summary>
+    /// The shortfall check must not fire when nothing was discarded — including for
+    /// the one case that legitimately produces MORE bound entries than configured
+    /// ones.
+    /// </summary>
+    /// <remarks>
+    /// Registering twice adds the binding delegate twice, and <c>Bind</c> APPENDS to a
+    /// list, so the bound count doubles. Hence the check is a shortfall
+    /// (<c>bound &lt; configured</c>) and not an inequality — an equality test here
+    /// would fail every host that calls <c>AddTwinCatAds</c> twice.
+    /// </remarks>
+    [Fact]
+    public void DoubleRegistration_DoesNotReportADiscardedEntry()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [TargetKey]                     = "1.2.3.4.5.6",
+                ["RawChannels:Mode"]            = "Simulated",
+                ["RawChannels:Seed:0:AmsNetId"] = "1.2.3.4.5.6",
+                ["RawChannels:Seed:0:Port"]     = "851",
+            })
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAds(configuration);
+        services.AddTwinCatAds(configuration);
+
+        using var provider = services.BuildServiceProvider();
+
+        // Resolving is the assertion: a false shortfall would throw here.
+        var options = provider.GetRequiredService<IOptions<TwinCatAdsOptions>>().Value;
+
+        Assert.NotEmpty(options.RawChannels.Seed);
+        Assert.All(options.RawChannels.Seed, s => Assert.Equal("1.2.3.4.5.6", s.AmsNetId));
+    }
 }

@@ -98,6 +98,30 @@ public sealed class AdsRawChannelOptions
     /// </para>
     /// </remarks>
     public List<AdsRawChannelSeed> Seed { get; set; } = [];
+
+    /// <summary>
+    /// Seed entries the configuration binder DISCARDED, surfaced as
+    /// options-validation failures by <see cref="TwinCatAdsOptionsValidator"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this is needed at all.</b> <c>ConfigurationBinder</c> reports a failed
+    /// conversion differently depending on where it happens. A bad SCALAR — say
+    /// <c>RawChannels:TimeoutMs = "typo"</c> — throws
+    /// <see cref="InvalidOperationException"/> naming the path. A bad value inside a
+    /// COLLECTION ELEMENT is swallowed and the whole element is dropped from the
+    /// list, silently: <c>"Seed": [{ "AmsNetId": "1.2.3.4.5.6", "Port": "typo" }]</c>
+    /// binds to an EMPTY <see cref="Seed"/> with no error of any kind. That is the
+    /// same silent-seed-loss failure the array shape was adopted to eliminate, so it
+    /// is detected rather than inherited.
+    /// </para>
+    /// <para>
+    /// Internal: a channel between the binding step and the validator, not part of
+    /// the configuration surface — the same arrangement
+    /// <c>PlcTargetOptions.InitialValueBindingErrors</c> uses.
+    /// </para>
+    /// </remarks>
+    internal List<string> SeedBindingErrors { get; } = [];
 }
 
 /// <summary>

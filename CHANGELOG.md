@@ -99,7 +99,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   A seed Net ID is validated more strictly than `IAdsRawChannelFactory.Get` accepts: `Get`
   resolves an out-of-range octet the way the ADS stack does, whereas a seed entry with the same
-  typo fails the host at startup, because a declaration's typo has no correct reading.
+  typo fails the host at startup, because a declaration's typo has no correct reading. A seed
+  `Port` takes decimal or `0x`-prefixed hex, so the conventional `0xFFFF` for an EtherCAT master
+  works in configuration as well as at a call site.
+
+  **A seed entry the configuration binder cannot convert now fails the host instead of
+  disappearing.** `ConfigurationBinder` reports a bad *scalar* by throwing with the offending
+  path, but swallows the same failure inside a *collection element* and drops the element, so
+  `"Port": "typo"` bound to a seed list silently missing that target — the identical failure mode
+  the array shape was adopted to eliminate, reached by a different route.
 
 ### Changed
 

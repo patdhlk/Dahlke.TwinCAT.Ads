@@ -257,9 +257,57 @@ public static class ServiceCollectionExtensions
                 // Seed is an ARRAY of objects precisely so this works: a dictionary
                 // keyed on "amsNetId:port" flattened into nested sections, because ':'
                 // is the hierarchy separator, and bound with no slots at all.
-                configuration.GetSection("RawChannels").Bind(o.RawChannels);
+                var rawChannels = configuration.GetSection("RawChannels");
+                rawChannels.Bind(o.RawChannels);
+                RecordDiscardedSeedEntries(rawChannels, o.RawChannels);
             })
             .ValidateOnStart();
+    }
+
+    /// <summary>
+    /// Detects seed entries the binder silently DISCARDED and records them for the
+    /// validator to report.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ConfigurationBinder</c> swallows a failed conversion inside a collection
+    /// element and drops the element, so
+    /// <c>"Seed": [{ "AmsNetId": "1.2.3.4.5.6", "Port": "typo" }]</c> binds to an
+    /// empty list with no error — a configured seed that simply is not there. A bad
+    /// SCALAR throws instead, so only the collection needs this.
+    /// </para>
+    /// <para>
+    /// <b>A count comparison rather than a re-validation of each value</b>, so it
+    /// cannot go stale: it fires for ANY member whose conversion fails, including one
+    /// added later. Only <see cref="AdsRawChannelSeed.Port"/> is convertible-typed
+    /// today — every other member is a <see cref="string"/>, which never fails to
+    /// convert — which is why the message names it as the likely cause.
+    /// </para>
+    /// <para>
+    /// Deliberately <c>bound &lt; configured</c> rather than <c>!=</c>. A host that
+    /// calls <c>AddTwinCatAds(configuration)</c> twice registers this delegate twice,
+    /// and <c>Bind</c> APPENDS to a list, so the bound count legitimately exceeds the
+    /// configured one. Only a SHORTFALL means something was thrown away.
+    /// </para>
+    /// </remarks>
+    private static void RecordDiscardedSeedEntries(
+        IConfiguration rawChannels,
+        AdsRawChannelOptions options)
+    {
+        var seedSection = rawChannels.GetSection("Seed");
+        if (!seedSection.Exists())
+            return;
+
+        var configured = seedSection.GetChildren().Count();
+
+        if (options.Seed.Count >= configured)
+            return;
+
+        options.SeedBindingErrors.Add(
+            $"RawChannels:Seed declares {configured} entr{(configured == 1 ? "y" : "ies")} but only " +
+            $"{options.Seed.Count} could be bound; the configuration binder DISCARDED the rest " +
+            $"instead of reporting them. Check that every entry's 'Port' is a number — a value " +
+            $"the binder cannot convert causes the whole entry to be dropped silently.");
     }
 
     /// <summary>

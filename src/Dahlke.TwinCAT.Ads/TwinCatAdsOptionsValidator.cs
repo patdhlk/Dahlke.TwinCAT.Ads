@@ -197,6 +197,10 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
         if (raw.IdleEvictionMs <= 0)
             failures.Add($"RawChannels:IdleEvictionMs must be greater than 0 (was {raw.IdleEvictionMs}).");
 
+        // Entries the binder threw away. Relayed verbatim: the message is already
+        // path-scoped and actionable, exactly like InitialValueBindingErrors.
+        failures.AddRange(raw.SeedBindingErrors);
+
         for (var i = 0; i < raw.Seed.Count; i++)
             ValidateRawSeed(raw.Seed[i], i, failures);
     }
