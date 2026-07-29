@@ -22,9 +22,9 @@ internal sealed class BeckhoffManagedRawConnection : IManagedRawConnection
     private readonly ConcurrentDictionary<uint, Action<ReadOnlyMemory<byte>>> _handlers = new();
 
     /// <summary>
-    /// The bound put on the underlying <see cref="AdsClient"/> — deliberately far
-    /// above any bound <see cref="AdsRawChannel"/> can construct, so that it never
-    /// fires first.
+    /// The bound put on the underlying <see cref="AdsClient"/> — far above any
+    /// realistic bound <see cref="AdsRawChannel"/> constructs, so that it never
+    /// fires first, but finite so that it still reaps.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -50,8 +50,28 @@ internal sealed class BeckhoffManagedRawConnection : IManagedRawConnection
     /// same failure — a bound the channel did not choose, arriving in the wrong
     /// shape. Raising it out of the way removes both.
     /// </para>
+    /// <para>
+    /// <b>Why one hour and not <see cref="int.MaxValue"/> — do not "simplify" this.</b>
+    /// It is not yet verified that cancelling the linked token ABORTS the underlying
+    /// ADS transaction rather than merely abandoning the await. If it only abandons,
+    /// this value is how long an abandoned request stays outstanding — where
+    /// Beckhoff's old default reaped it at 5 s. <see cref="int.MaxValue"/> ms is
+    /// ~24.8 days, which under concurrent load is a materially worse blast radius
+    /// for a leak; an hour bounds it and lets the process heal itself. It costs
+    /// nothing against the certain failure above, because a per-call timeout bounds
+    /// ONE synchronous ADS round trip and no realistic caller comes within orders of
+    /// magnitude of an hour. Settling the propagation question is a hardware-gate
+    /// task; until then, finite is strictly better.
+    /// </para>
+    /// <para>
+    /// "Realistic" is deliberate, not hedging: only <c>TimeoutMs &gt; 0</c> is
+    /// validated and a per-call <see cref="TimeSpan"/> is not validated at all, so a
+    /// degenerate configuration near this value could still be preempted by it. That
+    /// is not worth defending against in code, but it is worth not claiming
+    /// otherwise.
+    /// </para>
     /// </remarks>
-    private const int BackstopTimeoutMs = int.MaxValue;
+    private const int BackstopTimeoutMs = 60 * 60 * 1000;
 
     public BeckhoffManagedRawConnection(string amsNetId, int port)
     {
