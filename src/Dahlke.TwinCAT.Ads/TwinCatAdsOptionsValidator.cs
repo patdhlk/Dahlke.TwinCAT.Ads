@@ -52,6 +52,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
 
             ValidateTargetPort(targetId, target, failures);
             ValidateTargetTimeout(targetId, target, failures);
+            ValidateTargetSymbolBrowseTimeout(targetId, target, failures);
             ValidateTargetInitialValues(target, failures);
         }
     }
@@ -111,6 +112,29 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
             failures.Add(
                 $"Target '{targetId}': TimeoutMs '{target.TimeoutMs}' must be greater than zero. " +
                 $"Fix 'PlcTargets:{targetId}:TimeoutMs' (default: 5000 ms).");
+        }
+    }
+
+    /// <summary>
+    /// Was previously unvalidated because <see cref="AdsClient.Timeout"/> was
+    /// never wired to it — Beckhoff's invisible 5000 ms default made a bad value
+    /// inert. It now flows into <c>Task.Delay(SymbolBrowseTimeoutMs, ...)</c> on
+    /// the first symbol browse, and <see cref="Task.Delay(int,CancellationToken)"/>
+    /// throws <see cref="ArgumentOutOfRangeException"/> for any negative value
+    /// other than <c>-1</c>. Catching a bad value here, at startup, is the same
+    /// standard this validator already applies to raw-channel seed keys: a typo
+    /// fails the host instead of a poll hours later.
+    /// </summary>
+    private static void ValidateTargetSymbolBrowseTimeout(
+        string targetId,
+        PlcTargetOptions target,
+        List<string> failures)
+    {
+        if (target.SymbolBrowseTimeoutMs <= 0)
+        {
+            failures.Add(
+                $"Target '{targetId}': SymbolBrowseTimeoutMs '{target.SymbolBrowseTimeoutMs}' must be greater than zero. " +
+                $"Fix 'PlcTargets:{targetId}:SymbolBrowseTimeoutMs' (default: 30000 ms).");
         }
     }
 

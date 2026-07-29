@@ -23,8 +23,15 @@ public class TwinCatAdsOptionsValidatorTests
     private static PlcTargetOptions ValidTarget(
         string amsNetId = "1.2.3.4.5.6",
         int port = 851,
-        int timeoutMs = 5000) =>
-        new() { AmsNetId = amsNetId, Port = port, TimeoutMs = timeoutMs };
+        int timeoutMs = 5000,
+        int symbolBrowseTimeoutMs = 30000) =>
+        new()
+        {
+            AmsNetId = amsNetId,
+            Port = port,
+            TimeoutMs = timeoutMs,
+            SymbolBrowseTimeoutMs = symbolBrowseTimeoutMs,
+        };
 
     private static TwinCatAdsOptions ValidOptions(string? routerNetId = null) =>
         new()
@@ -250,6 +257,56 @@ public class TwinCatAdsOptionsValidatorTests
         var failures = result.Failures!.ToList();
         Assert.Single(failures);
         Assert.Contains("plc1", failures[0]);
+    }
+
+    // ------------------------------------------------------------------
+    // Per-target: SymbolBrowseTimeoutMs
+    // ------------------------------------------------------------------
+
+    // Was previously unvalidated AND unreachable: AdsClient.Timeout was never
+    // wired to it, so Beckhoff's invisible 5000 ms default made a bad value
+    // inert. Task 12 makes both true at once — reachable and now validated at
+    // startup, matching the standard this validator already applies elsewhere
+    // (e.g. raw-channel seed keys).
+
+    [Fact]
+    public void Target_SymbolBrowseTimeoutMs_Zero_Fails_Naming_TargetId_And_Value()
+    {
+        var options = ValidOptions();
+        options.Targets["plc1"] = ValidTarget(symbolBrowseTimeoutMs: 0);
+
+        var result = Validate(options);
+
+        Assert.False(result.Succeeded);
+        var failures = result.Failures!.ToList();
+        Assert.Single(failures);
+        Assert.Contains("plc1", failures[0]);
+        Assert.Contains("0", failures[0]);
+    }
+
+    [Fact]
+    public void Target_SymbolBrowseTimeoutMs_Negative_Fails()
+    {
+        var options = ValidOptions();
+        options.Targets["plc1"] = ValidTarget(symbolBrowseTimeoutMs: -5);
+
+        var result = Validate(options);
+
+        Assert.False(result.Succeeded);
+        var failures = result.Failures!.ToList();
+        Assert.Single(failures);
+        Assert.Contains("plc1", failures[0]);
+    }
+
+    [Fact]
+    public void Target_SymbolBrowseTimeoutMs_Positive_Passes()
+    {
+        var options = ValidOptions();
+        options.Targets["plc1"] = ValidTarget(symbolBrowseTimeoutMs: 30000);
+
+        var result = Validate(options);
+
+        Assert.True(result.Succeeded);
     }
 
     // ------------------------------------------------------------------
