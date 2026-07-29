@@ -19,6 +19,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
         ValidateTargets(options, failures);
         ValidateRouter(options, failures);
         ValidateDiagnostics(options, failures);
+        ValidateRawChannels(options, failures);
 
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
@@ -147,6 +148,44 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
             failures.Add(
                 $"Diagnostics.SymbolDump.MaxDepth '{maxDepth}' must be ≥ 0. " +
                 $"Fix 'AdsSymbolDump:MaxDepth' (default: 1; use 0 to traverse all levels).");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // RawChannels
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Validates <see cref="AdsRawChannelOptions"/>. Seed keys and payloads are
+    /// parsed HERE, at startup, so a malformed AMS Net ID or index group fails
+    /// the host rather than a poll hours later.
+    /// </summary>
+    private static void ValidateRawChannels(TwinCatAdsOptions options, List<string> failures)
+    {
+        var raw = options.RawChannels;
+
+        if (raw.TimeoutMs <= 0)
+            failures.Add($"RawChannels:TimeoutMs must be greater than 0 (was {raw.TimeoutMs}).");
+
+        if (raw.RetryCount < 0)
+            failures.Add($"RawChannels:RetryCount must not be negative (was {raw.RetryCount}).");
+
+        if (raw.IdleEvictionMs <= 0)
+            failures.Add($"RawChannels:IdleEvictionMs must be greater than 0 (was {raw.IdleEvictionMs}).");
+
+        foreach (var (channelKey, slots) in raw.Seed)
+        {
+            if (!RawSeedParser.TryParseChannelKey(channelKey, out _, out _, out var channelError))
+                failures.Add(channelError!);
+
+            foreach (var (slotKey, payload) in slots)
+            {
+                if (!RawSeedParser.TryParseSlotKey(slotKey, out _, out _, out var slotError))
+                    failures.Add(slotError!);
+
+                if (!RawSeedParser.TryParseHex(payload, out _, out var payloadError))
+                    failures.Add(payloadError!);
+            }
         }
     }
 }

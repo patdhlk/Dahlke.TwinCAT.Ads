@@ -1,1 +1,15 @@
 #nullable enable
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.AdsRawChannelOptions() -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.IdleEvictionMs.get -> int
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.IdleEvictionMs.set -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.Mode.get -> Dahlke.TwinCAT.Ads.ConnectionMode
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.Mode.set -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.RetryCount.get -> int
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.RetryCount.set -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.Seed.get -> System.Collections.Generic.Dictionary<string!, System.Collections.Generic.Dictionary<string!, string!>!>!
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.Seed.set -> void
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.TimeoutMs.get -> int
+Dahlke.TwinCAT.Ads.AdsRawChannelOptions.TimeoutMs.set -> void
+Dahlke.TwinCAT.Ads.TwinCatAdsOptions.RawChannels.get -> Dahlke.TwinCAT.Ads.AdsRawChannelOptions!
+Dahlke.TwinCAT.Ads.TwinCatAdsOptions.RawChannels.set -> void

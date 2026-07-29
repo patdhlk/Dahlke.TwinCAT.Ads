@@ -25,4 +25,10 @@ public sealed class TwinCatAdsOptions
     /// Diagnostics and observability settings.
     /// </summary>
     public AdsDiagnosticsOptions Diagnostics { get; set; } = new();
+
+    /// <summary>
+    /// Low-level raw ADS channel settings.
+    /// Populated from the <c>RawChannels</c> configuration section.
+    /// </summary>
+    public AdsRawChannelOptions RawChannels { get; set; } = new();
 }
