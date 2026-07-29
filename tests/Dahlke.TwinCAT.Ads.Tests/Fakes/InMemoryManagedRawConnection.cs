@@ -29,6 +29,29 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
     public bool StallNext { get; set; }
 
     /// <summary>
+    /// When true, EVERY operation stalls — a target that has simply stopped
+    /// answering, rather than one bad call.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="StallNext"/> is one-shot and cannot express this: a call that has
+    /// to burn a bound, be retried inline, and burn another needs the transport to
+    /// still be unresponsive the second time.
+    /// </remarks>
+    public bool StallAlways { get; set; }
+
+    /// <summary>
+    /// Runs inside <see cref="AddNotificationAsync"/>, after the gate and BEFORE
+    /// the handle is issued.
+    /// </summary>
+    /// <remarks>
+    /// The injection point for racing a registration: it puts the test's code
+    /// exactly where the device's answer is still outstanding, which is where
+    /// disposing a handle orphans a notification if the registration commits
+    /// blindly. Deterministic, where a real race would not be.
+    /// </remarks>
+    public Action? OnAddNotification { get; set; }
+
+    /// <summary>
     /// Completes the first time an operation actually parks in a stall.
     /// </summary>
     /// <remarks>
@@ -112,6 +135,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
         Action<ReadOnlyMemory<byte>> onData, CancellationToken ct)
     {
         await GateAsync(ct).ConfigureAwait(false);
+        OnAddNotification?.Invoke();
         var handle = Interlocked.Increment(ref _nextHandle) - 1;
         _subs[handle] = (ig, io, onData);
         return handle;
@@ -142,7 +166,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
             throw failure;
         }
 
-        if (StallNext)
+        if (StallNext || StallAlways)
         {
             StallNext = false;
             _stalled.TrySetResult();

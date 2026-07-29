@@ -127,19 +127,42 @@ internal sealed class AdsRawChannel : IAdsRawChannel
         // Publish to the registry BEFORE the first registration, exactly as
         // AdsConnectionFacade.SubscribeCoreAsync does for symbols: a transport
         // rebuild in the gap then SEES this subscription and restores it, where
-        // registering first and publishing second would lose it. The
-        // already-registered check below is what keeps that safe — it is the
-        // reservation that makes registration exactly-once per transport when the
-        // restore gets there first, which it always does when this very subscribe
-        // is what caused the transport to be built.
+        // registering first and publishing second would lose it. RegisterAsync's
+        // reservation is what keeps that safe: it makes registration exactly-once
+        // per transport when the restore gets there first, which it always does
+        // when this very subscribe is what caused the transport to be built.
         _subscriptions[id] = subscription;
 
         try
         {
-            var transport = await GetOrCreateTransportAsync(ct).ConfigureAwait(false);
+            // ONE bound over the whole registration, built the way RunAttemptsAsync
+            // builds its own. Without it the only thing standing between a caller
+            // and a dead target is AdsClient.Timeout — an invisible third-party
+            // default this library never sets, which neither tracks
+            // AdsRawChannelOptions.TimeoutMs nor surfaces as TimeoutException. It
+            // covers the transport build too, because a subscribe that is queued
+            // behind a slow rebuild is just as stuck as one waiting on the device.
+            using var timeoutCts = new CancellationTokenSource(DefaultTimeout, _timeProvider);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
-            if (!subscription.IsRegisteredOn(transport))
-                await RegisterAsync(id, subscription, transport, ct).ConfigureAwait(false);
+            try
+            {
+                var transport = await GetOrCreateTransportAsync(linkedCts.Token).ConfigureAwait(false);
+                await RegisterAsync(id, subscription, transport, linkedCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Caller cancellation, never dressed up as a timeout.
+                throw new OperationCanceledException(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // NOT retried, deliberately: a retry means dropping and rebuilding
+                // the transport, which recurses straight back into restoring every
+                // OTHER subscription on this channel.
+                throw CancellationDisambiguator.CreateRawException(
+                    ct, AmsNetId, Port, indexGroup, indexOffset, _options.TimeoutMs);
+            }
         }
         catch
         {
@@ -154,22 +177,62 @@ internal sealed class AdsRawChannel : IAdsRawChannel
         return new SubscriptionHandle(this, id);
     }
 
-    /// <summary>Registers one subscription against a transport and records its handle.</summary>
+    /// <summary>
+    /// Registers one subscription against a transport and records the resulting
+    /// registration — but only if that registration still belongs to anyone by the
+    /// time the device answers.
+    /// </summary>
     /// <remarks>
+    /// <para>
     /// The transport is recorded ALONGSIDE the handle because a handle is
     /// transport-scoped: number 5 on the transport that issued it is not number 5
     /// on its replacement. Removing by handle alone against whatever transport
     /// happens to be current would cancel a different subscriber's notification.
+    /// </para>
+    /// <para>
+    /// <b>Reserve, then commit-or-hand-back</b>, the shape
+    /// <see cref="AdsConnectionFacade"/>'s durable symbol subscriptions use. The
+    /// reservation taken before the await makes registration exactly-once per
+    /// transport — a subscribe whose own transport build restored it finds the
+    /// reservation and does not register a second time. The re-check after the
+    /// await is the other half: a device round trip is long enough for the
+    /// subscriber to dispose its handle, or for a newer rebuild to reserve a newer
+    /// transport, and a handle committed to a record nobody holds any more is one
+    /// nothing will ever remove. The device would keep pushing it for the
+    /// transport's whole life, and ADS notification handles are a limited
+    /// per-connection resource.
+    /// </para>
     /// </remarks>
     private async Task RegisterAsync(
         Guid id, RawSubscription subscription, IManagedRawConnection transport, CancellationToken ct)
     {
-        var handle = await transport.AddNotificationAsync(
-            subscription.IndexGroup, subscription.IndexOffset,
-            subscription.Length, subscription.CycleTimeMs,
-            data => Deliver(id, data), ct).ConfigureAwait(false);
+        if (!subscription.TryReserve(transport))
+            return;   // already registered against this very transport
 
-        subscription.MarkRegistered(transport, handle);
+        uint handle;
+        try
+        {
+            handle = await transport.AddNotificationAsync(
+                subscription.IndexGroup, subscription.IndexOffset,
+                subscription.Length, subscription.CycleTimeMs,
+                data => Deliver(id, data), ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Release the reservation so the next attempt — the next rebuild, or
+            // the subscribe still parked on this very call — tries again.
+            subscription.ReleaseReservation(transport);
+            throw;
+        }
+
+        if (_subscriptions.ContainsKey(id) && subscription.TryCommit(transport, handle))
+            return;
+
+        // Nobody owns this registration: the handle was disposed while the device
+        // was answering, or a newer transport took the reservation. Hand it back.
+        // Ordering makes this airtight — disposal always clears the reservation, so
+        // a dispose that lands after the ContainsKey check still fails the commit.
+        RemoveNotification(transport, handle);
     }
 
     /// <summary>
@@ -205,18 +268,33 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     /// Re-registers every live subscription against a freshly built transport.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Called from <see cref="GetOrCreateTransportAsync"/> while the transport gate
     /// is held, so a concurrent operation cannot observe a half-restored channel.
     /// A subscription disposed during the drop is already out of the dictionary and
     /// is therefore not restored — which is what makes "exactly once" hold.
+    /// </para>
+    /// <para>
+    /// <b>The token of the call that happened to trigger the rebuild must never
+    /// reach here.</b> Rebuilds are triggered by whichever operation next touches
+    /// the channel, carrying whatever token that caller passed — an ASP.NET
+    /// request's <c>RequestAborted</c>, say. Threading it in would mean one caller
+    /// walking away unregisters EVERY subscription on the channel: each
+    /// registration throws, each is swallowed here, and the transport is published
+    /// with none of them. That is permanent, not transient — the live subscriptions
+    /// pin the channel against idle eviction, so on a subscription-only channel
+    /// nothing ever rebuilds the transport again. Each restore is instead bounded
+    /// by the configured per-attempt timeout and nothing else.
+    /// </para>
     /// </remarks>
-    private async Task RestoreSubscriptionsAsync(IManagedRawConnection transport, CancellationToken ct)
+    private async Task RestoreSubscriptionsAsync(IManagedRawConnection transport)
     {
         foreach (var (id, subscription) in _subscriptions)
         {
+            using var timeoutCts = new CancellationTokenSource(DefaultTimeout, _timeProvider);
             try
             {
-                await RegisterAsync(id, subscription, transport, ct).ConfigureAwait(false);
+                await RegisterAsync(id, subscription, transport, timeoutCts.Token).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -230,25 +308,35 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     }
 
     /// <summary>Removes a subscription permanently. Idempotent and thread-safe.</summary>
-    /// <remarks>
-    /// Nothing here is allowed to throw. Disposal is documented idempotent and safe,
-    /// and the interesting case is precisely the one that fails: the transport this
-    /// subscription was registered on has already been dropped after a timeout or
-    /// released at shutdown. Both shapes of failure have to be absorbed — a
-    /// disposed <see cref="SimulatedRawConnection"/> throws SYNCHRONOUSLY, because
-    /// its removal is not an <c>async</c> method and the exception therefore escapes
-    /// the call instead of landing in the returned task.
-    /// </remarks>
     private void Unsubscribe(Guid id)
     {
         if (!_subscriptions.TryRemove(id, out var subscription))
             return;
 
-        if (!subscription.TryTakeRegistration(out var transport, out var handle))
-            return;
+        // Taking the registration also clears the reservation, which is what lets a
+        // restore still awaiting the device detect that its handle now belongs to
+        // nobody and hand it straight back.
+        if (subscription.TryTakeRegistration(out var transport, out var handle))
+            RemoveNotification(transport, handle);
+    }
 
-        // Fire-and-forget: the registry entry is already gone, so Deliver drops
-        // anything the transport sends from here on even if this call fails.
+    /// <summary>
+    /// Removes one device notification, fire-and-forget, absorbing every failure.
+    /// </summary>
+    /// <remarks>
+    /// Nothing here is allowed to throw: this runs from
+    /// <see cref="IDisposable.Dispose"/>, which is documented idempotent and safe,
+    /// and the interesting case is precisely the one that fails — the transport has
+    /// already been dropped after a timeout or released at shutdown. Both shapes of
+    /// failure have to be absorbed: a disposed
+    /// <see cref="SimulatedRawConnection"/> throws SYNCHRONOUSLY, because its
+    /// removal is not an <c>async</c> method and the exception therefore escapes
+    /// the call instead of landing in the returned task. Not awaiting is safe
+    /// because the registry entry is already gone, so <see cref="Deliver"/> drops
+    /// anything the transport sends from here on even if this never succeeds.
+    /// </remarks>
+    private void RemoveNotification(IManagedRawConnection transport, uint handle)
+    {
         try
         {
             _ = transport.RemoveNotificationAsync(handle, CancellationToken.None)
@@ -393,7 +481,7 @@ internal sealed class AdsRawChannel : IAdsRawChannel
             // half-restored channel. Subscriptions disposed during the drop are
             // already out of the dictionary and are correctly not restored.
             if (!_subscriptions.IsEmpty)
-                await RestoreSubscriptionsAsync(created, ct).ConfigureAwait(false);
+                await RestoreSubscriptionsAsync(created).ConfigureAwait(false);
 
             Volatile.Write(ref _transport, created);
             return created;
@@ -518,54 +606,108 @@ internal sealed class AdsRawChannel : IAdsRawChannel
         uint IndexGroup, uint IndexOffset, int Length, int CycleTimeMs, RawNotificationHandler Handler)
     {
         private readonly object _gate = new();
+
+        // The transport this subscription is reserved against, and — once the
+        // device has answered — the handle that transport issued. _hasHandle
+        // distinguishes "reserved, answer still pending" from "registered": only
+        // the latter has anything to remove.
         private IManagedRawConnection? _transport;
         private uint _handle;
+        private bool _hasHandle;
 
         /// <summary>
-        /// Whether this subscription is ALREADY registered against
-        /// <paramref name="transport"/>.
+        /// Claims <paramref name="transport"/> for this subscription, unless it is
+        /// already claimed for that very transport.
         /// </summary>
+        /// <returns>
+        /// <see langword="false"/> when this subscription is already reserved
+        /// against or registered on <paramref name="transport"/>, and the caller
+        /// must therefore NOT register it again.
+        /// </returns>
         /// <remarks>
         /// The exactly-once guard. A subscribe that causes its own transport to be
         /// built is restored by that build, under the gate, before
         /// <see cref="GetOrCreateTransportAsync"/> returns to it; without this check
         /// it would then register a second time and every notification would be
-        /// delivered twice.
+        /// delivered twice. Any previous registration reference is dropped rather
+        /// than removed: a new transport is only ever built after the previous one
+        /// was disposed, which takes its notifications with it.
         /// </remarks>
-        public bool IsRegisteredOn(IManagedRawConnection transport)
-        {
-            lock (_gate)
-                return ReferenceEquals(_transport, transport);
-        }
-
-        /// <summary>Records the registration a transport has just issued.</summary>
-        public void MarkRegistered(IManagedRawConnection transport, uint handle)
+        public bool TryReserve(IManagedRawConnection transport)
         {
             lock (_gate)
             {
+                if (ReferenceEquals(_transport, transport))
+                    return false;
+
                 _transport = transport;
-                _handle = handle;
+                _handle = 0;
+                _hasHandle = false;
+                return true;
             }
         }
 
         /// <summary>
-        /// Takes the current registration and clears it, so exactly one caller ever
-        /// removes it.
+        /// Records the handle <paramref name="transport"/> has just issued, if this
+        /// subscription still holds the reservation for it.
         /// </summary>
         /// <returns>
-        /// <see langword="false"/> when there is nothing to remove — the
-        /// subscription has never been registered, or its transport was dropped
-        /// before this ran.
+        /// <see langword="false"/> when the reservation is gone — disposed, or
+        /// superseded by a newer transport — and the caller must hand the handle
+        /// back to the transport instead.
+        /// </returns>
+        public bool TryCommit(IManagedRawConnection transport, uint handle)
+        {
+            lock (_gate)
+            {
+                if (!ReferenceEquals(_transport, transport))
+                    return false;
+
+                _handle = handle;
+                _hasHandle = true;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Gives up the reservation on <paramref name="transport"/> after a failed
+        /// registration, so the next attempt retries — but only if it is still ours.
+        /// </summary>
+        public void ReleaseReservation(IManagedRawConnection transport)
+        {
+            lock (_gate)
+            {
+                if (!ReferenceEquals(_transport, transport))
+                    return;
+
+                _transport = null;
+                _hasHandle = false;
+            }
+        }
+
+        /// <summary>
+        /// Takes the current registration and clears it — reservation included — so
+        /// exactly one caller ever removes it.
+        /// </summary>
+        /// <returns>
+        /// <see langword="false"/> when there is nothing to remove: never
+        /// registered, or reserved with the device's answer still outstanding. In
+        /// the second case clearing the reservation is what tells the pending
+        /// registration to hand its handle back.
         /// </returns>
         public bool TryTakeRegistration(
             [NotNullWhen(true)] out IManagedRawConnection? transport, out uint handle)
         {
             lock (_gate)
             {
-                transport = _transport;
+                var registered = _hasHandle;
+                transport = registered ? _transport : null;
                 handle = _handle;
+
                 _transport = null;
-                return transport is not null;
+                _handle = 0;
+                _hasHandle = false;
+                return registered && transport is not null;
             }
         }
     }

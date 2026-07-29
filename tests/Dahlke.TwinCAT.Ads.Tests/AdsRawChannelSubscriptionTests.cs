@@ -24,17 +24,31 @@ public class AdsRawChannelSubscriptionTests
 
         public List<InMemoryManagedRawConnection> Created { get; } = [];
 
+        /// <summary>When true, every transport handed out stalls every operation.</summary>
+        public bool StallEveryOperation { get; set; }
+
+        /// <summary>
+        /// Runs as each transport is handed out, INSIDE the transport gate and
+        /// before any subscription is restored onto it.
+        /// </summary>
+        /// <remarks>
+        /// The only deterministic way to act at that instant: a rebuild happens
+        /// inside <c>GetOrCreateTransportAsync</c>, where a test has no other seam.
+        /// </remarks>
+        public Action<InMemoryManagedRawConnection>? OnCreate { get; set; }
+
         /// <summary>Data every transport is born with.</summary>
         public void Seed(uint ig, uint io, byte[] data) => _seeds.Add((ig, io, data));
 
         public IManagedRawConnection Create(string netId, int port)
         {
-            var transport = new InMemoryManagedRawConnection();
+            var transport = new InMemoryManagedRawConnection { StallAlways = StallEveryOperation };
 
             foreach (var (ig, io, data) in _seeds)
                 transport.Seed(ig, io, data);
 
             Created.Add(transport);
+            OnCreate?.Invoke(transport);
             return transport;
         }
     }
@@ -153,6 +167,85 @@ public class AdsRawChannelSubscriptionTests
 
         // …and exactly once means the handler ran once for that write, too.
         Assert.Single(received);
+    }
+
+    [Fact]
+    public async Task Restore_SurvivesCancellationOfTheCallThatTriggeredTheRebuild()
+    {
+        var (channel, source, clock) = Create();
+        source.Seed(0x11, 1001, [1]);
+
+        await channel.SubscribeAsync(0x11, 1001, 1, 100, _ => { }, CancellationToken.None);
+        await ForceDropAsync(channel, source.Created[0], clock);
+
+        // A rebuild is triggered by whichever call next touches the channel, and it
+        // carries THAT caller's token — an aborted HTTP request, say. Cancel it at
+        // the instant the replacement is built, which is immediately before the
+        // restore runs.
+        using var cts = new CancellationTokenSource();
+        source.OnCreate = _ => cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => channel.ReadAsync(0x11, 1001, new byte[1], cts.Token));
+
+        // That caller is gone; the subscription is not. Threading their token into
+        // the restore would unregister every subscription on the channel — and
+        // permanently, since those same live subscriptions pin the channel against
+        // idle eviction, so nothing would ever rebuild the transport again.
+        Assert.Equal(2, source.Created.Count);
+        Assert.Single(source.Created[1].LiveHandles);
+        Assert.Equal(1, channel.LiveSubscriptionCount);
+    }
+
+    [Fact]
+    public async Task DisposingDuringARestore_OrphansNoNotification()
+    {
+        var (channel, source, clock) = Create();
+        source.Seed(0x11, 1001, [1]);
+
+        var handle = await channel.SubscribeAsync(
+            0x11, 1001, 1, 100, _ => { }, CancellationToken.None);
+
+        await ForceDropAsync(channel, source.Created[0], clock);
+
+        // Dispose from INSIDE the replacement's registration call — the window
+        // where a real ADS round trip is outstanding. The record leaves the
+        // registry before the handle it is about to be given even exists.
+        source.OnCreate = t => t.OnAddNotification = handle.Dispose;
+
+        await channel.ReadAsync(0x11, 1001, new byte[1], CancellationToken.None);
+
+        Assert.Equal(0, channel.LiveSubscriptionCount);
+
+        // The registration the restore created belongs to nobody: no handle holds
+        // it and no registry entry names it. Committing it blindly would leave the
+        // device pushing a notification for the whole life of this transport, which
+        // the remaining subscriptions can pin open indefinitely.
+        Assert.Empty(source.Created[1].LiveHandles);
+    }
+
+    [Fact]
+    public async Task Subscribe_AgainstAnUnresponsiveTarget_TimesOutOnTheConfiguredBound()
+    {
+        var (channel, source, clock) = Create();
+        source.StallEveryOperation = true;   // the target never answers
+
+        var pending = channel.SubscribeAsync(
+            0x11, 1001, 1, 100, _ => { }, CancellationToken.None);
+
+        // One bound covers the whole registration, so one advance ends it. Without
+        // it the only bound is AdsClient's own 5 s default, which is neither this
+        // value nor a TimeoutException.
+        await Task.WhenAny(source.Created[0].Stalled, pending);
+        clock.Advance(TimeSpan.FromMilliseconds(AttemptTimeoutMs + 1));
+
+        var ex = await Assert.ThrowsAsync<TimeoutException>(() => pending);
+        Assert.Contains($"{AttemptTimeoutMs} ms", ex.Message);
+
+        // Rolled back: a failed subscribe must not leave a phantom entry pinning
+        // the channel against eviction forever.
+        Assert.Equal(0, channel.LiveSubscriptionCount);
+        Assert.True(channel.TryEvictIfIdle(TimeSpan.Zero));
     }
 
     [Fact]

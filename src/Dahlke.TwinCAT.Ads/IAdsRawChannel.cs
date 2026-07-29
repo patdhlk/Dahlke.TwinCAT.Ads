@@ -67,9 +67,9 @@ public delegate void RawNotificationHandler(ReadOnlySpan<byte> data);
 /// 5000 ms bound can take up to 10 seconds before throwing
 /// <see cref="TimeoutException"/>. The worst case is
 /// <c>TimeoutMs × (RetryCount + 1)</c>. Caller cancellation is exempt: a cancelled
-/// token aborts immediately and no further attempt is made. This applies to the
-/// read, write, read-write and state operations; <see cref="SubscribeAsync"/> is
-/// bounded only by its cancellation token, as its remarks explain.
+/// token aborts immediately and no further attempt is made.
+/// <see cref="SubscribeAsync"/> takes the same per-attempt bound but is never
+/// retried, so its worst case is <c>TimeoutMs</c> flat.
 /// </para>
 /// <para>
 /// <b>Retry applies only to a timeout with no device answer</b>, and re-creates
@@ -196,6 +196,14 @@ public interface IAdsRawChannel
     /// <param name="ct">Cancels the initial registration, not the subscription itself.</param>
     /// <returns>A handle whose disposal removes the subscription permanently.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <see langword="null"/>.</exception>
+    /// <exception cref="TimeoutException">
+    /// Registration exceeded <see cref="AdsRawChannelOptions.TimeoutMs"/>.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="ct"/> was cancelled.</exception>
+    /// <exception cref="AdsErrorException">The device refused the registration.</exception>
+    /// <exception cref="AdsConnectionUnavailableException">
+    /// The transport could not be opened — including after the host has shut down.
+    /// </exception>
     /// <remarks>
     /// <para>
     /// <b>Durable across transport drops.</b> The subscription is owned by this
@@ -204,22 +212,28 @@ public interface IAdsRawChannel
     /// is re-registered against the new one — exactly once — and the returned
     /// handle stays valid throughout. This mirrors
     /// <see cref="IAdsConnection.SubscribeAsync(string, int, System.Action{string, object?}, CancellationToken)"/>,
-    /// whose subscriptions survive a pool reconnect the same way. A
-    /// re-registration that ITSELF fails is logged at Warning and the subscription
-    /// is retained for the next rebuild rather than discarded — but it delivers
-    /// nothing until one happens.
+    /// whose subscriptions survive a pool reconnect the same way. Each
+    /// re-registration is bounded by <see cref="AdsRawChannelOptions.TimeoutMs"/>
+    /// and is deliberately immune to the cancellation token of whichever call
+    /// happened to trigger the rebuild — one caller walking away must not
+    /// unregister another's subscription. One that ITSELF fails is logged at
+    /// Warning and the subscription is retained for the next rebuild rather than
+    /// discarded, but it delivers nothing until one happens; on a channel with no
+    /// other traffic, that may be a long time.
     /// </para>
     /// <para>
     /// <b>A live subscription pins the channel against idle eviction.</b> The
     /// sweeper will not release a transport that is serving notifications.
     /// </para>
     /// <para>
-    /// <b>Neither the timeout nor the retry policy applies here.</b> Unlike the
-    /// read and write operations, the initial registration — and every
-    /// re-registration after a drop — is bounded only by a cancellation token, not
-    /// by <see cref="AdsRawChannelOptions.TimeoutMs"/>, and a failed registration
-    /// is not retried on a fresh transport. Pass a <paramref name="ct"/> carrying a
-    /// deadline if you need one.
+    /// <b>Bounded by <see cref="AdsRawChannelOptions.TimeoutMs"/>, but never
+    /// retried.</b> Registration against an unresponsive target fails with
+    /// <see cref="TimeoutException"/> on that bound, the same exception every other
+    /// raw operation raises for the same physical situation. One bound covers the
+    /// whole call, transport build included. <see cref="AdsRawChannelOptions.RetryCount"/>
+    /// deliberately does NOT apply: retrying a registration means dropping and
+    /// rebuilding the transport, which would re-register every OTHER subscription
+    /// on this channel as a side effect of one subscriber's retry.
     /// </para>
     /// <para>
     /// <b>Threading.</b> <paramref name="handler"/> is invoked on the transport's
@@ -235,8 +249,9 @@ public interface IAdsRawChannel
     /// subscriptions, the promise is that a handler never fires after disposal
     /// COMPLETES — not that it never fires concurrently WITH disposal. A sink that
     /// cannot tolerate a concurrent late write must guard itself. Disposal does not
-    /// WAIT for the removal round trip to the device: the channel stops delivering
-    /// the moment the handle is disposed, whether or not that round trip succeeds.
+    /// WAIT for the removal round trip to the device: no further delivery is
+    /// dispatched once the handle is disposed, whether or not that round trip
+    /// succeeds.
     /// </para>
     /// <para>
     /// <b>Host shutdown ends delivery silently.</b> Once the factory has stopped,
