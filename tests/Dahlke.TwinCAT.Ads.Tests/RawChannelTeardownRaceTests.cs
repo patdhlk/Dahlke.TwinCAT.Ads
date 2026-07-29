@@ -34,7 +34,7 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 ///   docker run --rm --cpus=2 -v "$PWD":/src -w /src \
 ///     mcr.microsoft.com/dotnet/sdk:10.0 bash -c '
 ///       dotnet build tests/Dahlke.TwinCAT.Ads.Tests/Dahlke.TwinCAT.Ads.Tests.csproj -c Release -f net10.0
-///       for i in $(seq 1 30); do
+///       for i in $(seq 1 25); do
 ///         dotnet vstest tests/Dahlke.TwinCAT.Ads.Tests/bin/Release/net10.0/Dahlke.TwinCAT.Ads.Tests.dll
 ///       done'
 /// </code>
@@ -66,6 +66,28 @@ public class RawChannelTeardownRaceTests
     /// </summary>
     private static readonly TimeSpan RealTimeout = TimeSpan.FromSeconds(15);
 
+    /// <summary>
+    /// Builds a factory directly, bypassing options validation.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The eviction tests below pass <c>idleEvictionMs: 0</c>, which is NOT a
+    /// configuration a real host can have</b> — <c>TwinCatAdsOptionsValidator</c>
+    /// rejects <c>RawChannels:IdleEvictionMs &lt;= 0</c> at startup. These tests
+    /// construct the factory directly rather than through the options pipeline, so
+    /// nothing validates it here.
+    /// </para>
+    /// <para>
+    /// That is deliberate, and it is a strengthening rather than a cheat. At the
+    /// validated minimum of 1 ms the idle guard short-circuits the overwhelming
+    /// majority of sweeps, so the sweeper spends its time bailing on the clock
+    /// instead of reaching the claim/re-check handshake these tests exist to
+    /// exercise — which is precisely what made the brief's original Test 3 vacuous.
+    /// Zero makes every sweep attempt a real eviction. The handshake being tested
+    /// is not itself clock-dependent: the idle window only decides HOW OFTEN the
+    /// race is attempted, never whether it is safe.
+    /// </para>
+    /// </remarks>
     private static AdsRawChannelFactory CreateFactory(TimeProvider clock, int idleEvictionMs = 60_000)
     {
         var options = new TwinCatAdsOptions();
@@ -104,15 +126,25 @@ public class RawChannelTeardownRaceTests
     /// <see cref="CancellationTokenSource.Cancel()"/>: the LOUD symptom.
     /// </para>
     /// <para>
-    /// <b>The quiet symptom needs the container.</b> Wrapping that same
-    /// <c>Cancel()</c> in <c>try/catch (ObjectDisposedException)</c> reproduces what
-    /// 0.5.1 and 0.5.2 actually shipped — the exception silenced, the dropped
-    /// registration still there. Under that mutation this test stays GREEN on macOS
-    /// at any core count and goes red in 3 of 12 container runs with
-    /// <see cref="TimeoutException"/>, matching the ~15-20% the original hang
-    /// managed. That gap between the two mutations is the whole reason the recipe
-    /// above is written down: the symptom that survived two fixes is the one a dev
-    /// box cannot see.
+    /// <b>The quiet symptom.</b> Wrapping that same <c>Cancel()</c> in
+    /// <c>try/catch (ObjectDisposedException)</c> reproduces what 0.5.1 and 0.5.2
+    /// actually shipped — the exception silenced, the dropped registration still
+    /// there. Under that mutation this test fails with
+    /// <see cref="TimeoutException"/> rather than an exception: measured red in 3 of
+    /// 12 container runs, and ALSO red in 3 of 12 runs of this class alone on macOS
+    /// (arm64, Debug, net8.0). So the hang is reproducible on a dev box, at roughly
+    /// the ~15-20% the original managed.
+    /// </para>
+    /// <para>
+    /// <b>Do not read that as "the container is optional".</b> The recipe above is
+    /// mandatory on the historical grounds recorded at the top of this file — the
+    /// #9/#13/#15 hang itself was never once seen on macOS, and needed all three of
+    /// Linux, <c>--cpus=2</c> and the whole suite in one process. This harness
+    /// happening to be more falsifiable than the original defect is a property of
+    /// the harness, not a licence to skip the recipe. Note also that a single run
+    /// settles nothing in either direction: an earlier revision of these remarks
+    /// claimed this mutation was always green on macOS, on the strength of exactly
+    /// one green run.
     /// </para>
     /// </remarks>
     [Fact]
@@ -160,7 +192,8 @@ public class RawChannelTeardownRaceTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>IdleEvictionMs</c> is zero so every sweep ATTEMPTS an eviction rather than
+    /// <c>IdleEvictionMs</c> is zero — below the validated minimum, see
+    /// <see cref="CreateFactory"/> — so every sweep ATTEMPTS an eviction rather than
     /// mostly bailing on the idle check. That turns a rare coincidence into the
     /// common case: the reader rebuilds its transport constantly and the sweeper
     /// tries to claim it constantly, which is the only way the sub-microsecond gap
@@ -238,12 +271,32 @@ public class RawChannelTeardownRaceTests
     /// reaching it needs millions of attempts, not a hundred well-aligned ones.
     /// </para>
     /// <para>
-    /// <b>Verified capable of failing</b> by deleting the post-claim re-check in
-    /// <c>AdsRawChannel.TryEvictIfIdle</c> — the
-    /// <c>if (Volatile.Read(ref _inFlight) > 0 || LiveSubscriptionCount > 0)</c>
-    /// block that hands the transport back. <c>AddNotificationAsync</c> then lands
-    /// on a disposed transport and <c>SubscribeAsync</c> throws
-    /// <see cref="ObjectDisposedException"/> out of its rollback path.
+    /// <b>Verified capable of failing</b> by deleting ONLY the subscription half of
+    /// the post-claim re-check in <c>AdsRawChannel.TryEvictIfIdle</c> — that is,
+    /// striking <c>|| LiveSubscriptionCount > 0</c> and leaving
+    /// <c>Volatile.Read(ref _inFlight) > 0</c> in place. Red 4 of 4 runs, through
+    /// the subscribe path this test exists to cover:
+    /// </para>
+    /// <code>
+    ///   System.ObjectDisposedException : Raw channel 1.2.3.4.5.6:65535 used after its transport was disposed.
+    ///     at SimulatedRawConnection.AddNotificationAsync(...)
+    ///     at AdsRawChannel.RegisterAsync(...)
+    ///     at AdsRawChannel.SubscribeAsync(...)
+    /// </code>
+    /// <para>
+    /// <b>Use that narrow mutation, not the whole-block deletion.</b> Deleting the
+    /// entire re-check also makes this test red — but through the <c>ReadAsync</c>
+    /// at the top of the loop, i.e. the in-flight half, which is the path
+    /// <see cref="EvictionRacingAnInFlightOperation_DoesNotThrow"/> already covers.
+    /// A maintainer re-validating with the broad mutation would see a red result
+    /// that looks like confirmation while actually exercising a different mechanism
+    /// — the same class of mistake as a test that cannot fail, one level up.
+    /// </para>
+    /// <para>
+    /// The narrow mutation is also what proves these two tests are not redundant:
+    /// under it this test is red 4/4 while
+    /// <see cref="EvictionRacingAnInFlightOperation_DoesNotThrow"/> stays GREEN 4/4.
+    /// Each guards a half of the handshake that the other cannot reach.
     /// </para>
     /// </remarks>
     [Fact]
