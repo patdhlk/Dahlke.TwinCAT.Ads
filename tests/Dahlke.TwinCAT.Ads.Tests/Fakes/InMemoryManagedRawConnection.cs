@@ -45,7 +45,27 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
     public IReadOnlyCollection<uint> LiveHandles => _subs.Keys.ToArray();
 
     public bool IsConnected { get; private set; }
-    public bool Disposed { get; private set; }
+
+    /// <summary>Whether <see cref="Dispose"/> has run on this instance.</summary>
+    public bool Disposed => Volatile.Read(ref _disposed);
+
+    private bool _disposed;
+
+    /// <summary>
+    /// Refuses every operation once disposed, exactly as
+    /// <see cref="SimulatedRawConnection"/> and a real <c>AdsClient</c> do.
+    /// </summary>
+    /// <remarks>
+    /// This fake's whole purpose is to mirror the raw contract INDEPENDENTLY, so
+    /// it has to mirror the teeth too. Without them a test asserting "an in-flight
+    /// operation is not evicted out from under" would pass whether or not the
+    /// protection existed — the false-green harness this surface exists to avoid.
+    /// </remarks>
+    private void ThrowIfDisposed()
+    {
+        if (Volatile.Read(ref _disposed))
+            throw new ObjectDisposedException(nameof(InMemoryManagedRawConnection));
+    }
 
     public void Seed(uint ig, uint io, byte[] data) => _store[(ig, io)] = data;
 
@@ -113,6 +133,9 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
 
     private async Task GateAsync(CancellationToken ct)
     {
+        // Every operation funnels through here, so one check covers all six.
+        ThrowIfDisposed();
+
         if (FailNextWith is { } failure)
         {
             FailNextWith = null;
@@ -131,7 +154,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
 
     public void Dispose()
     {
-        Disposed = true;
+        Volatile.Write(ref _disposed, true);
         IsConnected = false;
         _subs.Clear();
     }

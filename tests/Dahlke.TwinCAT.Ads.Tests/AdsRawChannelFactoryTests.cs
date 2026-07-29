@@ -30,13 +30,19 @@ public class AdsRawChannelFactoryTests
         Assert.Equal(1, factory.ChannelCount);
     }
 
+    /// <summary>
+    /// Pins <c>ChannelKeyComparer</c> on both axes. The Net IDs differ only in
+    /// case: <see cref="IAdsRawChannelFactory.Get"/> is total and validates
+    /// nothing, so a caller really can hand it a Net ID in any case and must not
+    /// get back a second channel for the same target.
+    /// </summary>
     [Fact]
     public void Get_IsCaseInsensitiveOnNetId_ButNotAcrossPorts()
     {
         using var factory = Create(new FakeTimeProvider());
 
-        Assert.Same(factory.Get("1.2.3.4.5.6", 851), factory.Get("1.2.3.4.5.6", 851));
-        Assert.NotSame(factory.Get("1.2.3.4.5.6", 851), factory.Get("1.2.3.4.5.6", 852));
+        Assert.Same(factory.Get("aB.2.3.4.5.6", 851), factory.Get("Ab.2.3.4.5.6", 851));
+        Assert.NotSame(factory.Get("aB.2.3.4.5.6", 851), factory.Get("aB.2.3.4.5.6", 852));
         Assert.Equal(2, factory.ChannelCount);
     }
 
@@ -106,16 +112,103 @@ public class AdsRawChannelFactoryTests
         Assert.Equal(42, buffer[0]);   // the simulated store outlives the transport
     }
 
+    /// <summary>
+    /// Drives two channels to a live transport apiece.
+    /// </summary>
+    private static async Task<(IAdsRawChannel First, IAdsRawChannel Second)> ConnectTwoAsync(
+        AdsRawChannelFactory factory)
+    {
+        var first = factory.Get("1.2.3.4.5.6", 851);
+        var second = factory.Get("1.2.3.4.5.6", 852);
+
+        foreach (var (netId, port) in new[] { ("1.2.3.4.5.6", 851), ("1.2.3.4.5.6", 852) })
+        {
+            factory.TryGetSimulated(netId, port, out var sim);
+            sim!.Seed(0x11, 1, [1]);
+        }
+
+        await first.ReadAsync(0x11, 1, new byte[1], CancellationToken.None);
+        await second.ReadAsync(0x11, 1, new byte[1], CancellationToken.None);
+
+        Assert.Equal(ConnectionState.Connected, first.State);
+        Assert.Equal(ConnectionState.Connected, second.State);
+        return (first, second);
+    }
+
+    /// <summary>
+    /// <see cref="IAdsRawChannelFactory"/> documents that it "owns every underlying
+    /// transport and releases them at host shutdown". This pins the
+    /// <see cref="IHostedService"/> half of that promise.
+    /// </summary>
+    /// <remarks>
+    /// Unasserted, a consumer that builds and disposes a service provider per
+    /// integration test leaks one live <c>AdsClient</c> per addressed target,
+    /// silently. Replacing the <c>Shutdown</c> loop with a no-op must fail here.
+    /// </remarks>
     [Fact]
-    public void ActiveChannel_IsNotEvicted()
+    public async Task StopAsync_ReleasesEveryLiveTransport()
+    {
+        var clock = new FakeTimeProvider();
+        using var factory = Create(clock);
+        await factory.StartAsync(CancellationToken.None);
+
+        var (first, second) = await ConnectTwoAsync(factory);
+
+        await factory.StopAsync(CancellationToken.None);
+
+        Assert.Equal(ConnectionState.Disconnected, first.State);
+        Assert.Equal(ConnectionState.Disconnected, second.State);
+    }
+
+    /// <summary>
+    /// The <see cref="IDisposable"/> half of the same promise — the path the DI
+    /// container takes, and the one that runs when a host is disposed without ever
+    /// being stopped.
+    /// </summary>
+    [Fact]
+    public async Task Dispose_ReleasesEveryLiveTransport()
+    {
+        var clock = new FakeTimeProvider();
+        using var factory = Create(clock);
+
+        var (first, second) = await ConnectTwoAsync(factory);
+
+        factory.Dispose();   // the `using` disposes again: teardown is idempotent
+
+        Assert.Equal(ConnectionState.Disconnected, first.State);
+        Assert.Equal(ConnectionState.Disconnected, second.State);
+    }
+
+    /// <summary>
+    /// The idle WINDOW itself: a channel used 500 ms ago, with a 10 s window, must
+    /// keep its transport across a sweep.
+    /// </summary>
+    /// <remarks>
+    /// A live transport has to exist first. Without an operation, <c>Get</c> alone
+    /// creates none, <c>TryEvictIfIdle</c> short-circuits at <c>stale is null</c>
+    /// before it ever consults the clock, and the assertion measures nothing —
+    /// <see cref="ConnectionState.Disconnected"/> before and after. Deleting the
+    /// <c>LastUseUtc</c> check from <c>AdsRawChannel.TryEvictIfIdle</c> must make
+    /// this test fail; that mutant is otherwise green across the whole suite and
+    /// would silently make <see cref="AdsRawChannelOptions.IdleEvictionMs"/>
+    /// decorative in production.
+    /// </remarks>
+    [Fact]
+    public async Task ActiveChannel_IsNotEvicted()
     {
         var clock = new FakeTimeProvider();
         using var factory = Create(clock, o => o.IdleEvictionMs = 10_000);
 
         var channel = factory.Get("1.2.3.4.5.6", 0xFFFF);
-        clock.Advance(TimeSpan.FromMilliseconds(500));
+        factory.TryGetSimulated("1.2.3.4.5.6", 0xFFFF, out var sim);
+        sim!.Seed(0x11, 1, [7]);
+        await channel.ReadAsync(0x11, 1, new byte[1], CancellationToken.None);
+        Assert.Equal(ConnectionState.Connected, channel.State);
+
+        clock.Advance(TimeSpan.FromMilliseconds(500));   // well inside the 10 s window
         factory.SweepOnce();
 
+        Assert.Equal(ConnectionState.Connected, channel.State);
         Assert.Same(channel, factory.Get("1.2.3.4.5.6", 0xFFFF));
     }
 

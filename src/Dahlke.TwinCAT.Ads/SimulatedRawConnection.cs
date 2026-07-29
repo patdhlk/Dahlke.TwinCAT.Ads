@@ -70,9 +70,14 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection
 
     public void Connect() => IsConnected = true;
 
+    /// <remarks>
+    /// <see cref="Volatile"/> on both sides, matching <see cref="AdsRawChannel"/>:
+    /// the thread that disposes an evicted transport is not the thread that was
+    /// operating on it, so the write must be guaranteed visible to the reader.
+    /// </remarks>
     private void ThrowIfDisposed()
     {
-        if (_disposed)
+        if (Volatile.Read(ref _disposed))
             throw new ObjectDisposedException(
                 nameof(SimulatedRawConnection),
                 $"Raw channel {_amsNetId}:{_port} used after its transport was disposed.");
@@ -155,7 +160,7 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection
 
     public void Dispose()
     {
-        _disposed = true;
+        Volatile.Write(ref _disposed, true);
         IsConnected = false;
         _subscriptions.Clear();
     }

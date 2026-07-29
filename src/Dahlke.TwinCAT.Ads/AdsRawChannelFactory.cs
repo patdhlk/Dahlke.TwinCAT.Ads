@@ -157,6 +157,16 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
         }
         finally
         {
+            // Retract the source from the field BEFORE disposing it, so a teardown
+            // path can never find and cancel a disposed source. On the normal exit
+            // RequestSweeperStop has already nulled the field and this is a no-op;
+            // it earns its keep on an ABNORMAL exit — anything escaping SweepOnce
+            // outside its per-channel try, realistically a throwing ILogger in the
+            // warning path — where the field would otherwise still point here and
+            // the next StopAsync/Dispose would throw ObjectDisposedException before
+            // shutting a single channel down. CompareExchange, not Exchange: only
+            // retract OUR source, never one a later StartAsync installed.
+            Interlocked.CompareExchange(ref _sweeperCts, null, cts);
             cts.Dispose();
         }
     }
