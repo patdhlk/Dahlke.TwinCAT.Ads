@@ -15,9 +15,10 @@ A .NET library for TwinCAT ADS with durable connections, typed symbol access, si
 - **Reactive (Rx) companion** — optional `Dahlke.TwinCAT.Ads.Reactive` package surfaces value-change and connection-state notifications as `IObservable<T>` streams
 - **ADS sum commands** — batch writes, and batch reads of scalars, execute as a single round-trip on real connections; per-symbol `AdsValueResult` for granular success/failure
 - **Connection state observability** — `State` property (tri-state), `IsConnected` snapshot, `ConnectionStateChanged` event
-- **Per-target simulation** — `ConnectionMode.Real | Simulated` per target; mixed fleets supported; `InitialValues` seeding; `AddTwinCatAdsSimulation` forces all targets to simulated
+- **Raw ADS channels** — `IAdsRawChannelFactory` addresses any `(amsNetId, port)` by index group and index offset for targets the symbol API cannot reach (EtherCAT, the TwinCAT system service); cached, never disposed by the caller, with durable device notifications and a seedable simulation store
+- **Per-target simulation** — `ConnectionMode.Real | Simulated` per target; mixed fleets supported; `InitialValues` seeding; `AddTwinCatAdsSimulation` forces all targets — and raw channels — to simulated
 - **Health check** — Healthy / Degraded / Unhealthy with per-target data via `AddTwinCatAdsHealthCheck()`
-- **Options validation at startup** — malformed AMS Net IDs, invalid ports, and non-positive timeouts fail boot with actionable messages
+- **Options validation at startup** — malformed AMS Net IDs, invalid ports, non-positive timeouts, and malformed raw-channel seed keys fail boot with actionable messages
 - **Embedded ADS router with retry** — retries with backoff (2 s → 30 s cap); pool startup never blocks on the router
 
 ## Installation
@@ -344,6 +345,89 @@ if (pool.TryGetSimulatedConnection("plc1", out var sim))
     sim.SetInitialValues(new Dictionary<string, object?> { ["GVL.A"] = 99 });
 ```
 
+## Raw ADS channels
+
+For targets the symbol API cannot reach — EtherCAT masters and slaves, the TwinCAT system service — inject `IAdsRawChannelFactory` and address them by index group and index offset.
+
+```csharp
+public sealed class EtherCatDiagnostics(IAdsRawChannelFactory channels)
+{
+    public async Task<ushort> ReadSlaveStateAsync(
+        string masterNetId, ushort slaveAddress, CancellationToken ct)
+    {
+        var channel = channels.Get(masterNetId, 0xFFFF);
+
+        var buffer = new byte[2];
+        await channel.ReadAsync(0x0009, slaveAddress, buffer, ct);
+        return BitConverter.ToUInt16(buffer);
+    }
+}
+```
+
+Channels are cached per `(amsNetId, port)` and **never disposed by you** — hold the reference as long as you like. `Get` never blocks and never throws for a present Net ID, however malformed; an unreachable target simply reports `Disconnected` until you operate on it. Only a `null` Net ID throws (`ArgumentNullException`), because that is a caller bug rather than a target that happens not to exist.
+
+The Net ID is trimmed and canonicalised before it is used as a key, so `"1.2.3.4.5.6"`, `"01.2.3.4.5.6"` and `" 1.2.3.4.5.6"` are one channel. An octet outside 0–255 is **zeroed rather than rejected** — `Get("999.1.1.1.1.1", 851)` addresses `0.1.1.1.1.1`, and a warning is logged once per distinct spelling — because that is how the ADS stack resolves the address on the wire. Simulation seed keys are stricter and reject the same value at startup; see [Simulation](#simulation).
+
+Raw channels are unrelated to `PlcTargets`: they are not declared in configuration and need no configured target. Because a real raw channel cannot route without the embedded AMS router, leaving `RawChannels.Mode` at its default `Real` starts the router even when every configured PLC target is simulated. `AddTwinCatAdsSimulation` forces `RawChannels.Mode` to `Simulated` so it never does.
+
+### What to expect when things go wrong
+
+| Situation | Result |
+|---|---|
+| Device answers with an error code | `AdsErrorException` — an answer, never retried |
+| Every attempt timed out | `TimeoutException` |
+| You cancelled | `OperationCanceledException` carrying your token; no further attempt is made |
+| Transport could not be opened, or the host has shut down | `AdsConnectionUnavailableException` |
+
+The timeout bounds **each attempt**, so the default 5000 ms with one retry can take 10 seconds before throwing — the worst case for the attempts is `TimeoutMs × (RetryCount + 1)`. Pass an explicit `TimeSpan` overload when you need a tighter bound: probing a slave that may have no mailbox, for instance. A call that also has to build the transport for a channel with live subscriptions waits for that rebuild's restore pass first, which re-registers those subscriptions one at a time under their own separate bounds; that wait is not contained by the call's own attempt bound.
+
+The table covers the cases the contract names, not every exception the runtime can produce.
+
+### Notifications
+
+```csharp
+var handle = await channel.SubscribeAsync(
+    indexGroup: 0x0009, indexOffset: slaveAddress, length: 2, cycleTimeMs: 200,
+    handler: data => Console.WriteLine(BitConverter.ToUInt16(data)),
+    ct);
+```
+
+The handler receives a `ReadOnlySpan<byte>` valid only for that call — copy with `data.ToArray()` if you need to keep it. The compiler will not let you store the span itself, which is the point; the cost is that a handler cannot be `async`. Against a real target the handler runs on the ADS notification thread, never the caller's, so it must be thread-safe and must not block. A handler that throws is logged at Warning and keeps its subscription.
+
+Registration is bounded by `TimeoutMs` and is deliberately **never retried** — a retry would mean dropping and rebuilding the transport, re-registering every *other* subscription on the channel as a side effect of one subscriber's retry.
+
+Subscriptions survive a transport drop and are re-registered automatically, exactly once, while your handle stays valid. A live subscription pins its channel against idle eviction, so **dispose the handle** when you are done — dropping it on the floor holds a connection open for the factory's lifetime. After host shutdown no transport is rebuilt, so a live subscription simply goes quiet rather than raising anything.
+
+### Simulation
+
+Raw-channel options are set **in code**, on `TwinCatAdsOptions.RawChannels`:
+
+```csharp
+builder.Services.AddTwinCatAds(o =>
+{
+    o.RawChannels.Mode = ConnectionMode.Simulated;
+    o.RawChannels.Seed["192.168.1.10.3.1:65535"] = new()
+    {
+        ["0x11:1001"] = "02000000410C0000",
+    };
+});
+```
+
+> **Note.** Unlike `PlcTargets`, the `RawChannels` section is **not bound from `IConfiguration`** in this release — a `"RawChannels"` block in `appsettings.json` is read by nothing and leaves every value at its default. Use the code-first form above, or the `AddTwinCatAds(configuration, o => …)` combo overload if you also bind PLC targets from configuration.
+
+Seeding is also available at runtime, which is what tests and demo hosts usually want:
+
+```csharp
+if (channels.TryGetSimulated("192.168.1.10.3.1", 0xFFFF, out var sim))
+    sim.Seed(0x11, 1001, [0x02, 0x00, 0x00, 0x00]);
+```
+
+The store knows nothing about EtherCAT, CoE or files — seed the bytes your own decoder expects. An unseeded read answers `DeviceInvalidOffset`, the same code real hardware gives, so your error handling is exercised too. `ReadWriteAsync` in simulation writes the source to the slot and returns the slot's bytes; it will never invent a file handle, so seed the response you expect.
+
+Simulated subscriptions ignore `cycleTimeMs` and fire on every write made *through the channel* to the watched slot, with no coalescing, on whichever thread performed the write. `Seed` writes the slot **without** firing — it arranges state rather than reporting a change.
+
+Seed keys are validated at startup in **both** modes, so a malformed entry left behind after switching to `Real` still fails the host instead of sitting silently broken. A seed key's AMS Net ID must be six dot-separated octets each in 0–255 — stricter than `Get`, deliberately, because a declaration's typo has no correct reading.
+
 ## Health Check
 
 ```csharp
@@ -376,9 +460,24 @@ Each key is a PLC identifier used with `GetConnection(plcId)`.
 | `AmsNetId` | `string` | — | AMS Net ID of the PLC (required for `Real` targets) |
 | `Port` | `int` | `851` | ADS port number |
 | `DisplayName` | `string` | `""` | Human-readable name for logging |
-| `TimeoutMs` | `int` | `5000` | Per-operation timeout in milliseconds |
+| `TimeoutMs` | `int` | `5000` | Per-operation timeout in milliseconds. Must be greater than zero |
+| `SymbolBrowseTimeoutMs` | `int` | `30000` | Timeout for `GetSymbolsAsync` / `SearchSymbolsAsync`, which upload the PLC's symbol table and take far longer than a single read. Must be greater than zero |
 | `Mode` | `ConnectionMode` | `Real` | `Real` or `Simulated` |
 | `InitialValues` | `Dictionary<string, object?>` | `{}` | Symbol seed values for simulated targets. A bare scalar seeds a `string`; `{ "value": …, "type": "DINT" }` seeds the declared PLC type — see [Seeding initial values](#seeding-initial-values) |
+
+### `TwinCatAdsOptions.RawChannels` (code-first only)
+
+Global policy for [raw ADS channels](#raw-ads-channels). There is nothing per-target to configure, because a raw channel addresses whatever AMS target the caller names.
+
+**These options are not bound from `IConfiguration`** — there is no `RawChannels` JSON section in this release. Set them through an `AddTwinCatAds(o => …)` delegate.
+
+| Property | Type | Default | Description |
+|-----|------|---------|-------------|
+| `Mode` | `ConnectionMode` | `Real` | `Real` or `Simulated`. `Real` starts the embedded AMS router even when every `PlcTargets` entry is simulated |
+| `TimeoutMs` | `int` | `5000` | Timeout for each **attempt**, not for the retry sequence. Must be greater than zero |
+| `RetryCount` | `int` | `1` | Retries after a failed attempt, so `1` means up to two attempts. Must not be negative. Applies only to a timeout with no device answer |
+| `IdleEvictionMs` | `int` | `60000` | How long a channel may go unused before its transport is disposed. Must be greater than zero. A channel with a live subscription is never evicted |
+| `Seed` | `Dictionary<string, Dictionary<string, string>>` | `{}` | Simulation seed data. Outer key `amsNetId:port`, inner key `indexGroup:indexOffset` (decimal or `0x`-prefixed hex), value a hex byte payload with an even number of digits. Keys and payloads are validated at startup in **both** modes |
 
 ### `AdsSymbolDump` section (optional diagnostics)
 
