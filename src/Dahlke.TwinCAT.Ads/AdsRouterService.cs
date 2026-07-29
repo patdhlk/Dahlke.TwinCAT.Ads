@@ -98,7 +98,7 @@ internal class AdsRouterService : BackgroundService
     private readonly AdsRouterReadySignal _readySignal;
     private readonly TimeProvider _timeProvider;
     private readonly string? _netId;
-    private readonly bool _hasRealTargets;
+    private readonly bool _needsRouter;
 
     // IConfiguration is optional — null when the application does not register
     // it (pure code-first scenario).  When present the full application config is
@@ -137,13 +137,27 @@ internal class AdsRouterService : BackgroundService
     {
         var value = options.Value;
         _netId = value.Router.NetId;
-        _hasRealTargets = value.Targets.Values.Any(t => t.Mode == ConnectionMode.Real);
+        _needsRouter = NeedsRouter(value);
         _configuration = configuration;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<AdsRouterService>();
         _readySignal = readySignal;
         _timeProvider = timeProvider;
     }
+
+    /// <summary>
+    /// Whether the embedded AMS router must be started for this configuration.
+    /// </summary>
+    /// <remarks>
+    /// Raw channels have no symbol layer and cannot route without the embedded
+    /// router, so a host whose PLC targets are ALL simulated still needs one when
+    /// <see cref="AdsRawChannelOptions.Mode"/> is <see cref="ConnectionMode.Real"/>.
+    /// Before raw channels existed this was <c>_hasRealTargets</c>, which no
+    /// longer describes the condition.
+    /// </remarks>
+    internal static bool NeedsRouter(TwinCatAdsOptions options) =>
+        options.Targets.Values.Any(t => t.Mode == ConnectionMode.Real)
+        || options.RawChannels.Mode == ConnectionMode.Real;
 
     /// <summary>
     /// Determines whether the <c>AmsTcpIpRouter(IConfiguration, ILoggerFactory)</c>
@@ -202,7 +216,7 @@ internal class AdsRouterService : BackgroundService
             // that resolve the signal — it is never skipped over.
             await Task.Yield();
 
-            if (!_hasRealTargets)
+            if (!_needsRouter)
             {
                 // No real PLC targets configured — the embedded router is not needed
                 // (simulated targets talk to an in-memory store, not AMS/ADS).

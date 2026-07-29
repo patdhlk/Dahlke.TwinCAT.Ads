@@ -317,6 +317,10 @@ public static class ServiceCollectionExtensions
         {
             foreach (var target in o.Targets.Values)
                 target.Mode = ConnectionMode.Simulated;
+
+            // Raw channels too: otherwise the helper whose entire promise is
+            // "no hardware needed" quietly starts an embedded router.
+            o.RawChannels.Mode = ConnectionMode.Simulated;
         });
     }
 }
