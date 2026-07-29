@@ -454,6 +454,13 @@ public class AdsConnectionPoolTests
     {
         // The real race: the host's StopAsync path and the container's disposal
         // path running at the same time, which is what CI hit.
+        //
+        // Reproduction is core-count sensitive: on a many-core dev box the two
+        // paths rarely interleave tightly enough and 50 attempts pass every time,
+        // while on a 2-core CI runner it fails often. Run it under
+        // DOTNET_PROCESSOR_COUNT=2 when working on pool teardown — that turned a
+        // green local run into 14 failures in 25 while the unguarded Cancel in
+        // StopAsync was still there.
         for (var attempt = 0; attempt < 50; attempt++)
         {
             var (pool, factory, _, signal) = CreatePool("plc1");

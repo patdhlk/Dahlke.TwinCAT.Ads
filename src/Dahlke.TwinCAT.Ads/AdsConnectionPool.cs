@@ -241,8 +241,18 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
         // Cancel background loops (now the complete set, including any real loops
         // the router wait task released just before settling).
+        //
+        // Unlike DrainReconnectCts this deliberately does NOT take ownership: the
+        // loops still have to observe cancellation and finish before the drain
+        // below can dispose their sources. That leaves a window a concurrent
+        // Dispose can win — it drains and disposes a source while this enumeration
+        // still holds a reference to it — so the Cancel is guarded exactly as the
+        // stopping source above is. A source the other path already disposed is
+        // one it already cancelled, so skipping it loses nothing.
         foreach (var (_, cts) in _reconnectCts)
-            cts.Cancel();
+        {
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        }
 
         // Wait for background loops to finish
         var loopTasks = _loopTasks.Values.ToArray();

@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`AdsConnectionPool.StopAsync` could still throw `ObjectDisposedException` during concurrent shutdown.** ([#9](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/9))
+
+  A follow-up to the 0.5.1 teardown fix, which missed one call site. `StopAsync` cancels the
+  per-target reconnect sources before draining them:
+
+  ```csharp
+  foreach (var (_, cts) in _reconnectCts)
+      cts.Cancel();                       // unguarded
+  ```
+
+  Unlike `DrainReconnectCts`, this loop deliberately does not take ownership — the loops still
+  have to observe cancellation and finish before their sources can be disposed. That leaves a
+  window a concurrent `Dispose` can win: it drains and disposes a source while this enumeration
+  still holds a reference to it, and the `Cancel` throws with the original issue's signature:
+
+  ```
+  System.ObjectDisposedException : The CancellationTokenSource has been disposed.
+     at System.Threading.CancellationTokenSource.Cancel()
+     at Dahlke.TwinCAT.Ads.AdsConnectionPool.StopAsync(CancellationToken)
+  ```
+
+  The `Cancel` is now guarded exactly as the stopping source above it already was. A source the
+  other path disposed is one it already cancelled, so skipping it loses nothing.
+
+  Reproduction is core-count sensitive, which is why 0.5.1 shipped with it and why the existing
+  `ConcurrentStopAndDispose_DoNotThrow` test passes on a typical dev box: under
+  `DOTNET_PROCESSOR_COUNT=2` it failed 14 times in 25 runs before this change and 0 in 65 after.
+
 - **Config-seeded `InitialValues` lost their type: simulated reads returned `STRING` where a real PLC returns `DINT`/`BOOL`/`LREAL`.** ([#10](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/10))
 
   `IConfiguration` is string-typed all the way down, so a JSON `1500`, `21.5` and `true` all
