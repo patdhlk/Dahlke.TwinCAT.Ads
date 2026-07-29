@@ -278,36 +278,43 @@ public static class ServiceCollectionExtensions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>ConfigurationBinder</c> swallows a failed conversion inside a collection
-    /// element and drops the element, so
+    /// <c>ConfigurationBinder</c> swallows a failure inside a collection element and
+    /// drops the element, so
     /// <c>"Seed": [{ "AmsNetId": "1.2.3.4.5.6", "Port": "typo" }]</c> binds to an
     /// empty list with no error — a configured seed that simply is not there. A bad
-    /// SCALAR throws instead, so only the collection needs this.
+    /// SCALAR throws instead, so only collections need this.
     /// </para>
     /// <para>
-    /// <b>A count comparison rather than a re-validation of each value</b>, so it
-    /// cannot drift from the binder's own conversion rules: it fires for any member of
-    /// a SEED ENTRY whose conversion fails, whichever member that is.
-    /// <see cref="AdsRawChannelSeed.Port"/> is the only convertible-typed one today,
-    /// which is why the message names it as the likely cause.
+    /// <b>Both levels are checked, because BOTH are reachable.</b> A slot is itself a
+    /// collection element, so it is dropped by the same mechanism while the outer
+    /// counts still agree. Two routes reach it, and neither needs a convertible-typed
+    /// member:
     /// </para>
+    /// <list type="bullet">
+    ///   <item>a failed CONVERSION — <c>Port</c> is the only convertible-typed member
+    ///   today, which is why the entry-level message names it;</item>
+    ///   <item>an element written as a SCALAR where an object belongs —
+    ///   <c>"Slots": [ "0x11", "0x12" ]</c>, plausible from someone writing slots as
+    ///   bare index groups. Measured: 2 configured, 0 bound, and without this check
+    ///   zero errors, leaving the channel reachable but empty so every read answers an
+    ///   ADS error.</item>
+    /// </list>
     /// <para>
-    /// <b>It compares the OUTER list only, and slot-level discards are therefore NOT
-    /// covered.</b> A slot is itself a collection element, so the binder drops an
-    /// unconvertible slot exactly the same way — leaving the entry silently one slot
-    /// short while the outer counts still agree (verified: outer 1/1, slots 2/1).
-    /// That is unreachable today because every member of
-    /// <see cref="AdsRawChannelSeedSlot"/> is a <see cref="string"/>, which never
-    /// fails to convert, and <c>SeedTypesStayStringOnly…</c> in
-    /// <c>RawChannelConfigurationBindingTests</c> fails the moment that stops being
-    /// true, pointing here. Extending this to slots without such a member to test
-    /// against would have meant shipping a check nothing could exercise.
+    /// A count comparison rather than a re-validation of each value, so it cannot drift
+    /// from the binder's own rules: it fires for any cause of a drop, present or future.
     /// </para>
     /// <para>
     /// Deliberately <c>bound &lt; configured</c> rather than <c>!=</c>. A host that
     /// calls <c>AddTwinCatAds(configuration)</c> twice registers this delegate twice,
     /// and <c>Bind</c> APPENDS to a list, so the bound count legitimately exceeds the
     /// configured one. Only a SHORTFALL means something was thrown away.
+    /// </para>
+    /// <para>
+    /// The slot pass runs only when the outer counts are EQUAL. That is what makes
+    /// positional alignment sound — a dropped entry would shift every later index — and
+    /// it also covers the double-registration case for free, since the second pass sees
+    /// a doubled outer count and skips. A slot shortfall is therefore recorded exactly
+    /// once.
     /// </para>
     /// <para>
     /// <b>Deliberately does NOT clear <see cref="AdsRawChannelOptions.SeedBindingErrors"/>
@@ -328,16 +335,42 @@ public static class ServiceCollectionExtensions
         if (!seedSection.Exists())
             return;
 
-        var configured = seedSection.GetChildren().Count();
+        // The same enumeration the binder itself walked, so index i here is the entry
+        // the binder appended at position i.
+        var configuredEntries = seedSection.GetChildren().ToList();
 
-        if (options.Seed.Count >= configured)
+        if (options.Seed.Count < configuredEntries.Count)
+        {
+            options.SeedBindingErrors.Add(
+                $"RawChannels:Seed declares {configuredEntries.Count} " +
+                $"entr{(configuredEntries.Count == 1 ? "y" : "ies")} but only {options.Seed.Count} " +
+                $"could be bound; the configuration binder DISCARDED the rest instead of reporting " +
+                $"them. Check that every entry is an OBJECT and that its 'Port' is a number — an " +
+                $"entry the binder cannot bind is dropped silently.");
+
+            // Indices no longer line up, so a slot comparison would misattribute.
             return;
+        }
 
-        options.SeedBindingErrors.Add(
-            $"RawChannels:Seed declares {configured} entr{(configured == 1 ? "y" : "ies")} but only " +
-            $"{options.Seed.Count} could be bound; the configuration binder DISCARDED the rest " +
-            $"instead of reporting them. Check that every entry's 'Port' is a number — a value " +
-            $"the binder cannot convert causes the whole entry to be dropped silently.");
+        if (options.Seed.Count != configuredEntries.Count)
+            return;   // more bound than configured: a second registration pass appended.
+
+        for (var i = 0; i < configuredEntries.Count; i++)
+        {
+            var configuredSlots = configuredEntries[i].GetSection("Slots").GetChildren().Count();
+            var boundSlots = options.Seed[i].Slots.Count;
+
+            if (boundSlots >= configuredSlots)
+                continue;
+
+            options.SeedBindingErrors.Add(
+                $"RawChannels:Seed:{i}:Slots declares {configuredSlots} " +
+                $"slot{(configuredSlots == 1 ? "" : "s")} but only {boundSlots} could be bound; the " +
+                $"configuration binder DISCARDED the rest instead of reporting them. Each slot must " +
+                $"be an OBJECT with 'IndexGroup', 'IndexOffset' and 'Bytes' — a bare value such as " +
+                $"\"0x11\" cannot bind to a slot and is dropped silently, leaving the target " +
+                $"reachable but unseeded.");
+        }
     }
 
     /// <summary>

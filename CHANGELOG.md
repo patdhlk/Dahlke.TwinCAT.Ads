@@ -104,11 +104,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   works in configuration as well as at a call site. Note the corollary: `"0x851"` is **2129**, not
   851 — the canonical TC3 runtime port is decimal `851` and must be written that way.
 
-  **A seed entry the configuration binder cannot convert now fails the host instead of
+  **A seed entry or slot the configuration binder cannot bind now fails the host instead of
   disappearing.** `ConfigurationBinder` reports a bad *scalar* by throwing with the offending
-  path, but swallows the same failure inside a *collection element* and drops the element, so
-  `"Port": "typo"` bound to a seed list silently missing that target — the identical failure mode
-  the array shape was adopted to eliminate, reached by a different route.
+  path, but swallows the same failure inside a *collection element* and drops the element. So
+  `"Port": "typo"` bound to a seed list silently missing that target, and a slot written as a bare
+  value rather than an object — `"Slots": [ "0x11", "0x12" ]` — dropped every slot, leaving the
+  target reachable but unseeded so every read answered `DeviceInvalidOffset`. Both are the
+  identical failure mode the array shape was adopted to eliminate, reached by different routes;
+  entry and slot counts are now both checked.
 
 ### Changed
 

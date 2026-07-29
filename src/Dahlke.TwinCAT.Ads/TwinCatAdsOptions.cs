@@ -16,8 +16,10 @@ public sealed class TwinCatAdsOptions
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Embedded AMS router settings.
-    /// Populated from the <c>AmsRouter</c> configuration section.
+    /// Embedded AMS router settings. Only <see cref="AmsRouterOptions.NetId"/> is
+    /// populated from the <c>AmsRouter</c> configuration section — the section is NOT
+    /// bound as a whole, so a property added to <see cref="AmsRouterOptions"/> is not
+    /// configurable until the binding step is extended. See that type's remarks.
     /// </summary>
     public AmsRouterOptions Router { get; set; } = new();
 

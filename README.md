@@ -523,7 +523,7 @@ Each `Slots` entry:
 
 The Net ID here is validated **more strictly than `IAdsRawChannelFactory.Get`**, which accepts an out-of-range octet and resolves it the way the ADS stack does. A seed entry is a declaration whose typo has no correct reading, so `999.1.1.1.1.1` fails the host at startup rather than silently seeding `0.1.1.1.1.1`.
 
-A `Port` the configuration binder cannot convert to a number also fails the host at startup. It has to be caught deliberately: the binder reports a bad *scalar* by throwing, but silently **drops the whole entry** when the bad value is inside a collection element, so `"Port": "typo"` would otherwise leave that one target unseeded with no error anywhere.
+An entry or slot the configuration binder cannot bind also fails the host at startup. This has to be caught deliberately: the binder reports a bad *scalar* by throwing, but silently **discards a collection element** it cannot bind. Two mistakes hit that path — a `Port` that is not a number (`"Port": "typo"` drops the whole entry) and a slot written as a bare value instead of an object (`"Slots": [ "0x11", "0x12" ]` drops every slot). Either would otherwise leave the target reachable but unseeded, so every read answers an ADS error and a configuration mistake looks like a device fault.
 
 ### `AdsSymbolDump` section (optional diagnostics)
 
