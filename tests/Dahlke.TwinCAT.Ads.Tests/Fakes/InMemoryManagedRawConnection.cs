@@ -28,6 +28,19 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
     /// <summary>When true, the next operation waits on its token forever (simulating a stall).</summary>
     public bool StallNext { get; set; }
 
+    /// <summary>
+    /// Completes the first time an operation actually parks in a stall.
+    /// </summary>
+    /// <remarks>
+    /// Lets a test advance a fake clock only once the operation is genuinely
+    /// waiting on its per-attempt timeout. Without it a test would be racing the
+    /// clock against the operation reaching its await point: advance too early and
+    /// the bound is scheduled AFTER the clock has moved, so it never elapses.
+    /// </remarks>
+    public Task Stalled => _stalled.Task;
+
+    private readonly TaskCompletionSource _stalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     /// <summary>Handles currently registered — asserts re-registration happened exactly once.</summary>
     public IReadOnlyCollection<uint> LiveHandles => _subs.Keys.ToArray();
 
@@ -109,6 +122,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
         if (StallNext)
         {
             StallNext = false;
+            _stalled.TrySetResult();
             await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
         }
 

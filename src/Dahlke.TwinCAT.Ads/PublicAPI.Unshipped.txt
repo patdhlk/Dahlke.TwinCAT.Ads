@@ -15,3 +15,14 @@ Dahlke.TwinCAT.Ads.TwinCatAdsOptions.RawChannels.get -> Dahlke.TwinCAT.Ads.AdsRa
 Dahlke.TwinCAT.Ads.TwinCatAdsOptions.RawChannels.set -> void
 Dahlke.TwinCAT.Ads.ISimulatedRawChannel
 Dahlke.TwinCAT.Ads.ISimulatedRawChannel.Seed(uint indexGroup, uint indexOffset, System.ReadOnlySpan<byte> data) -> void
+Dahlke.TwinCAT.Ads.IAdsRawChannel
+Dahlke.TwinCAT.Ads.IAdsRawChannel.AmsNetId.get -> string!
+Dahlke.TwinCAT.Ads.IAdsRawChannel.Port.get -> int
+Dahlke.TwinCAT.Ads.IAdsRawChannel.State.get -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.IAdsRawChannel.ReadAsync(uint indexGroup, uint indexOffset, System.Memory<byte> destination, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<int>!
+Dahlke.TwinCAT.Ads.IAdsRawChannel.ReadAsync(uint indexGroup, uint indexOffset, System.Memory<byte> destination, System.TimeSpan timeout, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<int>!
+Dahlke.TwinCAT.Ads.IAdsRawChannel.WriteAsync(uint indexGroup, uint indexOffset, System.ReadOnlyMemory<byte> source, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
+Dahlke.TwinCAT.Ads.IAdsRawChannel.WriteAsync(uint indexGroup, uint indexOffset, System.ReadOnlyMemory<byte> source, System.TimeSpan timeout, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
+Dahlke.TwinCAT.Ads.IAdsRawChannel.ReadWriteAsync(uint indexGroup, uint indexOffset, System.Memory<byte> destination, System.ReadOnlyMemory<byte> source, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<int>!
+Dahlke.TwinCAT.Ads.IAdsRawChannel.ReadWriteAsync(uint indexGroup, uint indexOffset, System.Memory<byte> destination, System.ReadOnlyMemory<byte> source, System.TimeSpan timeout, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<int>!
+Dahlke.TwinCAT.Ads.IAdsRawChannel.ReadStateAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<TwinCAT.Ads.StateInfo>!

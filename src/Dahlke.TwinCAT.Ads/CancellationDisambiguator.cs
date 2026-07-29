@@ -54,4 +54,35 @@ internal static class CancellationDisambiguator
         return new TimeoutException(
             $"Read/write of symbol '{symbolPath}' on PLC '{plcId}' exceeded the configured timeout of {timeoutMs} ms.");
     }
+
+    /// <summary>
+    /// Creates the correct exception for a cancellation event during a RAW ADS
+    /// operation, which has no symbol path or PLC identifier to name.
+    /// </summary>
+    /// <param name="callerCt">The original cancellation token supplied by the caller.</param>
+    /// <param name="amsNetId">Target AMS Net ID, used in the message.</param>
+    /// <param name="port">Target AMS port, used in the message.</param>
+    /// <param name="indexGroup">Index group of the failed operation.</param>
+    /// <param name="indexOffset">Index offset of the failed operation.</param>
+    /// <param name="timeoutMs">The per-ATTEMPT timeout that elapsed.</param>
+    /// <returns>
+    /// An <see cref="OperationCanceledException"/> carrying <paramref name="callerCt"/>
+    /// when the caller cancelled, or a <see cref="TimeoutException"/> when only the
+    /// per-attempt timeout elapsed.
+    /// </returns>
+    public static Exception CreateRawException(
+        CancellationToken callerCt,
+        string amsNetId,
+        int port,
+        uint indexGroup,
+        uint indexOffset,
+        int timeoutMs)
+    {
+        if (callerCt.IsCancellationRequested)
+            return new OperationCanceledException(callerCt);
+
+        return new TimeoutException(
+            $"Raw ADS operation on {amsNetId}:{port} at index group 0x{indexGroup:X} " +
+            $"offset {indexOffset} exceeded the per-attempt timeout of {timeoutMs} ms.");
+    }
 }
