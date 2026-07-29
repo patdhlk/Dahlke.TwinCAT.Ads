@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.3] - 2026-07-29
 
+There is no 0.5.2 release. The two fixes below that were staged under that number never
+shipped on their own — they are first available here, so 0.5.3 follows 0.5.1 on NuGet.
+
 ### Fixed
 
 - **Pool shutdown could hang forever when `StopAsync` and `Dispose` ran concurrently.** ([#14](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/14))
@@ -43,10 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reproduce — isolating any one of those gives a false all-clear. Under that harness it hung
   ~15–20% of runs before this change and 0 of 42 after. The recipe is recorded on
   `ConcurrentStopAndDispose_DoNotThrow` so it does not have to be rediscovered.
-
-## [0.5.2] - 2026-07-29
-
-### Fixed
 
 - **`AdsConnectionPool.StopAsync` could still throw `ObjectDisposedException` during concurrent shutdown.** ([#9](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/9))
 
