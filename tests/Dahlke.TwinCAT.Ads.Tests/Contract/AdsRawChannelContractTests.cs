@@ -135,6 +135,24 @@ public abstract class AdsRawChannelContractTests
         Assert.Equal([42], received[0]);
     }
 
+    /// <remarks>
+    /// <b>Pins <see cref="AdsRawChannel"/>'s own registry gate, not either
+    /// transport's notification removal.</b> <c>AdsRawChannel.Unsubscribe</c>
+    /// removes the channel's registry entry SYNCHRONOUSLY, before the
+    /// transport-level removal (a fire-and-forget round trip) even starts, so
+    /// <c>AdsRawChannel.Deliver</c>'s registry check always wins the race
+    /// regardless of whether the underlying transport's own removal succeeds,
+    /// fails, or is a no-op. This fact therefore CANNOT, by construction, catch a
+    /// transport-level regression in either <see cref="SimulatedRawConnection"/>
+    /// or <see cref="InMemoryManagedRawConnection"/> in isolation — passing on
+    /// both derived classes here proves the shared channel logic, not agreement
+    /// between the two data planes. Verified empirically: mutating either
+    /// transport's <c>RemoveNotificationAsync</c> to a no-op leaves this fact
+    /// green on both harnesses; only breaking <c>AdsRawChannel</c>'s own gate
+    /// turns it red (see task-8-report.md, "Mutation testing"). See also
+    /// <c>AdsRawChannelSubscriptionTests.DisposedSubscription_StopsDelivering_EvenWhenTheTransportRemovalFails</c>,
+    /// which demonstrates the same gate directly against the removal-failure case.
+    /// </remarks>
     [Fact]
     public async Task DisposedSubscription_StopsFiring()
     {
@@ -151,6 +169,23 @@ public abstract class AdsRawChannelContractTests
         Assert.Equal(1, count);
     }
 
+    /// <remarks>
+    /// <b>Pins <see cref="AdsRawChannel"/>'s own handler try/catch — the only
+    /// exception handling anywhere in the notification path — not either
+    /// transport's fire-on-write logic.</b> Neither
+    /// <see cref="SimulatedRawConnection"/> nor
+    /// <see cref="InMemoryManagedRawConnection"/> catches an exception thrown by
+    /// its registered callback (both invoke it bare), and the callback each one
+    /// registers is always <c>data => Deliver(id, data)</c>, which never lets an
+    /// exception escape back to the transport. No per-implementation bug in
+    /// either transport's fire-on-write wiring could therefore make this fact
+    /// fail on only one derived class — the promise is entirely
+    /// <see cref="AdsRawChannel"/>'s, exactly as for
+    /// <see cref="DisposedSubscription_StopsFiring"/> above. Verified
+    /// empirically: removing <c>AdsRawChannel.Deliver</c>'s try/catch fails this
+    /// fact on BOTH derived classes simultaneously (see task-8-report.md,
+    /// "Mutation testing").
+    /// </remarks>
     [Fact]
     public async Task ThrowingHandler_DoesNotStopLaterNotifications()
     {
