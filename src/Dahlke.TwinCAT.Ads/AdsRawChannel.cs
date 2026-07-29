@@ -299,7 +299,8 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     /// with none of them. That is permanent, not transient — the live subscriptions
     /// pin the channel against idle eviction, so on a subscription-only channel
     /// nothing ever rebuilds the transport again. Each restore is instead bounded
-    /// by the configured per-attempt timeout and nothing else.
+    /// by the configured per-attempt timeout, and cut short only by this channel's
+    /// OWN shutdown — never by a caller's token.
     /// </para>
     /// </remarks>
     private async Task RestoreSubscriptionsAsync(IManagedRawConnection transport)

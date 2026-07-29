@@ -239,7 +239,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
         return _options.Mode == ConnectionMode.Simulated
             ? new SimulatedRawConnection(amsNetId, port, GetOrCreateStore(amsNetId, port))
-            : new BeckhoffManagedRawConnection(amsNetId, port, _options.TimeoutMs);
+            : new BeckhoffManagedRawConnection(amsNetId, port);
     }
 
     /// <summary>

@@ -6,7 +6,10 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 
 public class AdsRawChannelSubscriptionTests
 {
-    /// <summary>The default <see cref="AdsRawChannelOptions.TimeoutMs"/>, which these tests do not override.</summary>
+    /// <summary>
+    /// The default <see cref="AdsRawChannelOptions.TimeoutMs"/>, used unless a test
+    /// passes its own to <see cref="Create"/>.
+    /// </summary>
     private const int AttemptTimeoutMs = 5000;
 
     /// <summary>
@@ -91,21 +94,33 @@ public class AdsRawChannelSubscriptionTests
     /// discards the transport.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The clock is advanced only once the attempt has genuinely parked — the bound
     /// is scheduled when the attempt STARTS, so moving a fake clock first would
     /// schedule it beyond a clock that never moves again. The wait races
     /// <c>pending</c> so a channel that answers instead of stalling fails the
     /// assertion below rather than hanging here.
+    /// </para>
+    /// <para>
+    /// <paramref name="timeoutMs"/> MUST match what the channel was built with. It
+    /// is a parameter rather than the constant because <see cref="Create"/> is
+    /// parameterised: a caller that overrides the timeout and forgets to pass it
+    /// here would advance the clock short of the bound, and the call would never
+    /// complete. <see cref="CompletesPromptlyAsync"/> turns that into a failure
+    /// rather than a hung run.
+    /// </para>
     /// </remarks>
     private static async Task ForceDropAsync(
-        AdsRawChannel channel, InMemoryManagedRawConnection transport, FakeTimeProvider clock)
+        AdsRawChannel channel, InMemoryManagedRawConnection transport, FakeTimeProvider clock,
+        int timeoutMs = AttemptTimeoutMs)
     {
         transport.StallNext = true;
 
         var pending = channel.ReadAsync(0x11, 1001, new byte[1], CancellationToken.None);
         await Task.WhenAny(transport.Stalled, pending);
-        clock.Advance(TimeSpan.FromMilliseconds(AttemptTimeoutMs + 1));
+        clock.Advance(TimeSpan.FromMilliseconds(timeoutMs + 1));
 
+        await CompletesPromptlyAsync(pending);
         await Assert.ThrowsAsync<TimeoutException>(() => pending);
         Assert.True(transport.Disposed);
     }

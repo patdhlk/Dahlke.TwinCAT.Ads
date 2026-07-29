@@ -22,39 +22,42 @@ internal sealed class BeckhoffManagedRawConnection : IManagedRawConnection
     private readonly ConcurrentDictionary<uint, Action<ReadOnlyMemory<byte>>> _handlers = new();
 
     /// <summary>
-    /// Creates the transport for one target, bounding every round trip by
-    /// <paramref name="timeoutMs"/>.
+    /// The bound put on the underlying <see cref="AdsClient"/> — deliberately far
+    /// above any bound <see cref="AdsRawChannel"/> can construct, so that it never
+    /// fires first.
     /// </summary>
-    /// <param name="amsNetId">Target AMS Net ID.</param>
-    /// <param name="port">Target AMS port.</param>
-    /// <param name="timeoutMs">
-    /// The configured <see cref="AdsRawChannelOptions.TimeoutMs"/>, applied to the
-    /// underlying <see cref="AdsClient"/>.
-    /// </param>
     /// <remarks>
     /// <para>
-    /// <b>Assigning <see cref="AdsClient.Timeout"/> is load-bearing, not tidiness.</b>
-    /// Left alone it keeps Beckhoff's own 5000 ms default, which silently caps every
-    /// raw operation: a configured <see cref="AdsRawChannelOptions.TimeoutMs"/>
-    /// above 5000 could never be reached, and the caller would get
+    /// <b>The per-attempt <see cref="System.Threading.CancellationTokenSource"/> is
+    /// the single authority on timeouts; this is only a backstop.</b>
+    /// <see cref="AdsClient.Timeout"/> is a per-CLIENT property and one client
+    /// serves every concurrent caller on the channel, so it cannot express a
+    /// per-call bound — it can only cap one. Wiring it to
+    /// <see cref="AdsRawChannelOptions.TimeoutMs"/> would therefore break the
+    /// documented per-call <c>timeout</c> overloads: on a channel configured at
+    /// 750 ms, a caller passing 2 s would be cut off at 750 ms and — worse — get
     /// <see cref="AdsErrorException"/> with
-    /// <see cref="AdsErrorCode.ClientSyncTimeOut"/> at 5 s instead of the documented
-    /// <see cref="TimeoutException"/> — and this library's contract defines an ADS
-    /// error code as a device ANSWER, which is never retried and never tears the
-    /// channel down. The bound has to be the configured one for the documented
-    /// failure shape to be the one that actually happens.
+    /// <see cref="AdsErrorCode.ClientSyncTimeOut"/> rather than
+    /// <see cref="TimeoutException"/>. This library's contract defines an ADS error
+    /// code as a device ANSWER, never retried and never tearing the channel down,
+    /// so that is a timeout wearing an answer's clothes.
     /// </para>
     /// <para>
-    /// <see cref="AdsRawChannel"/>'s own <see cref="System.Threading.CancellationTokenSource"/>
-    /// still fires first in practice, both being the same value; this makes the
-    /// client's fallback agree with it rather than contradict it.
+    /// Leaving the property alone is not an option either: Beckhoff's own default
+    /// is 5000 ms, which silently caps EVERY raw operation, making any configured
+    /// <see cref="AdsRawChannelOptions.TimeoutMs"/> above 5000 unreachable and
+    /// producing that same wrong-shaped exception at 5 s. Both failures are the
+    /// same failure — a bound the channel did not choose, arriving in the wrong
+    /// shape. Raising it out of the way removes both.
     /// </para>
     /// </remarks>
-    public BeckhoffManagedRawConnection(string amsNetId, int port, int timeoutMs)
+    private const int BackstopTimeoutMs = int.MaxValue;
+
+    public BeckhoffManagedRawConnection(string amsNetId, int port)
     {
         _amsNetId = amsNetId;
         _port = port;
-        _client.Timeout = timeoutMs;
+        _client.Timeout = BackstopTimeoutMs;
         _client.AdsNotification += OnAdsNotification;
     }
 
@@ -62,8 +65,8 @@ internal sealed class BeckhoffManagedRawConnection : IManagedRawConnection
 
     /// <summary>
     /// The bound actually applied to the underlying client. Test-support: it is
-    /// the only way to observe, without hardware, that the configured timeout
-    /// reached the Beckhoff client at all.
+    /// the only way to observe, without hardware, that the client cannot preempt
+    /// a bound the channel constructs.
     /// </summary>
     internal int ClientTimeoutMs => _client.Timeout;
 

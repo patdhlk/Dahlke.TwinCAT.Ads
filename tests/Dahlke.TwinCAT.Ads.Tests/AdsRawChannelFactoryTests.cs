@@ -532,39 +532,46 @@ public class AdsRawChannelFactoryTests
         Assert.Same(first.Get("1.2.3.4.5.6", 851), second.Get("1.2.3.4.5.6", 851));
     }
 
-    [Fact]
-    public void RealTransport_CarriesTheConfiguredTimeout()
+    /// <summary>
+    /// The client bound must sit above every bound the channel can construct, for
+    /// both configurations that would otherwise cap one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 750 is the dangerous one. <c>ReadAsync(..., TimeSpan timeout, ct)</c> is
+    /// documented to override <c>TimeoutMs</c> for one attempt, and the channel
+    /// honours it — but <c>AdsClient.Timeout</c> is a per-CLIENT property shared by
+    /// every concurrent caller, so wiring it to <c>TimeoutMs</c> would cut a 2 s
+    /// override off at 750 ms and raise <c>AdsErrorException</c>/<c>ClientSyncTimeOut</c>,
+    /// which this library's contract defines as a device ANSWER. A timeout wearing
+    /// an answer's clothes.
+    /// </para>
+    /// <para>
+    /// 30000 is the original defect: left unassigned the client keeps Beckhoff's own
+    /// 5000 ms default, so a configured bound above it is simply unreachable — and
+    /// fails in that same wrong shape.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(750)]
+    [InlineData(30_000)]
+    public void RealTransport_ClientBoundNeverPreemptsTheChannelsOwn(int configuredTimeoutMs)
     {
-        // Left unassigned, AdsClient keeps Beckhoff's own 5000 ms default, which
-        // silently caps every raw operation: a configured TimeoutMs above 5000
-        // could never be reached, and instead of the documented TimeoutException
-        // the caller would get AdsErrorException/ClientSyncTimeout at 5 s — which
-        // this library's contract defines as a device ANSWER, never retried.
-        //
-        // 30000 is chosen ABOVE that default on purpose: it is the value a
-        // consumer cannot obtain unless the assignment really happens.
         using var factory = Create(
             new FakeTimeProvider(),
-            o => { o.Mode = ConnectionMode.Real; o.TimeoutMs = 30_000; });
+            o => { o.Mode = ConnectionMode.Real; o.TimeoutMs = configuredTimeoutMs; });
 
         // Constructs the client; it does not connect, so no router is involved.
         using var transport = factory.CreateTransport("1.2.3.4.5.6", 0xFFFF);
 
-        var beckhoff = Assert.IsType<BeckhoffManagedRawConnection>(transport);
-        Assert.Equal(30_000, beckhoff.ClientTimeoutMs);
-    }
+        var clientBoundMs = Assert.IsType<BeckhoffManagedRawConnection>(transport).ClientTimeoutMs;
 
-    [Fact]
-    public void RealTransport_TimeoutIsTheConfiguredValue_NotBeckhoffsDefault()
-    {
-        // The complement of the test above, below the default rather than above it,
-        // so neither can pass by coincidence with 5000.
-        using var factory = Create(
-            new FakeTimeProvider(),
-            o => { o.Mode = ConnectionMode.Real; o.TimeoutMs = 750; });
-
-        using var transport = factory.CreateTransport("1.2.3.4.5.6", 0xFFFF);
-
-        Assert.Equal(750, Assert.IsType<BeckhoffManagedRawConnection>(transport).ClientTimeoutMs);
+        // Deliberately a floor, not an equality: the backstop's only job is to never
+        // fire first, so pinning an exact value would just re-pin an implementation
+        // detail. An hour is far beyond any per-call override a real caller passes.
+        Assert.True(
+            clientBoundMs >= (int)TimeSpan.FromHours(1).TotalMilliseconds,
+            $"client bound {clientBoundMs} ms can preempt a per-call override on a " +
+            $"channel configured at {configuredTimeoutMs} ms");
     }
 }
