@@ -136,6 +136,31 @@ public abstract class AdsRawChannelContractTests
     }
 
     /// <remarks>
+    /// Pins ON-CHANGE semantics for raw notifications: the real transport
+    /// registers <c>AdsTransMode.OnChange</c>, so a device only notifies when the
+    /// slot's CONTENT changes — rewriting the same bytes (even from a fresh
+    /// buffer) is silent, and a subsequent different write fires again. Both
+    /// simulated data planes must agree with the hardware they stand in for.
+    /// </remarks>
+    [Fact]
+    public async Task Subscription_DoesNotFireWhenTheWrittenBytesAreUnchanged()
+    {
+        var harness = CreateHarness();
+
+        var received = new List<byte[]>();
+        await harness.Channel.SubscribeAsync(
+            0x11, 1001, 1, 100, data => received.Add(data.ToArray()), CancellationToken.None);
+
+        await harness.Channel.WriteAsync(0x11, 1001, new byte[] { 42 }, CancellationToken.None);
+        await harness.Channel.WriteAsync(0x11, 1001, new byte[] { 42 }, CancellationToken.None); // same bytes, fresh buffer
+        await harness.Channel.WriteAsync(0x11, 1001, new byte[] { 43 }, CancellationToken.None);
+
+        Assert.Equal(2, received.Count);
+        Assert.Equal([42], received[0]);
+        Assert.Equal([43], received[1]);
+    }
+
+    /// <remarks>
     /// <b>Pins <see cref="AdsRawChannel"/>'s own registry gate, not either
     /// transport's notification removal.</b> <c>AdsRawChannel.Unsubscribe</c>
     /// removes the channel's registry entry SYNCHRONOUSLY, before the
@@ -170,21 +195,14 @@ public abstract class AdsRawChannelContractTests
     }
 
     /// <remarks>
-    /// <b>Pins <see cref="AdsRawChannel"/>'s own handler try/catch — the only
-    /// exception handling anywhere in the notification path — not either
-    /// transport's fire-on-write logic.</b> Neither
-    /// <see cref="SimulatedRawConnection"/> nor
-    /// <see cref="InMemoryManagedRawConnection"/> catches an exception thrown by
-    /// its registered callback (both invoke it bare), and the callback each one
-    /// registers is always <c>data => Deliver(id, data)</c>, which never lets an
-    /// exception escape back to the transport. No per-implementation bug in
-    /// either transport's fire-on-write wiring could therefore make this fact
-    /// fail on only one derived class — the promise is entirely
-    /// <see cref="AdsRawChannel"/>'s, exactly as for
-    /// <see cref="DisposedSubscription_StopsFiring"/> above. Verified
-    /// empirically: removing <c>AdsRawChannel.Deliver</c>'s try/catch fails this
-    /// fact on BOTH derived classes simultaneously (see task-8-report.md,
-    /// "Mutation testing").
+    /// Pins that a throwing subscriber cannot stop later notifications. Two nets
+    /// now hold this: <see cref="AdsRawChannel"/>'s own handler try/catch in
+    /// <c>Deliver</c> (the logged one — the callback each transport registers is
+    /// always <c>data =&gt; Deliver(record, data)</c>), and beneath it the shared
+    /// <see cref="SubscriberRegistry{TKey, TValue}"/>'s per-callback isolation,
+    /// which both raw transports compose. The registry's isolation is pinned
+    /// directly by its own unit tests; this fact pins the channel-level outcome
+    /// on both harnesses.
     /// </remarks>
     [Fact]
     public async Task ThrowingHandler_DoesNotStopLaterNotifications()
