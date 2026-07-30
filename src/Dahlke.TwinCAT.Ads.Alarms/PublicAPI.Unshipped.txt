@@ -1,5 +1,12 @@
 #nullable enable
 Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmShapeException
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmShapeException.PlcAlarmShapeException(string! message) -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmShapeException.PlcAlarmShapeException(string! message, System.Exception! innerException) -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcClockKind
+Dahlke.TwinCAT.Ads.Alarms.PlcClockKind.Local = 2 -> Dahlke.TwinCAT.Ads.Alarms.PlcClockKind
+Dahlke.TwinCAT.Ads.Alarms.PlcClockKind.Unspecified = 0 -> Dahlke.TwinCAT.Ads.Alarms.PlcClockKind
+Dahlke.TwinCAT.Ads.Alarms.PlcClockKind.Utc = 1 -> Dahlke.TwinCAT.Ads.Alarms.PlcClockKind
 Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Error = 3 -> Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
 Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Info = 1 -> Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
 Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.None = 0 -> Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
