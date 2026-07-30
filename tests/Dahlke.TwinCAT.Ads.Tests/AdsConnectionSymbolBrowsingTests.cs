@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Diagnostics;
 using System.Text;
 using Dahlke.TwinCAT.Ads.Tests.Fakes;
 using Microsoft.Extensions.Logging;
@@ -347,45 +346,75 @@ public class AdsConnectionSymbolBrowsingTests
     [Fact]
     public async Task SearchSymbolsAsync_AbandonsSlowBrowse_ThrowsTimeoutException_WhenSymbolBrowseTimeoutMsElapses()
     {
-        // The browse (a blocking enumeration) would take 1s; the browse timeout is 50ms. The
-        // caller must stop waiting at ~50ms, NOT ~1s — proving the timeout actually bounds the
-        // CALLER's wait even though the underlying browse cannot itself be interrupted (see
-        // RunBrowseAsync's remarks: it races the browse against a timer via Task.WhenAny rather
-        // than relying on Task.Run's CancellationToken, which does nothing once the delegate has
-        // already started).
+        // The browse (a blocking enumeration) is held on a gate rather than a delay; the browse
+        // timeout is 50ms. The caller must stop waiting at ~50ms while the browse is still blocked
+        // on the gate — proving the timeout actually bounds the CALLER's wait even though the
+        // underlying browse cannot itself be interrupted (see RunBrowseAsync's remarks: it races
+        // the browse against a timer via Task.WhenAny rather than relying on Task.Run's
+        // CancellationToken, which does nothing once the delegate has already started).
         var options = new PlcTargetOptions { DisplayName = "PLC 1", TimeoutMs = 3000, SymbolBrowseTimeoutMs = 50 };
         using var connection = new AdsConnection("plc1", options, new NullLoggerFactory());
-        var loader = new SlowIterationSymbolLoader(TimeSpan.FromSeconds(1));
+        using var browseGate = new ManualResetEventSlim(initialState: false);
+        var loader = new SlowIterationSymbolLoader(TimeSpan.Zero, gate: browseGate);
         connection.SetSymbolLoaderForTesting(loader);
 
-        await Assert.ThrowsAsync<TimeoutException>(
-            () => connection.SearchSymbolsAsync("anything", includeChildren: false, CancellationToken.None));
+        try
+        {
+            await Assert.ThrowsAsync<TimeoutException>(
+                () => connection.SearchSymbolsAsync("anything", includeChildren: false, CancellationToken.None));
 
-        // The invariant is ordering, not duration: the caller must have given up while the browse
-        // was still running. Asserting on elapsed milliseconds instead would be flaky, because the
-        // fake blocks a thread-pool thread for the full second and a small CI runner can starve the
-        // timeout continuation long past the 50ms budget without the mechanism being wrong.
-        Assert.False(loader.BrowseCompleted,
-            "Expected the caller to stop waiting while the slow browse was still running, but the browse had already completed.");
+            // The invariant is ordering, not duration: the caller must have given up while the browse
+            // was still running. Asserting on elapsed milliseconds instead would be flaky, because the
+            // fake blocks a thread-pool thread until released and a small CI runner can starve the
+            // timeout continuation long past the 50ms budget without the mechanism being wrong.
+            // Ordering alone is not sufficient, though: without the gate, a starved timeout
+            // continuation would let the browse finish first and win Task.WhenAny outright, so
+            // Assert.ThrowsAsync<TimeoutException> would fail with "no exception thrown" before this
+            // ordering assertion is ever reached. The gate is what guarantees ThrowsAsync itself
+            // cannot lose that race — the browse cannot complete until the gate is released below.
+            Assert.False(loader.BrowseCompleted,
+                "Expected the caller to stop waiting while the slow browse was still running, but the browse had already completed.");
+        }
+        finally
+        {
+            // Release the blocked thread-pool thread rather than leaving it on its 30s internal
+            // wait — leaking that under a constrained-CPU test run would itself cause flakes
+            // elsewhere.
+            browseGate.Set();
+        }
     }
 
     [Fact]
     public async Task SearchSymbolsAsync_CallerCancels_ThrowsOperationCanceledException_NotTimeoutException()
     {
-        // A large SymbolBrowseTimeoutMs so only the caller's own cancellation can win the race.
+        // A large SymbolBrowseTimeoutMs so only the caller's own cancellation can win the race —
+        // still true, but no longer the whole mechanism. The gate is what makes this deterministic:
+        // the browse is held on a gate rather than a delay, so the enumeration cannot finish until
+        // the test releases it below, and a starved CI runner cannot let the browse complete first
+        // and change which exception the caller observes.
         var options = new PlcTargetOptions { DisplayName = "PLC 1", TimeoutMs = 3000, SymbolBrowseTimeoutMs = 60_000 };
         using var connection = new AdsConnection("plc1", options, new NullLoggerFactory());
-        connection.SetSymbolLoaderForTesting(new SlowIterationSymbolLoader(TimeSpan.FromSeconds(1)));
+        using var browseGate = new ManualResetEventSlim(initialState: false);
+        var loader = new SlowIterationSymbolLoader(TimeSpan.Zero, gate: browseGate);
+        connection.SetSymbolLoaderForTesting(loader);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
-        var sw = Stopwatch.StartNew();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => connection.SearchSymbolsAsync("anything", includeChildren: false, cts.Token));
-        sw.Stop();
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => connection.SearchSymbolsAsync("anything", includeChildren: false, cts.Token));
 
-        Assert.True(sw.ElapsedMilliseconds < 800,
-            $"Expected caller cancellation to win the race well before the 1s slow browse completed; took {sw.ElapsedMilliseconds}ms.");
+            Assert.False(loader.BrowseCompleted,
+                "Expected the caller's cancellation to win while the gated browse was still running.");
+        }
+        finally
+        {
+            // Release the blocked thread-pool thread rather than leaving it on its 30s internal
+            // wait — leaking that under a constrained-CPU test run would itself cause flakes
+            // elsewhere.
+            browseGate.Set();
+        }
     }
 
     [Fact]

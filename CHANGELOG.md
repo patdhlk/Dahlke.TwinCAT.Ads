@@ -5,6 +5,249 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-29
+
+### Added
+
+- **Raw ADS channels — a low-level index-group/index-offset surface.** Until now the library
+  exposed nothing below the symbol layer, so reaching an EtherCAT master, a CoE object
+  dictionary, or the TwinCAT system service meant dropping to `new AdsClient()` and rebuilding
+  connection lifetime, timeout and retry by hand.
+
+  Inject `IAdsRawChannelFactory` — registered by `AddTwinCatAds` alongside the pool — and call
+  `Get(amsNetId, port)` for a cached, permanent `IAdsRawChannel` carrying `ReadAsync`,
+  `WriteAsync`, `ReadWriteAsync`, `ReadStateAsync` and `SubscribeAsync`. Targets are named at
+  the call site rather than declared in configuration, which is what discovery-driven use cases
+  need: an EtherCAT master's Net ID is not known until you have asked for it.
+
+  `ReadWriteAsync` is present because the ADS *ReadWrite* service is not optional: the file
+  protocol's `FILE_OPEN` sends the path as write data and returns the handle as read data, so a
+  read/write-only surface cannot express it at all.
+
+  **Channels are never disposed by consumers.** `Get` is total — it never blocks, and the only
+  input that throws is a `null` Net ID, which is a caller programming error rather than a target
+  that happens not to exist. Reachability is therefore discovered by operating, not by
+  obtaining. Channel identity is permanent; idle eviction drops the underlying transport, not
+  the facade, and the next operation reconnects. This deliberately avoids a refcounted lease,
+  whose correctness would depend on every caller disposing exactly once — the ownership
+  ambiguity that produced the three-instalment teardown race in #9/#13/#15.
+
+  **The Net ID is normalised, so one device is one channel.** `"1.2.3.4.5.6"`,
+  `"01.2.3.4.5.6"` and `" 1.2.3.4.5.6"` all return the same channel and, in simulation, share
+  one seedable store. An octet outside 0–255 is **zeroed, not rejected** — `Get("999.1.1.1.1.1",
+  851)` returns the channel for `0.1.1.1.1.1` — because that is how the ADS stack itself
+  resolves the address when the transport connects, so the channel really does reach the device
+  the key names. A warning is logged once per distinct spelling. The same Net ID used as an
+  `AdsRawChannelOptions.Seed` entry **fails the host at startup** instead: a seed entry is a
+  declaration whose typo has no correct reading, whereas a lookup's only correct answer is what
+  the wire will do.
+
+  **Timeouts bound each ATTEMPT, not the retry sequence.** With the defaults a call can
+  therefore take up to 10 seconds before throwing `TimeoutException`: `RetryCount` of 1 permits
+  two attempts of 5000 ms. The worst case for the attempts themselves is
+  `TimeoutMs × (RetryCount + 1)`. This matches how consumers already retry by hand, and the
+  reason is mechanical — a retry re-creates the transport before reissuing, because a fresh
+  client is what clears the stall. Reusing the stalled one would look like a retry and behave
+  like a second timeout. A call that also has to *build* the transport for a channel with live
+  subscriptions additionally waits for that rebuild's restore pass, which re-registers those
+  subscriptions one at a time under their own separate bounds; that wait precedes the call's own
+  attempt bound rather than being contained by it.
+
+  **An ADS error code is an answer, not a failure.** It is never retried and never tears the
+  channel down. That distinction matters on EtherCAT, where `PortNotConnected`,
+  `TargetPortNotFound` and `DeviceTimeOut` are the ordinary replies from a slave with no mailbox
+  — treating them as transport death would rebuild the connection on every probe of a
+  mailbox-less slave.
+
+  **Raw notification handlers take `ReadOnlySpan<byte>`**, via the named `RawNotificationHandler`
+  delegate rather than `Action<ReadOnlyMemory<byte>>`. The buffer belongs to the transport and is
+  reused once the handler returns; a `ReadOnlyMemory` could be captured and read later, yielding
+  silently wrong bytes with no exception and no stack trace. A span cannot be captured or stored,
+  so that mistake is a compile error, and a handler that needs the data writes a visible
+  `data.ToArray()`. The cost is that handlers cannot be `async`.
+
+  Subscriptions are durable: a transport drop re-registers every live one against the fresh
+  transport — exactly once — while the caller's handle stays valid, and a live subscription pins
+  its channel against idle eviction. **Registration is bounded by `TimeoutMs` but is never
+  retried**, because retrying it would mean dropping and rebuilding the transport, re-registering
+  every *other* subscription on the channel as a side effect of one subscriber's retry.
+
+  **After the host has shut down, `Get` still returns a channel but operating on it fails fast**
+  with `AdsConnectionUnavailableException` rather than opening a transport nothing would ever
+  release. This matters for a consumer hosted service that stops after the factory does, and
+  mirrors the rule `IAdsConnection` already applies to a stopped pool.
+
+- **Simulation for raw channels.** `AdsRawChannelOptions.Mode` selects a seedable byte store,
+  populated up front from `AdsRawChannelOptions.Seed` or at runtime via
+  `IAdsRawChannelFactory.TryGetSimulated`. The store carries **no protocol knowledge** — it does
+  not know what an index group means or how a file request is framed; a consumer seeds the exact
+  bytes its own decoder should read back. An unseeded read answers `DeviceInvalidOffset`,
+  deliberately the code real hardware gives for a bad offset, so error-classification paths run
+  in simulation rather than only against a device.
+
+  Seed entries are validated at startup in **both** modes, so a malformed entry left
+  behind after a switch to `Real` still fails the host rather than sitting silently broken.
+
+  **`RawChannels` binds from `IConfiguration`**, alongside `PlcTargets` and `AmsRouter`, and is
+  equally settable through an `AddTwinCatAds(…)` options delegate. `Seed` is an **array of
+  objects** — `{ AmsNetId, Port, Slots: [{ IndexGroup, IndexOffset, Bytes }] }` — rather than a
+  dictionary keyed on `amsNetId:port`: `:` is the configuration hierarchy separator, so such a
+  key flattens into nested sections and loses the port and both slot indices. `IndexGroup` and
+  `IndexOffset` are strings so that `0x`-prefixed hex keeps working; both decimal and hex are
+  accepted. A seed entry's Net ID is matched against the channel after normalisation, so
+  `01.2.3.4.5.6` still seeds `1.2.3.4.5.6`.
+
+  A seed Net ID is validated more strictly than `IAdsRawChannelFactory.Get` accepts: `Get`
+  resolves an out-of-range octet the way the ADS stack does, whereas a seed entry with the same
+  typo fails the host at startup, because a declaration's typo has no correct reading. A seed
+  `Port` takes decimal or `0x`-prefixed hex, so the conventional `0xFFFF` for an EtherCAT master
+  works in configuration as well as at a call site. Note the corollary: `"0x851"` is **2129**, not
+  851 — the canonical TC3 runtime port is decimal `851` and must be written that way.
+
+  **A seed entry or slot the configuration binder cannot bind now fails the host instead of
+  disappearing.** `ConfigurationBinder` reports a bad *scalar* by throwing with the offending
+  path, but swallows the same failure inside a *collection element* and drops the element. So
+  `"Port": "typo"` bound to a seed list silently missing that target, and a slot written as a bare
+  value rather than an object — `"Slots": [ "0x11", "0x12" ]` — dropped every slot, leaving the
+  target reachable but unseeded so every read answered `DeviceInvalidOffset`. Both are the
+  identical failure mode the array shape was adopted to eliminate, reached by different routes;
+  entry and slot counts are now both checked.
+
+- **`AmsRouter:Routes` — remote routes for the embedded router.** Without this, a host on a
+  machine with no TwinCAT installation could not reach a remote PLC **at all**: the embedded
+  router started with an empty route table and `AmsRouterOptions` exposed only `NetId`, so
+  nothing could tell it where the device was. Verified against a live rack — the identical code
+  path fails with `TargetMachineNotFound` without a route and succeeds with one, same machine and
+  same Net ID.
+
+  It was invisible on Windows, where the OS router already holds the routes, which is also why
+  the hardware suite had never been runnable off Windows.
+
+  ```json
+  "AmsRouter": {
+    "NetId": "192.168.1.220.1.1",
+    "Routes": [
+      { "Name": "rack", "NetId": "5.138.44.199.1.1", "Address": "192.168.1.223" }
+    ]
+  }
+  ```
+
+  **A new option rather than a Beckhoff configuration key, because no such key exists.** Four
+  candidate spellings were measured against the `AmsTcpIpRouter(IConfiguration, …)` overload —
+  `StaticRoutes:0:*`, `RemoteConnections:R:*`, `Router:StaticRoutes:0:*` and
+  `Ams:StaticRoutes:0:*` — and all yielded zero routes. Beckhoff's only other source is a TwinCAT
+  `StaticRoutes.xml` on disk, absent on exactly the machines that need the embedded router.
+
+  `Address` takes an IP address or a host name; the router resolves either. Entries are added
+  **after** the router has started — the ordering that was verified on hardware — and **before**
+  the readiness signal releases the connection pool, so a pool connection never races a route
+  that is not in the table yet. Each is logged at `Information` with its name, Net ID and
+  address; a route the router rejects is logged at `Warning` naming it rather than thrown, since
+  throwing would tear down a working router and make one unreachable device cost every reachable
+  one. Routes configured while `AmsRouter:NetId` is unset are warned about rather than ignored in
+  silence.
+
+  A route's `NetId` is validated with the **strict** six-octet 0–255 check shared with
+  raw-channel seed entries, deliberately not `AmsNetId.TryParse`: that method *launders* an
+  out-of-range octet, returning `true` for `999.1.1.1.1.1` and yielding `0.1.1.1.1.1`, so
+  delegating would let a typo'd route silently address a different device. `Name` and `Address`
+  must be non-empty, and duplicate names fail the host because the router keys routes by name.
+  Routes are validated whether or not the embedded router is enabled, so a typo left behind after
+  a switch to the system router still fails rather than waiting to be rediscovered. A route
+  element the configuration binder discards — `"Routes": [ "rack" ]`, a bare value where an
+  object belongs — fails the host too, the same protection seed entries and slots already have.
+
+### Changed
+
+- **The embedded AMS router now starts when raw channels are real, even if every configured PLC
+  target is simulated.** Raw channels have no symbol layer to fall back on and cannot route
+  without it, so the previous `_hasRealTargets` gate would have left every `Get` failing at
+  connect in such a host. `AddTwinCatAdsSimulation` correspondingly forces `RawChannels.Mode` to
+  `Simulated`, so the helper whose entire promise is "no hardware needed" cannot quietly start a
+  router.
+
+- **`AdsClient.Timeout` is now set explicitly on both client construction sites, as a backstop
+  that is deliberately never the effective bound.** The library's own `CancellationTokenSource`
+  remains the authority, because `AdsClient.Timeout` is a per-*client* property on a client that
+  serves every concurrent caller, so it cannot express a per-call bound — it can only cap one.
+  Wiring it to the configured operation timeout was tried and reverted: on a channel configured
+  at 750 ms, a caller passing an explicit 2 s override would have been cut off at 750 ms and, worse,
+  received `AdsErrorException`/`ClientSyncTimeOut` instead of `TimeoutException` — a timeout
+  wearing an answer's clothes.
+
+  **The two backstops deliberately differ in shape.** The symbol layer derives its value as
+  `2 × max(TimeoutMs, SymbolBrowseTimeoutMs)` (computed in `long` and clamped to `int.MaxValue`),
+  which is possible because that layer has no per-call timeout override — both bounds are known
+  at construction. The raw path instead uses a flat **one hour**, because its per-call `TimeSpan`
+  overload is both unvalidated and unknown at construction time, so no construction-time formula
+  could bound it. One hour rather than `int.MaxValue` is also deliberate: it is not yet verified
+  whether cancelling the linked token aborts the underlying ADS transaction or merely abandons
+  the await. If it only abandons, that constant is how long an abandoned request stays
+  outstanding — `int.MaxValue` ms is ~24.8 days, an hour self-heals. Settling that question needs
+  hardware and has not been done.
+
+- **`Beckhoff` obsolete-overload suppressions are confined to one file.** The index-group
+  overloads are `[Obsolete]` in 7.x with no `AdsClient`-compatible replacement;
+  `BeckhoffManagedRawConnection` is now the single permitted `#pragma warning disable CS0618`
+  site, so consumers no longer carry it.
+
+### Fixed
+
+- **Configured symbol-layer timeouts were unreachable: Beckhoff's invisible 5000 ms default was
+  the real bound.** `AdsClient.Timeout` was never assigned anywhere in `src/`, so the Beckhoff
+  client's own 5000 ms default capped every symbol operation regardless of configuration. Two
+  consequences, both shipped since 0.5.3:
+
+  - `PlcTargetOptions.TimeoutMs` above 5000 could not be reached.
+  - `PlcTargetOptions.SymbolBrowseTimeoutMs` **defaults to 30000** and was therefore guaranteed
+    unreachable out of the box. `IAdsConnection`'s documented behaviour — racing the browse
+    against `SymbolBrowseTimeoutMs` on the thread pool — bounds the *caller's wait* correctly,
+    but nothing could extend the client's own cap underneath it. A browse the author clearly
+    expected to be allowed 30 s (a large PLC's symbol upload plausibly needs it) aborted at 5 s.
+
+  In both cases the failure also arrived in the wrong shape: `AdsErrorException` with
+  `AdsErrorCode.ClientSyncTimeOut`, which this library's own contract defines as a device
+  *answer*, rather than the documented `TimeoutException`.
+
+  **Migration.** Two behaviour changes for existing consumers:
+
+  1. **`TimeoutException` now replaces `AdsErrorException`/`ClientSyncTimeOut` for timeouts over
+     5 s.** Code catching `AdsErrorException` to detect a slow timeout on a target configured
+     above 5000 ms must switch to `TimeoutException`.
+  2. **A symbol browse that previously died at 5 s can now legitimately run to 30 s** (or to
+     whatever `SymbolBrowseTimeoutMs` says). Anyone who was relying on the fast 5 s failure as a
+     liveness signal now waits longer. Lower `SymbolBrowseTimeoutMs` explicitly if that matters.
+
+  No existing test relied on the 5 s cap: the symbol-browsing tests inject a fake loader and
+  never call `Connect()`, so nothing in the suite could ever have been sensitive to
+  `AdsClient.Timeout`.
+
+- **`PlcTargetOptions.SymbolBrowseTimeoutMs` is now validated at startup.** It previously had no
+  validation at all, while `TimeoutMs` did. That was inert as long as the 5 s cap always won, but
+  the value flows into `Task.Delay(SymbolBrowseTimeoutMs, …)`, which throws
+  `ArgumentOutOfRangeException` for any negative other than `-1` — so lifting the cap turned
+  `SymbolBrowseTimeoutMs: -5` from harmless into a crash on the first browse. It must now be
+  greater than zero, checked at startup with the other target options and reported alongside
+  them. No upper bound is imposed on either timeout: picking a ceiling would be an unasked-for
+  policy decision, and the backstop arithmetic already clamps large values safely.
+
+- **Two symbol-browsing tests could fail under CPU pressure** (test-only, and pre-existing on
+  `main` rather than introduced here). `SearchSymbolsAsync_AbandonsSlowBrowse_…` and
+  `SearchSymbolsAsync_CallerCancels_…` both raced a fake that blocks a thread-pool thread for a
+  full second while xUnit runs collections at core count — two, under the constrained-container
+  recipe this project uses to reproduce teardown races. One asserted a hard wall-clock bound,
+  which is unsound under load; the other was already ordering-based, but ordering alone did not
+  save it, because a starved continuation lets the browse win `Task.WhenAny` outright and
+  `ThrowsAsync` then fails with "no exception" before any ordering assertion is reached. Both now
+  hold the browse on an explicit gate, the way a third test in the same file already did.
+
+  **The justification is mechanistic, not statistical.** The gate makes the race window
+  structurally unreachable — the enumeration cannot complete until the test releases it — so
+  neither the exception type nor the ordering can be decided by scheduler luck. The measured
+  evidence alone would not support a stronger claim: 0 failures in 15 whole-suite container runs
+  against a historical ~16% (4 of 25) does not statistically establish improvement, since the
+  one-sided 95% upper bound on 0/15 is ≈18%.
+
 ## [0.5.3] - 2026-07-29
 
 There is no 0.5.2 release. The two fixes below that were staged under that number never

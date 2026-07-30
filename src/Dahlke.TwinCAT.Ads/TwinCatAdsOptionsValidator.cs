@@ -19,6 +19,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
         ValidateTargets(options, failures);
         ValidateRouter(options, failures);
         ValidateDiagnostics(options, failures);
+        ValidateRawChannels(options, failures);
 
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
@@ -51,6 +52,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
 
             ValidateTargetPort(targetId, target, failures);
             ValidateTargetTimeout(targetId, target, failures);
+            ValidateTargetSymbolBrowseTimeout(targetId, target, failures);
             ValidateTargetInitialValues(target, failures);
         }
     }
@@ -113,12 +115,37 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
         }
     }
 
+    /// <summary>
+    /// Was previously unvalidated because <see cref="AdsClient.Timeout"/> was
+    /// never wired to it — Beckhoff's invisible 5000 ms default made a bad value
+    /// inert. It now flows into <c>Task.Delay(SymbolBrowseTimeoutMs, ...)</c> on
+    /// the first symbol browse, and <see cref="Task.Delay(int,CancellationToken)"/>
+    /// throws <see cref="ArgumentOutOfRangeException"/> for any negative value
+    /// other than <c>-1</c>. Catching a bad value here, at startup, is the same
+    /// standard this validator already applies to raw-channel seed entries: a typo
+    /// fails the host instead of a poll hours later.
+    /// </summary>
+    private static void ValidateTargetSymbolBrowseTimeout(
+        string targetId,
+        PlcTargetOptions target,
+        List<string> failures)
+    {
+        if (target.SymbolBrowseTimeoutMs <= 0)
+        {
+            failures.Add(
+                $"Target '{targetId}': SymbolBrowseTimeoutMs '{target.SymbolBrowseTimeoutMs}' must be greater than zero. " +
+                $"Fix 'PlcTargets:{targetId}:SymbolBrowseTimeoutMs' (default: 30000 ms).");
+        }
+    }
+
     // ------------------------------------------------------------------
     // Router
     // ------------------------------------------------------------------
 
     private static void ValidateRouter(TwinCatAdsOptions options, List<string> failures)
     {
+        ValidateRouterRoutes(options, failures);
+
         var netId = options.Router?.NetId;
 
         // Null or empty means "use system router" — always valid.
@@ -131,6 +158,85 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
                 $"Router.NetId '{netId}' is not a valid AMS Net ID. " +
                 $"Expected six dot-separated octets, e.g. '127.0.0.1.1.1'. " +
                 $"Fix 'AmsRouter:NetId', or remove the key to disable the embedded router.");
+        }
+    }
+
+    /// <summary>
+    /// Validates <see cref="AmsRouterOptions.Routes"/>. Every entry needs a name, an
+    /// address and a strictly well-formed Net ID, and names must be unique.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Validated in BOTH router modes, even when <c>AmsRouter:NetId</c> is unset and
+    /// the entries will be ignored, so a typo left behind after switching to the
+    /// system router still fails the host rather than sitting silently broken until
+    /// someone switches back. This matches how raw-channel seeds are treated.
+    /// </para>
+    /// <para>
+    /// <b>The Net ID check is <c>RawSeedParser.IsWellFormedNetId</c>, NOT
+    /// <see cref="AmsNetId.TryParse"/>.</b> That method LAUNDERS an out-of-range
+    /// octet instead of rejecting it — <c>AmsNetId.TryParse("999.1.1.1.1.1")</c>
+    /// returns <see langword="true"/> and yields <c>0.1.1.1.1.1</c>, so <c>256</c>,
+    /// <c>300</c> and <c>999</c> all collapse to the same address. Delegating would
+    /// let a typo'd route pass startup and then quietly address a DIFFERENT DEVICE
+    /// than the one written in configuration. A route is a declaration whose typo has
+    /// no correct reading, so it is rejected — the same rule, and the same shared
+    /// method, as a raw-channel seed entry.
+    /// </para>
+    /// <para>
+    /// Note this is stricter than <see cref="ValidateRouter"/>'s own check of
+    /// <c>AmsRouter:NetId</c>, which still uses <see cref="AmsNetId.TryParse"/>.
+    /// Tightening that is a behaviour change to an already-shipped key and belongs to
+    /// its own change rather than being smuggled in here.
+    /// </para>
+    /// </remarks>
+    private static void ValidateRouterRoutes(TwinCatAdsOptions options, List<string> failures)
+    {
+        var router = options.Router;
+        if (router is null)
+            return;
+
+        // Routes the binder threw away. Relayed verbatim: already path-scoped and
+        // actionable, exactly like RawChannels' SeedBindingErrors.
+        failures.AddRange(router.RouteBindingErrors);
+
+        var seenNames = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < router.Routes.Count; i++)
+        {
+            var route = router.Routes[i];
+
+            if (string.IsNullOrWhiteSpace(route.Name))
+            {
+                failures.Add(
+                    $"AmsRouter:Routes:{i}:Name is required — the embedded router keys its route " +
+                    $"table by name. Give the route a name unique within 'AmsRouter:Routes'.");
+            }
+            else if (seenNames.TryGetValue(route.Name, out var first))
+            {
+                failures.Add(
+                    $"AmsRouter:Routes:{i}:Name '{route.Name}' duplicates " +
+                    $"'AmsRouter:Routes:{first}:Name'. The embedded router keys routes by name " +
+                    $"— two routes sharing one are not two routes — so give each a distinct name.");
+            }
+            else
+            {
+                seenNames[route.Name] = i;
+            }
+
+            if (!RawSeedParser.IsWellFormedNetId(route.NetId))
+            {
+                failures.Add(
+                    $"AmsRouter:Routes:{i}:NetId '{route.NetId}' is not six dot-separated octets " +
+                    $"in the range 0-255 (e.g. '5.138.44.199.1.1').");
+            }
+
+            if (string.IsNullOrWhiteSpace(route.Address))
+            {
+                failures.Add(
+                    $"AmsRouter:Routes:{i}:Address is required — set it to the device's IP address " +
+                    $"(e.g. '192.168.1.223') or host name.");
+            }
         }
     }
 
@@ -147,6 +253,83 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
             failures.Add(
                 $"Diagnostics.SymbolDump.MaxDepth '{maxDepth}' must be ≥ 0. " +
                 $"Fix 'AdsSymbolDump:MaxDepth' (default: 1; use 0 to traverse all levels).");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // RawChannels
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Validates <see cref="AdsRawChannelOptions"/>. Seed entries are parsed HERE,
+    /// at startup, so a malformed AMS Net ID or index group fails the host rather
+    /// than a poll hours later.
+    /// </summary>
+    private static void ValidateRawChannels(TwinCatAdsOptions options, List<string> failures)
+    {
+        var raw = options.RawChannels;
+
+        if (raw.TimeoutMs <= 0)
+            failures.Add($"RawChannels:TimeoutMs must be greater than 0 (was {raw.TimeoutMs}).");
+
+        if (raw.RetryCount < 0)
+            failures.Add($"RawChannels:RetryCount must not be negative (was {raw.RetryCount}).");
+
+        if (raw.IdleEvictionMs <= 0)
+            failures.Add($"RawChannels:IdleEvictionMs must be greater than 0 (was {raw.IdleEvictionMs}).");
+
+        // Entries the binder threw away. Relayed verbatim: the message is already
+        // path-scoped and actionable, exactly like InitialValueBindingErrors.
+        failures.AddRange(raw.SeedBindingErrors);
+
+        for (var i = 0; i < raw.Seed.Count; i++)
+            ValidateRawSeed(raw.Seed[i], i, failures);
+    }
+
+    /// <summary>
+    /// Validates one <see cref="AdsRawChannelSeed"/>. Messages carry BOTH the list
+    /// index — the configuration path an operator edits is
+    /// <c>RawChannels:Seed:{index}:…</c> — and the offending value, because an
+    /// index alone is unsearchable and a value alone is ambiguous across entries.
+    /// </summary>
+    private static void ValidateRawSeed(
+        AdsRawChannelSeed seed,
+        int index,
+        List<string> failures)
+    {
+        if (!RawSeedParser.IsWellFormedNetId(seed.AmsNetId))
+        {
+            failures.Add(
+                $"RawChannels:Seed:{index}:AmsNetId '{seed.AmsNetId}' is not six dot-separated " +
+                $"octets in the range 0-255 (e.g. '192.168.1.10.3.1').");
+        }
+
+        if (seed.Port is < 0 or > 65535)
+        {
+            failures.Add(
+                $"RawChannels:Seed:{index}:Port '{seed.Port}' is outside the range 0-65535.");
+        }
+
+        for (var s = 0; s < seed.Slots.Count; s++)
+        {
+            var slot = seed.Slots[s];
+
+            if (!RawSeedParser.TryParseIndex(slot.IndexGroup, out _))
+            {
+                failures.Add(
+                    $"RawChannels:Seed:{index}:Slots:{s}:IndexGroup '{slot.IndexGroup}' is not a " +
+                    $"number (decimal or 0x-prefixed hex, no sign, no whitespace).");
+            }
+
+            if (!RawSeedParser.TryParseIndex(slot.IndexOffset, out _))
+            {
+                failures.Add(
+                    $"RawChannels:Seed:{index}:Slots:{s}:IndexOffset '{slot.IndexOffset}' is not a " +
+                    $"number (decimal or 0x-prefixed hex, no sign, no whitespace).");
+            }
+
+            if (!RawSeedParser.TryParseHex(slot.Bytes, out _, out var payloadError))
+                failures.Add($"RawChannels:Seed:{index}:Slots:{s}:Bytes — {payloadError}");
         }
     }
 }

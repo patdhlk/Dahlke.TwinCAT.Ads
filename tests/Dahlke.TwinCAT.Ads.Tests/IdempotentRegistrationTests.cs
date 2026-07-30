@@ -38,11 +38,12 @@ public class IdempotentRegistrationTests
             o.Targets["plc1"] = new PlcTargetOptions { AmsNetId = "1.2.3.4.5.6" };
         });
 
-        // Exactly 2 IHostedService registrations: one router + one pool (not 4).
+        // Exactly 3 IHostedService registrations: one router + one pool + one raw
+        // channel factory (not 6).
         int hostedServiceCount = services
             .Count(d => d.ServiceType == typeof(IHostedService));
 
-        Assert.Equal(2, hostedServiceCount);
+        Assert.Equal(3, hostedServiceCount);
     }
 
     [Fact]
@@ -74,9 +75,10 @@ public class IdempotentRegistrationTests
     public void AddTwinCatAdsSimulation_CalledTwice_DoesNotDuplicateHostedServices()
     {
         // AddTwinCatAdsSimulation now registers the same core services as
-        // AddTwinCatAds (router + pool = 2 hosted services).  Calling it twice
-        // must not result in 4 hosted services — the AdsRouterReadySignal guard
-        // in RegisterCoreServices ensures idempotency for the service registrations.
+        // AddTwinCatAds (router + pool + raw channel factory = 3 hosted services).
+        // Calling it twice must not result in 6 hosted services — the
+        // AdsRouterReadySignal guard in RegisterCoreServices ensures idempotency
+        // for the service registrations.
         var services = new ServiceCollection();
         services.AddLogging();
 
@@ -89,11 +91,12 @@ public class IdempotentRegistrationTests
             o.Targets["sim1"] = new PlcTargetOptions { Mode = ConnectionMode.Simulated };
         });
 
-        // Exactly 2 IHostedService registrations: one router + one pool (not 4).
+        // Exactly 3 IHostedService registrations: one router + one pool + one raw
+        // channel factory (not 6).
         int hostedServiceCount = services
             .Count(d => d.ServiceType == typeof(IHostedService));
 
-        Assert.Equal(2, hostedServiceCount);
+        Assert.Equal(3, hostedServiceCount);
     }
 
     [Fact]
@@ -124,10 +127,10 @@ public class IdempotentRegistrationTests
     [Fact]
     public void AddTwinCatAds_Then_AddTwinCatAdsSimulation_DoesNotDuplicateHostedServices()
     {
-        // AddTwinCatAds registers core (router + pool).
+        // AddTwinCatAds registers core (router + pool + raw channel factory).
         // AddTwinCatAdsSimulation then hits the guard (RegisterCoreServices skips)
         // and only registers the PostConfigure mode-flip.
-        // Total hosted services: still 2 (not 4).
+        // Total hosted services: still 3 (not 6).
         var services = new ServiceCollection();
         services.AddLogging();
 
@@ -144,7 +147,7 @@ public class IdempotentRegistrationTests
         int hostedServiceCount = services
             .Count(d => d.ServiceType == typeof(IHostedService));
 
-        Assert.Equal(2, hostedServiceCount);
+        Assert.Equal(3, hostedServiceCount);
     }
 
     [Fact]

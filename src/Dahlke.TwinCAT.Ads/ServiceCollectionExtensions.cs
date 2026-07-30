@@ -15,7 +15,8 @@ namespace Dahlke.TwinCAT.Ads;
 /// (<c>AddTwinCatAds</c> / <c>AddTwinCatAdsSimulation</c>):
 /// <list type="number">
 ///   <item><b>Config-only</b> — <c>AddTwinCatAds(IConfiguration)</c>: existing
-///   behaviour; reads targets and router settings from the supplied configuration.</item>
+///   behaviour; reads targets, router, diagnostics and raw-channel settings from
+///   the supplied configuration.</item>
 ///   <item><b>Code-first</b> — <c>AddTwinCatAds(Action&lt;TwinCatAdsOptions&gt;)</c>:
 ///   no <see cref="IConfiguration"/> required; suitable for pure code-first
 ///   applications, unit tests, and worker services that do not use
@@ -47,7 +48,8 @@ public static class ServiceCollectionExtensions
     /// Registers the embedded ADS router and connection pool with health checks
     /// and automatic reconnection.
     /// <para>Reads options from the supplied <paramref name="configuration"/>
-    /// (expects the <c>AmsRouter</c> and <c>PlcTargets</c> sections).</para>
+    /// (the <c>PlcTargets</c>, <c>AmsRouter</c>, <c>AdsSymbolDump</c> and
+    /// <c>RawChannels</c> sections; each is optional).</para>
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
     /// <param name="configuration">The application configuration root.</param>
@@ -126,12 +128,20 @@ public static class ServiceCollectionExtensions
     /// that forces every target into simulation mode for offline development.
     /// No ADS router or TwinCAT installation is required.
     /// <para>
-    /// Reads options from the supplied <paramref name="configuration"/>
-    /// (expects the <c>PlcTargets</c> section), then applies a
-    /// <see cref="IServiceCollection"/> PostConfigure delegate that sets every
-    /// target's <see cref="PlcTargetOptions.Mode"/> to
+    /// Reads options from the supplied <paramref name="configuration"/> exactly as
+    /// <see cref="AddTwinCatAds(IServiceCollection,IConfiguration)"/> does, then
+    /// applies a PostConfigure delegate that sets every target's
+    /// <see cref="PlcTargetOptions.Mode"/> — and
+    /// <see cref="AdsRawChannelOptions.Mode"/> — to
     /// <see cref="ConnectionMode.Simulated"/> after all other Configure delegates
     /// have run.
+    /// </para>
+    /// <para>
+    /// <b>That PostConfigure BEATS configuration.</b> Binding is a Configure
+    /// delegate and therefore runs first, so a host that writes
+    /// <c>"RawChannels": { "Mode": "Real" }</c> and calls this method still gets
+    /// simulation — which is the point, since this overload's whole promise is that
+    /// no hardware is needed.
     /// </para>
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
@@ -229,8 +239,28 @@ public static class ServiceCollectionExtensions
                 // type to bind onto. See InitialValueBinder.
                 InitialValueBinder.Bind(plcTargets, o.Targets);
 
-                // Router.NetId ← AmsRouter:NetId (existing layout).
-                o.Router.NetId = configuration.GetSection("AmsRouter").GetValue<string>("NetId");
+                // Router ← AmsRouter:NetId and AmsRouter:Routes (existing layout).
+                //
+                // TWO PROPERTIES, not the section. A third property added to
+                // AmsRouterOptions is NOT picked up here and would stay at its default
+                // however a host spells it in configuration — the same way RawChannels
+                // shipped dead. OptionsSectionsAreBoundTests does not cover this: it
+                // guards new sections on TwinCatAdsOptions, not new members of a section
+                // bound property-by-property. Extend these lines, or switch to a
+                // whole-section Bind as RawChannels below does.
+                var amsRouter = configuration.GetSection("AmsRouter");
+                o.Router.NetId = amsRouter.GetValue<string>("NetId");
+
+                // Routes is ASSIGNED, not Bind-appended, so a host that registers
+                // twice ends up with one copy of each route rather than two. That
+                // matters more here than for RawChannels:Seed: routes are keyed by
+                // name and a duplicate name is a startup FAILURE, so appending would
+                // break every host calling AddTwinCatAds twice.
+                var routesSection = amsRouter.GetSection("Routes");
+                var routes = routesSection.Get<List<AmsRouteOptions>>();
+                if (routes is not null)
+                    o.Router.Routes = routes;
+                RecordDiscardedRoutes(routesSection, o.Router);
 
                 // SymbolDump: bind legacy key first (lower precedence), then
                 // new section over it (higher precedence wins).
@@ -241,8 +271,166 @@ public static class ServiceCollectionExtensions
                 var symbolDumpSection = configuration.GetSection("AdsSymbolDump");
                 if (symbolDumpSection.Exists())
                     symbolDumpSection.Bind(o.Diagnostics.SymbolDump);
+
+                // RawChannels ← the whole section. Unlike the sections above there is
+                // no legacy layout to reconcile, so a plain Bind covers every member.
+                // Seed is an ARRAY of objects precisely so this works: a dictionary
+                // keyed on "amsNetId:port" flattened into nested sections, because ':'
+                // is the hierarchy separator, and bound with no slots at all.
+                var rawChannels = configuration.GetSection("RawChannels");
+                rawChannels.Bind(o.RawChannels);
+                RecordDiscardedSeedEntries(rawChannels, o.RawChannels);
             })
             .ValidateOnStart();
+    }
+
+    /// <summary>
+    /// Detects seed entries the binder silently DISCARDED and records them for the
+    /// validator to report.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ConfigurationBinder</c> swallows a failure inside a collection element and
+    /// drops the element, so
+    /// <c>"Seed": [{ "AmsNetId": "1.2.3.4.5.6", "Port": "typo" }]</c> binds to an
+    /// empty list with no error — a configured seed that simply is not there. A bad
+    /// SCALAR throws instead, so only collections need this.
+    /// </para>
+    /// <para>
+    /// <b>Both levels are checked, because BOTH are reachable.</b> A slot is itself a
+    /// collection element, so it is dropped by the same mechanism while the outer
+    /// counts still agree. Two routes reach it, and neither needs a convertible-typed
+    /// member:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>a failed CONVERSION — <c>Port</c> is the only convertible-typed member
+    ///   today, which is why the entry-level message names it;</item>
+    ///   <item>an element written as a SCALAR where an object belongs —
+    ///   <c>"Slots": [ "0x11", "0x12" ]</c>, plausible from someone writing slots as
+    ///   bare index groups. Measured: 2 configured, 0 bound, and without this check
+    ///   zero errors, leaving the channel reachable but empty so every read answers an
+    ///   ADS error.</item>
+    /// </list>
+    /// <para>
+    /// A count comparison rather than a re-validation of each value, so it cannot drift
+    /// from the binder's own rules: it fires for any cause of a drop, present or future.
+    /// </para>
+    /// <para>
+    /// Deliberately <c>bound &lt; configured</c> rather than <c>!=</c>. A host that
+    /// calls <c>AddTwinCatAds(configuration)</c> twice registers this delegate twice,
+    /// and <c>Bind</c> APPENDS to a list, so the bound count legitimately exceeds the
+    /// configured one. Only a SHORTFALL means something was thrown away.
+    /// </para>
+    /// <para>
+    /// The slot pass runs only when the outer counts are EQUAL. That is what makes
+    /// positional alignment sound — a dropped entry would shift every later index — and
+    /// it also covers the double-registration case for free, since the second pass sees
+    /// a doubled outer count and skips. A slot shortfall is therefore recorded exactly
+    /// once.
+    /// </para>
+    /// <para>
+    /// <b>Deliberately does NOT clear <see cref="AdsRawChannelOptions.SeedBindingErrors"/>
+    /// first</b>, unlike <c>InitialValueBinder.Bind</c>, which recomputes its errors
+    /// from scratch on every pass. This check cannot: on a second registration pass the
+    /// bound count is already doubled, so the comparison is no longer meaningful and
+    /// the pass stays silent. Clearing would then ERASE a shortfall the first pass
+    /// correctly found — turning a cosmetic duplicate line into a silent miss. The
+    /// duplicate is the lesser fault, and it only occurs for a double-registering host
+    /// whose every entry is bad.
+    /// </para>
+    /// </remarks>
+    private static void RecordDiscardedSeedEntries(
+        IConfiguration rawChannels,
+        AdsRawChannelOptions options)
+    {
+        var seedSection = rawChannels.GetSection("Seed");
+        if (!seedSection.Exists())
+            return;
+
+        // The same enumeration the binder itself walked, so index i here is the entry
+        // the binder appended at position i.
+        var configuredEntries = seedSection.GetChildren().ToList();
+
+        if (options.Seed.Count < configuredEntries.Count)
+        {
+            options.SeedBindingErrors.Add(
+                $"RawChannels:Seed declares {configuredEntries.Count} " +
+                $"entr{(configuredEntries.Count == 1 ? "y" : "ies")} but only {options.Seed.Count} " +
+                $"could be bound; the configuration binder DISCARDED the rest instead of reporting " +
+                $"them. Check that every entry is an OBJECT and that its 'Port' is a number — an " +
+                $"entry the binder cannot bind is dropped silently.");
+
+            // Indices no longer line up, so a slot comparison would misattribute.
+            return;
+        }
+
+        if (options.Seed.Count != configuredEntries.Count)
+            return;   // more bound than configured: a second registration pass appended.
+
+        for (var i = 0; i < configuredEntries.Count; i++)
+        {
+            var configuredSlots = configuredEntries[i].GetSection("Slots").GetChildren().Count();
+            var boundSlots = options.Seed[i].Slots.Count;
+
+            if (boundSlots >= configuredSlots)
+                continue;
+
+            options.SeedBindingErrors.Add(
+                $"RawChannels:Seed:{i}:Slots declares {configuredSlots} " +
+                $"slot{(configuredSlots == 1 ? "" : "s")} but only {boundSlots} could be bound; the " +
+                $"configuration binder DISCARDED the rest instead of reporting them. Each slot must " +
+                $"be an OBJECT with 'IndexGroup', 'IndexOffset' and 'Bytes' — a bare value such as " +
+                $"\"0x11\" cannot bind to a slot and is dropped silently, leaving the target " +
+                $"reachable but unseeded.");
+        }
+    }
+
+    /// <summary>
+    /// Detects <c>AmsRouter:Routes</c> entries the binder silently DISCARDED and
+    /// records them for the validator to report.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same mechanism as <see cref="RecordDiscardedSeedEntries"/>, for the same
+    /// reason: <c>ConfigurationBinder</c> swallows a failure inside a collection
+    /// element and drops the element. No route member is convertible-typed — all three
+    /// are <see cref="string"/> — but a conversion failure is not the only route to a
+    /// drop. An element written as a SCALAR where an object belongs,
+    /// <c>"Routes": [ "rack" ]</c>, cannot bind to a complex type and is dropped with
+    /// no error at all. A route that vanishes is precisely the failure this section
+    /// exists to remove: the host starts, the router runs, and every operation against
+    /// the device answers <c>TargetMachineNotFound</c>.
+    /// </para>
+    /// <para>
+    /// <b>Clears first, unlike the seed check.</b> <c>Routes</c> is ASSIGNED by the
+    /// binding step rather than Bind-appended, so a second registration pass sees the
+    /// same counts as the first and recomputes the same answer — the recompute is
+    /// meaningful, so a stale message from an earlier pass should not survive
+    /// alongside it. The seed check cannot clear, because its bound count doubles on a
+    /// second pass and clearing would erase a real shortfall.
+    /// </para>
+    /// </remarks>
+    private static void RecordDiscardedRoutes(
+        IConfigurationSection routesSection,
+        AmsRouterOptions options)
+    {
+        options.RouteBindingErrors.Clear();
+
+        if (!routesSection.Exists())
+            return;
+
+        var configured = routesSection.GetChildren().Count();
+
+        if (options.Routes.Count >= configured)
+            return;
+
+        options.RouteBindingErrors.Add(
+            $"AmsRouter:Routes declares {configured} " +
+            $"rout{(configured == 1 ? "e" : "es")} but only {options.Routes.Count} could be bound; " +
+            $"the configuration binder DISCARDED the rest instead of reporting them. Each route " +
+            $"must be an OBJECT with 'Name', 'NetId' and 'Address' — a bare value such as " +
+            $"\"rack\" cannot bind to a route and is dropped silently, leaving the target " +
+            $"unreachable with no error at startup.");
     }
 
     /// <summary>
@@ -265,7 +453,8 @@ public static class ServiceCollectionExtensions
     /// <c>AddTwinCatAds</c> overloads: <see cref="TimeProvider"/>, the router
     /// ready signal, <see cref="AdsRouterService"/>, the connection factory, and
     /// the connection pool (both as <see cref="AdsConnectionPool"/> and as
-    /// <see cref="IAdsConnectionPool"/>).
+    /// <see cref="IAdsConnectionPool"/>), and the raw channel factory (both as
+    /// <see cref="AdsRawChannelFactory"/> and as <see cref="IAdsRawChannelFactory"/>).
     /// </summary>
     private static void RegisterCoreServices(IServiceCollection services)
     {
@@ -291,16 +480,22 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AdsConnectionPool>();
         services.AddSingleton<IAdsConnectionPool>(sp => sp.GetRequiredService<AdsConnectionPool>());
         services.AddHostedService(sp => sp.GetRequiredService<AdsConnectionPool>());
+        services.AddSingleton<AdsRawChannelFactory>();
+        services.AddSingleton<IAdsRawChannelFactory>(sp => sp.GetRequiredService<AdsRawChannelFactory>());
+        services.AddHostedService(sp => sp.GetRequiredService<AdsRawChannelFactory>());
     }
 
     /// <summary>
     /// Registers the PostConfigure delegate used by all
     /// <c>AddTwinCatAdsSimulation</c> overloads.
     /// <para>
-    /// The delegate flips every target's <see cref="PlcTargetOptions.Mode"/> to
+    /// The delegate flips every target's <see cref="PlcTargetOptions.Mode"/>, and
+    /// <see cref="AdsRawChannelOptions.Mode"/>, to
     /// <see cref="ConnectionMode.Simulated"/> after all other Configure delegates
     /// have run, ensuring that config-bound or lambda-added targets are all in
-    /// simulation mode regardless of how they were originally declared.
+    /// simulation mode regardless of how they were originally declared. Binding is
+    /// itself a Configure delegate, so this deliberately overrides a
+    /// <c>RawChannels:Mode</c> of <c>Real</c> read from configuration.
     /// </para>
     /// <para>
     /// This method is intentionally NOT guarded by an idempotency check — the
@@ -317,6 +512,10 @@ public static class ServiceCollectionExtensions
         {
             foreach (var target in o.Targets.Values)
                 target.Mode = ConnectionMode.Simulated;
+
+            // Raw channels too: otherwise the helper whose entire promise is
+            // "no hardware needed" quietly starts an embedded router.
+            o.RawChannels.Mode = ConnectionMode.Simulated;
         });
     }
 }
