@@ -14,7 +14,7 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 /// </para>
 /// <para>
 /// <b>Not thread-safe by itself.</b> <see cref="Apply"/> must be called from one thread
-/// at a time; <see cref="PlcAlarmMonitor"/> serialises it under a lock. Reads of
+/// at a time; <c>PlcAlarmMonitor</c> serialises it under a lock. Reads of
 /// <see cref="Outstanding"/> are safe from any thread — it returns an immutable snapshot
 /// published by a single volatile write.
 /// </para>
