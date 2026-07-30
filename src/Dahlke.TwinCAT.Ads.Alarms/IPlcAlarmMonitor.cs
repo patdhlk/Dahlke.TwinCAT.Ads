@@ -8,7 +8,18 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 /// <para>
 /// Registered as a singleton by <c>AddTwinCatAdsAlarms</c>. Subscriptions are opened
 /// when the host starts and are durable across reconnects, inherited from the core
-/// library's facade subscriptions.
+/// library's facade subscriptions. A target that is unreachable at startup does NOT
+/// prevent the host from starting: it is logged, the other targets are monitored
+/// normally, and the unreachable one is registered automatically once it connects.
+/// Until then it reports no alarms.
+/// </para>
+/// <para>
+/// <b>Ordering.</b> Transitions for one target are delivered in the order they were
+/// computed, so a consumer folding the stream into its own state never sees, say, a
+/// <c>Raised</c> arrive after the <c>Ended</c> that followed it. This is guaranteed per
+/// target, not across targets. It is achieved by holding that target's lock across
+/// delivery, so a handler that blocks delays the NEXT snapshot for that target — one
+/// more reason the handlers below must be quick.
 /// </para>
 /// <para>
 /// <b>Threading.</b> <see cref="GetOutstanding()"/> is safe from any thread and never
@@ -67,7 +78,29 @@ public interface IPlcAlarmMonitor
     /// </summary>
     /// <returns>
     /// <see langword="true"/> when the write was issued; <see langword="false"/> when the
-    /// alarm is no longer outstanding, or its array slot no longer holds it.
+    /// target is not monitored, the alarm is no longer outstanding, or its array slot no
+    /// longer holds it.
     /// </returns>
+    /// <remarks>
+    /// A <see langword="false"/> result means "nothing was written", never "something went
+    /// wrong on the PLC" — the read-back and the write are ordinary ADS operations and
+    /// their failures propagate rather than being folded into the return value.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="plcId"/> or <paramref name="alarmKey"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="ct"/> was cancelled during the slot read-back or the write.
+    /// </exception>
+    /// <exception cref="global::TwinCAT.Ads.AdsErrorException">
+    /// The PLC rejected the slot read-back or the write — for example the alarm array no
+    /// longer exposes that slot.
+    /// </exception>
+    /// <exception cref="AdsConnectionUnavailableException">
+    /// The target's connection was unavailable for longer than its configured timeout.
+    /// </exception>
+    /// <exception cref="TimeoutException">
+    /// The per-target timeout elapsed before the read-back or the write completed.
+    /// </exception>
     Task<bool> AcknowledgeAsync(string plcId, string alarmKey, CancellationToken ct);
 }
