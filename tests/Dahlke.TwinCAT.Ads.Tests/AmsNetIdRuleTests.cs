@@ -136,4 +136,81 @@ public class AmsNetIdRuleTests
         var failure = Assert.Single(failures);
         Assert.Contains("AmsRouter:Routes:0:NetId", failure);
     }
+
+    // ------------------------------------------------------------------
+    // Normalise
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Every spelling of one physical device collapses to ONE key, so a lookup cannot
+    /// mint a second channel for a device that already has one — and in simulation, a
+    /// seed applied under one spelling is not invisible under another.
+    /// </summary>
+    [Theory]
+    [InlineData("1.2.3.4.5.6")]
+    [InlineData("01.2.3.4.5.6")]                    // TryParse canonicalises this
+    [InlineData(" 1.2.3.4.5.6")]                    // but does NOT tolerate this
+    [InlineData("1.2.3.4.5.6 ")]
+    public void Normalise_CollapsesEverySpellingOfOneDevice(string spelling)
+    {
+        var key = AmsNetIdRule.Normalise(spelling, out var laundered);
+
+        Assert.Equal("1.2.3.4.5.6", key);
+        Assert.False(laundered);
+    }
+
+    /// <summary>
+    /// An out-of-range octet is ACCEPTED here and reported, not rejected. The lookup
+    /// path is documented total, and the transport launders identically at
+    /// <c>Connect()</c> — so the collapsed key genuinely names the device that will be
+    /// dialled. Reporting it is what lets the caller warn instead of the library
+    /// pretending nothing happened.
+    /// </summary>
+    [Theory]
+    [InlineData("999.1.1.1.1.1")]
+    [InlineData("256.1.1.1.1.1")]
+    public void Normalise_LaundersAndReportsIt_RatherThanRejecting(string netId)
+    {
+        var key = AmsNetIdRule.Normalise(netId, out var laundered);
+
+        Assert.True(laundered);
+        Assert.Equal("0.1.1.1.1.1", key);
+    }
+
+    /// <summary>
+    /// An unparseable ID keys on its trimmed original rather than throwing, because
+    /// the lookup path validates nothing and discovers reachability by operating.
+    /// </summary>
+    /// <remarks>
+    /// The empty and whitespace rows are the load-bearing ones:
+    /// <c>AmsNetId.TryParse</c> is itself NOT total — it THROWS
+    /// <see cref="ArgumentException"/> on an empty string rather than returning
+    /// <see langword="false"/>, and <c>Trim()</c> turns a whitespace-only argument
+    /// into one. The emptiness guard is why this method keeps the totality it exists
+    /// to preserve, for the very input a discovery scan is most likely to produce.
+    /// </remarks>
+    [Theory]
+    [InlineData("", "")]
+    [InlineData("   ", "")]
+    [InlineData("not-a-netid", "not-a-netid")]
+    [InlineData("  not-a-netid  ", "not-a-netid")]
+    public void Normalise_IsTotal_ForAnUnparseableId(string input, string expected)
+    {
+        var key = AmsNetIdRule.Normalise(input, out var laundered);
+
+        Assert.Equal(expected, key);
+        Assert.False(laundered);
+    }
+
+    /// <summary>
+    /// The overload exists for callers that cannot act on the laundering — matching a
+    /// configured seed against an already-normalised channel key, where the warning
+    /// was already logged when the channel was created.
+    /// </summary>
+    [Fact]
+    public void Normalise_OverloadDiscardsTheLaunderedFlag()
+    {
+        Assert.Equal("1.2.3.4.5.6", AmsNetIdRule.Normalise("01.2.3.4.5.6"));
+        Assert.Equal("0.1.1.1.1.1", AmsNetIdRule.Normalise("999.1.1.1.1.1"));
+    }
 }

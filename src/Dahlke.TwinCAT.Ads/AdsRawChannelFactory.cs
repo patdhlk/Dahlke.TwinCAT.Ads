@@ -73,7 +73,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
         // would otherwise surface as a NullReferenceException from Trim().
         ArgumentNullException.ThrowIfNull(amsNetId);
 
-        var key = (NetId: NormaliseNetId(amsNetId, out var laundered), Port: port);
+        var key = (NetId: AmsNetIdRule.Normalise(amsNetId, out var laundered), Port: port);
 
         if (laundered)
             WarnOnceAboutLaundering(amsNetId, key.NetId);
@@ -132,70 +132,9 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
         // The store exists independently of any transport, so seeding before the
         // first operation works and survives every later eviction.
-        simulated = GetOrCreateStore(NormaliseNetId(amsNetId), port);
+        simulated = GetOrCreateStore(AmsNetIdRule.Normalise(amsNetId), port);
         return true;
     }
-
-    /// <summary>
-    /// Canonicalises a caller-supplied AMS Net ID so every spelling of one
-    /// physical device lands on ONE channel and ONE store.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Without this the dictionary key is whatever string the caller typed, so
-    /// <c>"1.2.3.4.5.6"</c>, <c>"01.2.3.4.5.6"</c> and <c>" 1.2.3.4.5.6"</c>
-    /// become three channels with three stores addressing one target — and in
-    /// simulation a seed applied under one spelling is invisible under another,
-    /// which reads as "seeding silently doesn't work".
-    /// </para>
-    /// <para>
-    /// Trim first: <c>AmsNetId.TryParse</c> canonicalises <c>"01.2.3.4.5.6"</c> to
-    /// <c>"1.2.3.4.5.6"</c> but does NOT tolerate leading whitespace. An
-    /// unparseable ID keys on the trimmed original rather than throwing, because
-    /// <see cref="IAdsRawChannelFactory.Get"/> is documented total — it validates
-    /// nothing and discovers reachability by operating.
-    /// </para>
-    /// <para>
-    /// <b>The emptiness guard is load-bearing, not defensive.</b>
-    /// <c>AmsNetId.TryParse</c> is itself NOT total: it THROWS
-    /// <see cref="ArgumentException"/> on an empty string rather than returning
-    /// <see langword="false"/>, and <c>Trim()</c> turns a whitespace-only argument
-    /// into one. Calling it unguarded would break the totality this method exists
-    /// to preserve, for the very input a discovery scan is most likely to produce.
-    /// </para>
-    /// <para>
-    /// Note this deliberately inherits <c>AmsNetId</c>'s out-of-range laundering
-    /// (<c>"999.1.1.1.1.1"</c> becomes <c>"0.1.1.1.1.1"</c>), reporting it through
-    /// <paramref name="laundered"/> so the caller can warn. That is the right call
-    /// HERE, and only here: the transport resolves the ID the same way at
-    /// <c>Connect()</c> — <c>AmsNetId.Parse</c> launders identically to
-    /// <c>TryParse</c> — so the two spellings genuinely address one device and
-    /// collapsing them keeps the key agreeing with the wire. <c>AmsNetIdRule.Require</c>
-    /// takes the opposite line and rejects such an ID outright, because a
-    /// configured seed entry is an operator's stated intent, not a runtime lookup.
-    /// </para>
-    /// </remarks>
-    /// <param name="amsNetId">The caller-supplied Net ID. Must not be null.</param>
-    /// <param name="laundered">
-    /// <see langword="true"/> when the ID parsed but had an octet outside 0-255, so
-    /// the returned key addresses a DIFFERENT device than the text suggests.
-    /// </param>
-    private static string NormaliseNetId(string amsNetId, out bool laundered)
-    {
-        var trimmed = amsNetId.Trim();
-
-        if (trimmed.Length > 0 && AmsNetId.TryParse(trimmed, out var parsed))
-        {
-            laundered = !AmsNetIdRule.IsWellFormed(trimmed);
-            return parsed.ToString();
-        }
-
-        laundered = false;
-        return trimmed;
-    }
-
-    /// <inheritdoc cref="NormaliseNetId(string, out bool)"/>
-    private static string NormaliseNetId(string amsNetId) => NormaliseNetId(amsNetId, out _);
 
     /// <summary>
     /// Creates a transport for one channel — always a FRESH instance, in both
@@ -259,7 +198,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
             // from Get/TryGetSimulated, so a seed entry spelled "01.2.3.4.5.6"
             // would otherwise never match the "1.2.3.4.5.6" channel it names.
             if (seed.Port != port ||
-                !string.Equals(NormaliseNetId(seed.AmsNetId), amsNetId, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(AmsNetIdRule.Normalise(seed.AmsNetId), amsNetId, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             foreach (var slot in seed.Slots)

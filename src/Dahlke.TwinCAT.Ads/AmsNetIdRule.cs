@@ -1,4 +1,5 @@
 using System.Globalization;
+using TwinCAT.Ads;
 
 namespace Dahlke.TwinCAT.Ads;
 
@@ -113,4 +114,63 @@ internal static class AmsNetIdRule
 
         failures.Add(remedy is null ? message : $"{message} {remedy}");
     }
+
+    /// <summary>
+    /// Canonicalises a caller-supplied AMS Net ID so every spelling of one physical
+    /// device lands on ONE key.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Without this a dictionary key is whatever string the caller typed, so
+    /// <c>"1.2.3.4.5.6"</c>, <c>"01.2.3.4.5.6"</c> and <c>" 1.2.3.4.5.6"</c> become
+    /// three entries addressing one target — and in simulation a seed applied under
+    /// one spelling is invisible under another, which reads as "seeding silently
+    /// doesn't work".
+    /// </para>
+    /// <para>
+    /// Trim first: <c>AmsNetId.TryParse</c> canonicalises <c>"01.2.3.4.5.6"</c> to
+    /// <c>"1.2.3.4.5.6"</c> but does NOT tolerate leading whitespace. An unparseable
+    /// ID keys on the trimmed original rather than throwing, because the lookup path
+    /// this serves validates nothing and discovers reachability by operating.
+    /// </para>
+    /// <para>
+    /// <b>The emptiness guard is load-bearing, not defensive.</b>
+    /// <c>AmsNetId.TryParse</c> is itself NOT total: it THROWS
+    /// <see cref="ArgumentException"/> on an empty string rather than returning
+    /// <see langword="false"/>, and <c>Trim()</c> turns a whitespace-only argument
+    /// into one. Calling it unguarded would break the totality this method exists to
+    /// preserve, for the very input a discovery scan is most likely to produce.
+    /// </para>
+    /// <para>
+    /// This deliberately INHERITS the laundering that <see cref="Require"/> rejects,
+    /// reporting it through <paramref name="laundered"/> so the caller can warn. That
+    /// is right here and only here: the transport resolves the ID the same way at
+    /// <c>Connect()</c> — <c>AmsNetId.Parse</c> launders identically to
+    /// <c>TryParse</c> — so the two spellings genuinely address one device, and
+    /// collapsing them keeps the key agreeing with the wire. A configured value gets
+    /// the opposite answer, because it is an operator's stated intent rather than a
+    /// runtime lookup.
+    /// </para>
+    /// </remarks>
+    /// <param name="amsNetId">The caller-supplied Net ID. Must not be null.</param>
+    /// <param name="laundered">
+    /// <see langword="true"/> when the ID parsed but had an octet outside 0-255, so
+    /// the returned key addresses a DIFFERENT device than the text suggests.
+    /// </param>
+    internal static string Normalise(string amsNetId, out bool laundered)
+    {
+        var trimmed = amsNetId.Trim();
+
+        if (trimmed.Length > 0 && AmsNetId.TryParse(trimmed, out var parsed))
+        {
+            laundered = !IsWellFormed(trimmed);
+            return parsed.ToString();
+        }
+
+        laundered = false;
+        return trimmed;
+    }
+
+    /// <inheritdoc cref="Normalise(string, out bool)"/>
+    internal static string Normalise(string amsNetId) => Normalise(amsNetId, out _);
 }
