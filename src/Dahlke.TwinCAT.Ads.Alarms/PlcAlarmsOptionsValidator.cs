@@ -18,11 +18,38 @@ internal sealed class PlcAlarmsOptionsValidator(IOptions<TwinCatAdsOptions> adsO
     public ValidateOptionsResult Validate(string? name, PlcAlarmsOptions options)
     {
         var failures = new List<string>();
-        var configuredTargets = adsOptions.Value.Targets;
+
+        // Targets is null only for a code-first caller that assigns it explicitly
+        // (normal JSON binding always produces at least an empty dictionary). Null
+        // means "no alarm targets configured", which is exactly as legal as an
+        // empty dictionary — the package is opt-in per target — so there is
+        // nothing to validate.
+        if (options.Targets is null)
+            return ValidateOptionsResult.Success;
+
+        Dictionary<string, PlcTargetOptions>? configuredTargets;
+        try
+        {
+            configuredTargets = adsOptions.Value.Targets;
+        }
+        catch (OptionsValidationException)
+        {
+            // IOptions<TwinCatAdsOptions>.Value re-runs TwinCatAdsOptionsValidator and
+            // throws when the core options are themselves invalid; a failed Create()
+            // is not cached, so it throws on every access. That core failure is
+            // already reported by the core's own validator — swallowing it here is
+            // deliberate, not an oversight. Re-throwing (or adding our own failure
+            // about it) would either erase every alarm-specific failure below or
+            // duplicate the core's message. Instead, fall back to "unknown" so the
+            // cross-reference check below is skipped (we genuinely cannot tell
+            // whether a plcId exists), while SymbolPath/CycleTimeMs checks — which
+            // don't depend on the core options — still run and still get reported.
+            configuredTargets = null;
+        }
 
         foreach (var (plcId, target) in options.Targets)
         {
-            if (!configuredTargets.ContainsKey(plcId))
+            if (configuredTargets is not null && !configuredTargets.ContainsKey(plcId))
             {
                 failures.Add(
                     $"Alarm monitoring is configured for PLC target '{plcId}' " +
