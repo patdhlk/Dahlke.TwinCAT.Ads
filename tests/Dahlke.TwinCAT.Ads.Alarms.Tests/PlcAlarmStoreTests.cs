@@ -113,4 +113,116 @@ public class PlcAlarmStoreTests
         Assert.All(transitions, t => Assert.Equal(AlarmTransitionKind.Raised, t.Kind));
         Assert.Equal(2, store.Outstanding.Count);
     }
+
+    [Fact]
+    public void Acknowledgement_RaisesAcknowledged()
+    {
+        var store = new PlcAlarmStore(PlcId);
+        store.Apply([Alarm("BMK1Err404")]);
+
+        var transitions = store.Apply([Alarm("BMK1Err404", isAcked: true)]);
+
+        var transition = Assert.Single(transitions);
+        Assert.Equal(AlarmTransitionKind.Acknowledged, transition.Kind);
+        Assert.NotNull(transition.Previous);
+        Assert.False(transition.Previous!.IsAcknowledged);
+    }
+
+    [Fact]
+    public void Unacknowledgement_RaisesNothing()
+    {
+        var store = new PlcAlarmStore(PlcId);
+        store.Apply([Alarm("BMK1Err404", isAcked: true)]);
+
+        var transitions = store.Apply([Alarm("BMK1Err404", isAcked: false)]);
+
+        Assert.Empty(transitions);
+    }
+
+    [Fact]
+    public void FaultEndingWhileUnacknowledged_RaisesCleared()
+    {
+        var store = new PlcAlarmStore(PlcId);
+        store.Apply([Alarm("BMK1Err404")]);
+
+        var transitions = store.Apply([Alarm("BMK1Err404", isActive: false)]);
+
+        var transition = Assert.Single(transitions);
+        Assert.Equal(AlarmTransitionKind.Cleared, transition.Kind);
+        Assert.Single(store.Outstanding);
+    }
+
+    [Fact]
+    public void FaultReturning_RaisesReoccurred()
+    {
+        var store = new PlcAlarmStore(PlcId);
+        store.Apply([Alarm("BMK1Err404")]);
+        store.Apply([Alarm("BMK1Err404", isActive: false)]);
+
+        var transitions = store.Apply([Alarm("BMK1Err404", isActive: true)]);
+
+        var transition = Assert.Single(transitions);
+        Assert.Equal(AlarmTransitionKind.Reoccurred, transition.Kind);
+    }
+
+    [Fact]
+    public void AdvancingTimestampWhileActive_RaisesReoccurred()
+    {
+        var store = new PlcAlarmStore(PlcId);
+        store.Apply([Alarm("BMK1Err404", timestamp: new DateTime(2026, 6, 17, 12, 0, 0))]);
+
+        var transitions = store.Apply(
+            [Alarm("BMK1Err404", timestamp: new DateTime(2026, 6, 17, 12, 5, 0))]);
+
+        var transition = Assert.Single(transitions);
+        Assert.Equal(AlarmTransitionKind.Reoccurred, transition.Kind);
+    }
+
+    [Fact]
+    public void AcknowledgingAnAlreadyClearedAlarm_RaisesAcknowledgedThenEnded()
+    {
+        // Both edges are real and both are reported, in that order: the operator
+        // acknowledged it, and that acknowledgement is what ended it.
+        var store = new PlcAlarmStore(PlcId);
+        store.Apply([Alarm("BMK1Err404")]);
+        store.Apply([Alarm("BMK1Err404", isActive: false)]);
+
+        var transitions = store.Apply([Alarm("BMK1Err404", isActive: false, isAcked: true)]);
+
+        Assert.Equal(2, transitions.Count);
+        Assert.Equal(AlarmTransitionKind.Acknowledged, transitions[0].Kind);
+        Assert.Equal(AlarmTransitionKind.Ended, transitions[1].Kind);
+        Assert.Empty(store.Outstanding);
+    }
+
+    [Fact]
+    public void ReusedSlot_DoesNotLeakThePreviousOccupant()
+    {
+        // Slots are permanent and reused. A new alarm landing in slot 0 must be a
+        // fresh Raised, and the previous occupant must end.
+        var store = new PlcAlarmStore(PlcId);
+        store.Apply([Alarm("BMK1Err404", slot: 0)]);
+
+        var transitions = store.Apply([Alarm("BMK2Err500", equipmentId: "BMK2", errorCode: 500, slot: 0)]);
+
+        Assert.Contains(transitions, t => t.Kind == AlarmTransitionKind.Raised && t.Alarm.Key == "BMK2Err500");
+        Assert.Contains(transitions, t => t.Kind == AlarmTransitionKind.Ended && t.Alarm.Key == "BMK1Err404");
+        Assert.Single(store.Outstanding);
+    }
+
+    [Fact]
+    public void Keys_AreMatchedCaseInsensitively()
+    {
+        // The PLC's symbol and key casing is not guaranteed stable across reads.
+        // Without OrdinalIgnoreCase this raises a second alarm instead of acknowledging
+        // the first — and every existing test would still pass.
+        var store = new PlcAlarmStore(PlcId);
+        store.Apply([Alarm("BMK1Err404")]);
+
+        var transitions = store.Apply([Alarm("bmk1err404", isAcked: true)]);
+
+        var transition = Assert.Single(transitions);
+        Assert.Equal(AlarmTransitionKind.Acknowledged, transition.Kind);
+        Assert.Single(store.Outstanding);
+    }
 }

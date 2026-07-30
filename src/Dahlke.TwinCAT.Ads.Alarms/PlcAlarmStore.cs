@@ -47,29 +47,70 @@ internal sealed class PlcAlarmStore(string plcId)
 
         foreach (var alarm in snapshot)
         {
-            // An unoccupied slot in a fixed array carries a blank key.
             if (string.IsNullOrWhiteSpace(alarm.Key))
                 continue;
 
             var wasTracked = _outstanding.TryGetValue(alarm.Key, out var previous);
 
-            if (!IsOutstanding(alarm))
+            if (!wasTracked)
             {
-                if (wasTracked)
-                    transitions.Add(new AlarmTransition(AlarmTransitionKind.Ended, alarm, previous));
+                if (IsOutstanding(alarm))
+                {
+                    next[alarm.Key] = alarm;
+                    transitions.Add(new AlarmTransition(AlarmTransitionKind.Raised, alarm, null));
+                }
+
                 continue;
             }
 
-            next[alarm.Key] = alarm;
+            // State edges first, then membership. Acknowledging an already-cleared
+            // alarm produces BOTH an Acknowledged and an Ended, in that order: the
+            // operator acted, and that action is what ended the alarm.
+            AddStateTransitions(transitions, alarm, previous!);
 
-            if (!wasTracked)
-                transitions.Add(new AlarmTransition(AlarmTransitionKind.Raised, alarm, null));
+            if (IsOutstanding(alarm))
+                next[alarm.Key] = alarm;
+            else
+                transitions.Add(new AlarmTransition(AlarmTransitionKind.Ended, alarm, previous));
+        }
+
+        // A key the snapshot no longer carries at all — its slot was reused, or the
+        // PLC blanked it. Report it ended with its last known state.
+        foreach (var (key, stale) in _outstanding)
+        {
+            if (!next.ContainsKey(key) && !transitions.Any(t => KeyMatches(t, key)))
+                transitions.Add(new AlarmTransition(AlarmTransitionKind.Ended, stale, stale));
         }
 
         _outstanding = next;
         Volatile.Write(ref _published, next.Values.ToArray());
         return transitions;
     }
+
+    /// <summary>
+    /// Emits the acknowledgement and activity edges between two readings of the same
+    /// alarm. Un-acknowledgement (true to false) deliberately emits nothing: it is not
+    /// an acknowledgement, and inventing a transition for a state the PLC is not
+    /// expected to produce is public surface we would have to keep.
+    /// </summary>
+    private static void AddStateTransitions(
+        List<AlarmTransition> transitions, PlcAlarm alarm, PlcAlarm previous)
+    {
+        if (alarm.IsAcknowledged && !previous.IsAcknowledged)
+            transitions.Add(new AlarmTransition(AlarmTransitionKind.Acknowledged, alarm, previous));
+
+        if (!alarm.IsActive && previous.IsActive && IsOutstanding(alarm))
+            transitions.Add(new AlarmTransition(AlarmTransitionKind.Cleared, alarm, previous));
+
+        var faultReturned = alarm.IsActive && !previous.IsActive;
+        var reFired = alarm.IsActive && previous.IsActive && alarm.PlcTimestamp > previous.PlcTimestamp;
+
+        if (faultReturned || reFired)
+            transitions.Add(new AlarmTransition(AlarmTransitionKind.Reoccurred, alarm, previous));
+    }
+
+    private static bool KeyMatches(AlarmTransition transition, string key) =>
+        string.Equals(transition.Alarm.Key, key, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsOutstanding(PlcAlarm alarm) =>
         alarm.IsActive || (alarm.NeedsAcknowledgement && !alarm.IsAcknowledged);
