@@ -40,8 +40,8 @@ namespace Dahlke.TwinCAT.Ads;
 /// 5000ms therefore bounds how long an operation will block during an outage.
 /// </para>
 /// <para>
-/// <b>Stopped vs transient outage.</b> A <see cref="Clear"/> issued while the
-/// pool is merely reconnecting leaves the facade in a transient-outage state:
+/// <b>Stopped vs transient outage.</b> A <see cref="ClearCurrent"/> issued while
+/// the pool is merely reconnecting leaves the facade in a transient-outage state:
 /// operations wait, because a connection may yet arrive. Once the pool is
 /// stopping or disposing it calls <see cref="MarkStopped"/>, after which the
 /// facade fails FAST — operations throw <see cref="AdsConnectionUnavailableException"/>
@@ -164,11 +164,13 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
     /// <summary>
-    /// The current underlying connection the facade routes to, exposed for tests
-    /// to assert routing/identity behaviour. <see langword="null"/> when the
-    /// target has no live connection.
+    /// The current underlying connection the facade routes to.
+    /// <see langword="null"/> when the target has no live connection. Backs
+    /// <see cref="IAdsConnectionPool.TryGetSimulatedConnection"/> — which
+    /// type-tests it for a live <see cref="SimulatedAdsConnection"/> — and lets
+    /// tests assert routing/identity behaviour.
     /// </summary>
-    internal IManagedConnection? CurrentForTesting => Volatile.Read(ref _current);
+    internal IManagedConnection? Current => Volatile.Read(ref _current);
 
     /// <summary>
     /// Called by <see cref="AdsConnectionPool"/>'s <c>SetState</c> helper immediately
@@ -260,16 +262,6 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     /// </remarks>
     internal void ClearCurrent(IManagedConnection connection)
         => Interlocked.CompareExchange(ref _current, null, connection);
-
-    /// <summary>
-    /// Unconditionally clears the facade's current connection. Used on pool stop,
-    /// where all connections are being torn down regardless of identity.
-    /// </summary>
-    /// <remarks>
-    /// Like <see cref="ClearCurrent"/> this is a TRANSIENT clear and does not
-    /// mark the facade stopped; <see cref="MarkStopped"/> governs fast-fail.
-    /// </remarks>
-    internal void Clear() => Volatile.Write(ref _current, null);
 
     /// <summary>
     /// Marks the facade permanently stopped (pool StopAsync/Dispose). After this,

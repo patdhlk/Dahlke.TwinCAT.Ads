@@ -39,7 +39,7 @@ public class TryGetSimulatedConnectionTests
     private static async Task WaitForConnection(AdsConnectionPool pool, string plcId)
     {
         var deadline = DateTime.UtcNow + RealTimeout;
-        while (((AdsConnectionFacade)pool.GetConnection(plcId)).CurrentForTesting is null)
+        while (((AdsConnectionFacade)pool.GetConnection(plcId)).Current is null)
         {
             if (DateTime.UtcNow > deadline)
                 throw new TimeoutException($"Facade for '{plcId}' never published a connection.");
@@ -64,7 +64,7 @@ public class TryGetSimulatedConnectionTests
             Assert.NotNull(sim);
             // The returned instance is the very one the facade routes to — so
             // seeding it is observable through the facade.
-            Assert.Same(((AdsConnectionFacade)pool.GetConnection("sim")).CurrentForTesting, sim);
+            Assert.Same(((AdsConnectionFacade)pool.GetConnection("sim")).Current, sim);
 
             // Case-insensitive id lookup, matching GetConnection's contract.
             Assert.True(pool.TryGetSimulatedConnection("SIM", out var simUpper));

@@ -408,7 +408,7 @@ public class AdsConnectionFacadeSubscriptionTests
         await pool.StartAsync(CancellationToken.None);
 
         var facade = Assert.IsType<AdsConnectionFacade>(pool.GetConnection("plc1"));
-        await WaitUntil(() => ReferenceEquals(facade.CurrentForTesting, first));
+        await WaitUntil(() => ReferenceEquals(facade.Current, first));
 
         var fired = 0;
         var handle = await facade.SubscribeAsync("MAIN.x", 100, (_, _) => Interlocked.Increment(ref fired), CancellationToken.None)
@@ -419,7 +419,7 @@ public class AdsConnectionFacadeSubscriptionTests
 
         // Drive the health-check failure -> reconnect onto `second`.
         var deadline = DateTime.UtcNow + RealTimeout;
-        while (!ReferenceEquals(facade.CurrentForTesting, second))
+        while (!ReferenceEquals(facade.Current, second))
         {
             time.Advance(TimeSpan.FromSeconds(5));
             await Task.Delay(TimeSpan.FromMilliseconds(10));

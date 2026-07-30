@@ -110,7 +110,7 @@ public class AdsConnectionPoolTests
     /// Since the facade redesign, <c>GetConnection</c> returns a STABLE
     /// per-target facade whose identity never changes — it is not the underlying
     /// managed connection. To pin "the facade routes to THIS managed connection"
-    /// we assert on the facade's <c>CurrentForTesting</c> instead of on
+    /// we assert on the facade's <c>Current</c> instead of on
     /// <c>GetConnection</c> identity.
     /// </remarks>
     private static async Task WaitForConnection(AdsConnectionPool pool, string plcId, object expected)
@@ -130,7 +130,7 @@ public class AdsConnectionPoolTests
     /// during an outage). The facade itself is what <c>GetConnection</c> returns.
     /// </summary>
     private static IManagedConnection? CurrentOf(AdsConnectionPool pool, string plcId)
-        => ((AdsConnectionFacade)pool.GetConnection(plcId)).CurrentForTesting;
+        => ((AdsConnectionFacade)pool.GetConnection(plcId)).Current;
 
     // =====================================================================
 
@@ -390,7 +390,7 @@ public class AdsConnectionPoolTests
         // to any connection: its current pointer is cleared and it reads as
         // disconnected.
         var facade = Assert.IsType<AdsConnectionFacade>(pool.GetConnection("plc1"));
-        Assert.Null(facade.CurrentForTesting);
+        Assert.Null(facade.Current);
         Assert.False(facade.IsConnected);
     }
 

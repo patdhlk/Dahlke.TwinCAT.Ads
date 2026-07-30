@@ -61,7 +61,7 @@ public class AdsConnectionPoolSymbolDumpTests
     }
 
     private static IManagedConnection? CurrentOf(AdsConnectionPool pool, string plcId)
-        => ((AdsConnectionFacade)pool.GetConnection(plcId)!).CurrentForTesting;
+        => ((AdsConnectionFacade)pool.GetConnection(plcId)!).Current;
 
     /// <summary>
     /// When <see cref="SymbolDumpOptions.Enabled"/> is <see langword="true"/>,
