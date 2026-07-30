@@ -551,10 +551,17 @@ public class AmsRouterRouteTests
     /// <b>Measured, not folklore:</b> <c>AmsNetId.TryParse("999.1.1.1.1.1")</c> returns
     /// <see langword="true"/> and yields <c>0.1.1.1.1.1</c> — the octet is ZEROED, so
     /// <c>256</c>, <c>300</c> and <c>999</c> all collapse to the same address.
-    /// Validation therefore uses <c>RawSeedParser.IsWellFormedNetId</c>, shared with
-    /// raw-channel seed validation, so the two can never drift apart. Delegating to
-    /// Beckhoff would let this configuration start a host whose route points somewhere
-    /// nobody wrote down.
+    /// Validation therefore uses <c>AmsNetIdRule</c>, shared with every other
+    /// configured Net ID, so they can never drift apart. Delegating to Beckhoff would
+    /// let this configuration start a host whose route points somewhere nobody wrote
+    /// down.
+    /// <para>
+    /// <b>This is now the ONLY thing standing between a typo'd route and the wire.</b>
+    /// <c>AdsRouterService</c> re-checked the rule before handing a route to
+    /// <c>AmsNetId.Parse</c> until 0.6.0, when that unreachable guard was deleted in
+    /// favour of one enforcement point. If this test is ever weakened, nothing
+    /// downstream catches what it stops.
+    /// </para>
     /// </remarks>
     [Theory]
     [InlineData("999.1.1.1.1.1")]
@@ -578,7 +585,7 @@ public class AmsRouterRouteTests
     /// </summary>
     /// <remarks>
     /// Pinned as an executable fact because the whole argument for
-    /// <c>RawSeedParser.IsWellFormedNetId</c> rests on it. If a future Beckhoff version
+    /// <c>AmsNetIdRule</c> rests on it. If a future Beckhoff version
     /// starts rejecting the value instead, this test says so and the reasoning in the
     /// validator can be revisited deliberately.
     /// </remarks>
@@ -588,7 +595,7 @@ public class AmsRouterRouteTests
         Assert.True(AmsNetId.TryParse("999.1.1.1.1.1", out var laundered));
         Assert.Equal("0.1.1.1.1.1", laundered.ToString());
 
-        Assert.False(RawSeedParser.IsWellFormedNetId("999.1.1.1.1.1"));
+        Assert.False(AmsNetIdRule.IsWellFormed("999.1.1.1.1.1"));
     }
 
     /// <summary>

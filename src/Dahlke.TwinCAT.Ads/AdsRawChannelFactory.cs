@@ -170,7 +170,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     /// HERE, and only here: the transport resolves the ID the same way at
     /// <c>Connect()</c> — <c>AmsNetId.Parse</c> launders identically to
     /// <c>TryParse</c> — so the two spellings genuinely address one device and
-    /// collapsing them keeps the key agreeing with the wire. <c>RawSeedParser</c>
+    /// collapsing them keeps the key agreeing with the wire. <c>AmsNetIdRule.Require</c>
     /// takes the opposite line and rejects such an ID outright, because a
     /// configured seed entry is an operator's stated intent, not a runtime lookup.
     /// </para>
@@ -186,7 +186,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
         if (trimmed.Length > 0 && AmsNetId.TryParse(trimmed, out var parsed))
         {
-            laundered = !RawSeedParser.IsWellFormedNetId(trimmed);
+            laundered = !AmsNetIdRule.IsWellFormed(trimmed);
             return parsed.ToString();
         }
 

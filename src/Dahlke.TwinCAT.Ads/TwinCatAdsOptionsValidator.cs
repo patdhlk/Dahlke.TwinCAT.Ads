@@ -173,7 +173,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
     /// someone switches back. This matches how raw-channel seeds are treated.
     /// </para>
     /// <para>
-    /// <b>The Net ID check is <c>RawSeedParser.IsWellFormedNetId</c>, NOT
+    /// <b>The Net ID check is <c>AmsNetIdRule.IsWellFormed</c>, NOT
     /// <see cref="AmsNetId.TryParse"/>.</b> That method LAUNDERS an out-of-range
     /// octet instead of rejecting it — <c>AmsNetId.TryParse("999.1.1.1.1.1")</c>
     /// returns <see langword="true"/> and yields <c>0.1.1.1.1.1</c>, so <c>256</c>,
@@ -224,7 +224,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
                 seenNames[route.Name] = i;
             }
 
-            if (!RawSeedParser.IsWellFormedNetId(route.NetId))
+            if (!AmsNetIdRule.IsWellFormed(route.NetId))
             {
                 failures.Add(
                     $"AmsRouter:Routes:{i}:NetId '{route.NetId}' is not six dot-separated octets " +
@@ -297,7 +297,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
         int index,
         List<string> failures)
     {
-        if (!RawSeedParser.IsWellFormedNetId(seed.AmsNetId))
+        if (!AmsNetIdRule.IsWellFormed(seed.AmsNetId))
         {
             failures.Add(
                 $"RawChannels:Seed:{index}:AmsNetId '{seed.AmsNetId}' is not six dot-separated " +

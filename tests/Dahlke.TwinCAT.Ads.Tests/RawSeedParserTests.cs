@@ -3,42 +3,6 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 public class RawSeedParserTests
 {
     // ------------------------------------------------------------------
-    // IsWellFormedNetId
-    // ------------------------------------------------------------------
-
-    [Theory]
-    [InlineData("192.168.1.10.3.1")]
-    [InlineData("5.1.2.3.4.5")]
-    [InlineData("0.0.0.0.0.0")]                     // 0 and 255 are the
-    [InlineData("255.255.255.255.255.255")]         // boundaries
-    [InlineData("01.2.3.4.5.6")]                    // non-canonical but in range
-    public void IsWellFormedNetId_AcceptsSixInRangeOctets(string netId) =>
-        Assert.True(RawSeedParser.IsWellFormedNetId(netId));
-
-    /// <summary>
-    /// The octet range is checked HERE rather than delegated to
-    /// <c>AmsNetId.TryParse</c>, which LAUNDERS an out-of-range octet —
-    /// <c>"999.1.1.1.1.1"</c> parses true and silently becomes
-    /// <c>"0.1.1.1.1.1"</c>, so <c>256</c>, <c>300</c> and <c>999</c> all collapse
-    /// to one address. Delegating would let a seed entry naming a device that does
-    /// not exist pass startup validation and then seed a channel the operator never
-    /// named. Counting six segments has the same hole.
-    /// </summary>
-    [Theory]
-    [InlineData("1.2.3.4.5")]                       // five octets
-    [InlineData("1.2.3.4.5.6.7")]                   // seven
-    [InlineData("999.1.1.1.1.1")]
-    [InlineData("1.2.3.4.5.256")]
-    [InlineData("1.2.3.4.5.-1")]                    // NumberStyles.None: no sign
-    [InlineData("1.2.3.4.5.+1")]
-    [InlineData("1.2.3.4.5. 1")]                    // and no whitespace
-    [InlineData("1.2.3.4.5.0x10")]                  // hex is not an AMS octet
-    [InlineData("abc.d.e.f.g.h")]
-    [InlineData("")]
-    public void IsWellFormedNetId_RejectsMalformed(string netId) =>
-        Assert.False(RawSeedParser.IsWellFormedNetId(netId));
-
-    // ------------------------------------------------------------------
     // TryParseIndex
     // ------------------------------------------------------------------
 
