@@ -67,4 +67,50 @@ internal static class AmsNetIdRule
 
         return true;
     }
+
+    /// <summary>
+    /// Appends a startup failure when <paramref name="value"/> is not strictly
+    /// well-formed. The single message template for every configured Net ID.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Takes the configuration PATH rather than a friendly label, because the path is
+    /// the only identifier that is both searchable and actionable — an index alone is
+    /// unsearchable and a value alone is ambiguous across entries. Leading with it is
+    /// why the message needs no trailing "Fix '…'" clause.
+    /// </para>
+    /// <para>
+    /// Appends to the caller's list rather than returning a <see cref="bool"/>, so the
+    /// validator's own idiom — collect every failure, report them together, let the
+    /// operator fix one boot instead of five — survives at each call site as a single
+    /// line.
+    /// </para>
+    /// </remarks>
+    /// <param name="configPath">
+    /// The configuration path of the offending key, e.g.
+    /// <c>PlcTargets:myPlc:AmsNetId</c> or <c>AmsRouter:Routes:0:NetId</c>.
+    /// </param>
+    /// <param name="value">The offending value, quoted verbatim into the message.</param>
+    /// <param name="failures">The validator's collected failures, appended to.</param>
+    /// <param name="remedy">
+    /// Optional key-specific recovery advice, appended to the SAME message so a site
+    /// with its own escape hatch does not cost the operator a second failure. Only
+    /// <c>AmsRouter:NetId</c> passes it — removing that key falls back to the system
+    /// router, which no other Net ID key offers.
+    /// </param>
+    internal static void Require(
+        string configPath,
+        string? value,
+        List<string> failures,
+        string? remedy = null)
+    {
+        if (IsWellFormed(value))
+            return;
+
+        var message =
+            $"{configPath} '{value}' is not six dot-separated octets in the " +
+            $"range 0-255 (e.g. '192.168.1.10.1.1').";
+
+        failures.Add(remedy is null ? message : $"{message} {remedy}");
+    }
 }

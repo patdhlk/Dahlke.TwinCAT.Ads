@@ -50,4 +50,90 @@ public class AmsNetIdRuleTests
     [Fact]
     public void IsWellFormed_RejectsNull_RatherThanThrowing() =>
         Assert.False(AmsNetIdRule.IsWellFormed(null));
+
+    // ------------------------------------------------------------------
+    // Require
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Require_AppendsNothing_ForAWellFormedValue()
+    {
+        var failures = new List<string>();
+
+        AmsNetIdRule.Require("PlcTargets:plc1:AmsNetId", "1.2.3.4.5.6", failures);
+
+        Assert.Empty(failures);
+    }
+
+    /// <summary>
+    /// The message carries BOTH the configuration path an operator edits and the
+    /// offending value. A path alone does not say which value was wrong; a value
+    /// alone is unsearchable and ambiguous across entries.
+    /// </summary>
+    [Fact]
+    public void Require_NamesTheConfigPathAndTheOffendingValue()
+    {
+        var failures = new List<string>();
+
+        AmsNetIdRule.Require("AmsRouter:Routes:0:NetId", "999.1.1.1.1.1", failures);
+
+        var failure = Assert.Single(failures);
+        Assert.Contains("AmsRouter:Routes:0:NetId", failure);
+        Assert.Contains("999.1.1.1.1.1", failure);
+        Assert.Contains("0-255", failure);
+    }
+
+    /// <summary>
+    /// ONE template across every site. Before consolidation four sites spelled this
+    /// four ways and two of them omitted the octet range — the very part of the rule
+    /// that distinguishes it from <c>AmsNetId.TryParse</c>, so those two messages
+    /// described a rule the validator did not enforce.
+    /// </summary>
+    [Fact]
+    public void Require_UsesOneTemplate_AcrossEverySite()
+    {
+        var failures = new List<string>();
+
+        AmsNetIdRule.Require("PlcTargets:plc1:AmsNetId", "999.1.1.1.1.1", failures);
+        AmsNetIdRule.Require("RawChannels:Seed:0:AmsNetId", "999.1.1.1.1.1", failures);
+
+        Assert.Equal(2, failures.Count);
+        Assert.Equal(
+            failures[0].Replace("PlcTargets:plc1:AmsNetId", "<path>"),
+            failures[1].Replace("RawChannels:Seed:0:AmsNetId", "<path>"));
+    }
+
+    /// <summary>
+    /// A key with its own recovery path can say so without earning a SECOND failure.
+    /// <c>AmsRouter:NetId</c> is the only such site: removing the key falls back to
+    /// the system router, which no other Net ID key offers.
+    /// </summary>
+    [Fact]
+    public void Require_AppendsAKeySpecificRemedy_AsOneFailure()
+    {
+        var failures = new List<string>();
+
+        AmsNetIdRule.Require(
+            "AmsRouter:NetId", "999.1.1.1.1.1", failures,
+            remedy: "Remove the key to use the system router instead.");
+
+        var failure = Assert.Single(failures);
+        Assert.Contains("0-255", failure);
+        Assert.Contains("Remove the key to use the system router instead.", failure);
+    }
+
+    /// <summary>
+    /// A key that never bound fails naming itself, rather than throwing from inside
+    /// the validator and costing the operator every OTHER failure in the batch.
+    /// </summary>
+    [Fact]
+    public void Require_RejectsNull_WithoutThrowing()
+    {
+        var failures = new List<string>();
+
+        AmsNetIdRule.Require("AmsRouter:Routes:0:NetId", null, failures);
+
+        var failure = Assert.Single(failures);
+        Assert.Contains("AmsRouter:Routes:0:NetId", failure);
+    }
 }

@@ -224,12 +224,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
                 seenNames[route.Name] = i;
             }
 
-            if (!AmsNetIdRule.IsWellFormed(route.NetId))
-            {
-                failures.Add(
-                    $"AmsRouter:Routes:{i}:NetId '{route.NetId}' is not six dot-separated octets " +
-                    $"in the range 0-255 (e.g. '5.138.44.199.1.1').");
-            }
+            AmsNetIdRule.Require($"AmsRouter:Routes:{i}:NetId", route.NetId, failures);
 
             if (string.IsNullOrWhiteSpace(route.Address))
             {
@@ -297,12 +292,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
         int index,
         List<string> failures)
     {
-        if (!AmsNetIdRule.IsWellFormed(seed.AmsNetId))
-        {
-            failures.Add(
-                $"RawChannels:Seed:{index}:AmsNetId '{seed.AmsNetId}' is not six dot-separated " +
-                $"octets in the range 0-255 (e.g. '192.168.1.10.3.1').");
-        }
+        AmsNetIdRule.Require($"RawChannels:Seed:{index}:AmsNetId", seed.AmsNetId, failures);
 
         if (seed.Port is < 0 or > 65535)
         {
