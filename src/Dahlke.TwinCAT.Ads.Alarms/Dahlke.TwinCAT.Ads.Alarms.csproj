@@ -7,6 +7,16 @@
     <LangVersion>latest</LangVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
+    <!--
+      CS1574: some <see cref> doc comments forward-reference types that land in
+      later tasks of this package's build-out (IAlarmTextCatalog in Task 6,
+      PlcAlarmMonitor in Task 7). The plan's own text carries these crefs
+      verbatim ahead of the types existing; suppressing here keeps the build
+      warning-free without rewriting the doc prose. Safe to drop once every
+      referenced type exists.
+    -->
+    <NoWarn>$(NoWarn);CS1574</NoWarn>
+
     <!-- NuGet Package Metadata -->
     <PackageId>Dahlke.TwinCAT.Ads.Alarms</PackageId>
     <Version>0.0.0-dev</Version>

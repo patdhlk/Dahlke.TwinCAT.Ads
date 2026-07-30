@@ -1,1 +1,59 @@
 #nullable enable
+Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
+Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Error = 3 -> Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
+Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Info = 1 -> Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
+Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.None = 0 -> Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
+Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Warning = 2 -> Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.<Clone>$() -> Dahlke.TwinCAT.Ads.Alarms.AlarmTransition!
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.Alarm.get -> Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.Alarm.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.AlarmTransition(Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind Kind, Dahlke.TwinCAT.Ads.Alarms.PlcAlarm! Alarm, Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? Previous) -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.Deconstruct(out Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind Kind, out Dahlke.TwinCAT.Ads.Alarms.PlcAlarm! Alarm, out Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? Previous) -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.Equals(Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? other) -> bool
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.Kind.get -> Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.Kind.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.Previous.get -> Dahlke.TwinCAT.Ads.Alarms.PlcAlarm?
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.Previous.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind.Acknowledged = 1 -> Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind.Cleared = 2 -> Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind.Ended = 4 -> Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind.Raised = 0 -> Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind
+Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind.Reoccurred = 3 -> Dahlke.TwinCAT.Ads.Alarms.AlarmTransitionKind
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.<Clone>$() -> Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.Equals(Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? other) -> bool
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.EquipmentId.get -> string!
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.EquipmentId.init -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.ErrorCode.get -> uint
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.ErrorCode.init -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.IsAcknowledged.get -> bool
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.IsAcknowledged.init -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.IsActive.get -> bool
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.IsActive.init -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.Key.get -> string!
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.Key.init -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.NeedsAcknowledgement.get -> bool
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.NeedsAcknowledgement.init -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.PlcAlarm() -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.PlcId.get -> string!
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.PlcId.init -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.PlcTimestamp.get -> System.DateTime
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.PlcTimestamp.init -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.Severity.get -> Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.Severity.init -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.SlotIndex.get -> int
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.SlotIndex.init -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.Text.get -> string?
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.Text.init -> void
+override Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.Equals(object? obj) -> bool
+override Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.GetHashCode() -> int
+override Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.ToString() -> string!
+override Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.Equals(object? obj) -> bool
+override Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.GetHashCode() -> int
+override Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.ToString() -> string!
+static Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.operator !=(Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? left, Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? right) -> bool
+static Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.operator ==(Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? left, Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? right) -> bool
+static Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.operator !=(Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? left, Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? right) -> bool
+static Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.operator ==(Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? left, Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? right) -> bool
