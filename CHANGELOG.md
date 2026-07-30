@@ -163,6 +163,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `PlcTargets:{id}:AmsNetId` and `AmsRouter:NetId` now reject an out-of-range octet
+  instead of laundering it.** Both keys were validated with `AmsNetId.TryParse`, which returns
+  `true` for `999.1.1.1.1.1` and yields `0.1.1.1.1.1` — the octet is *zeroed*, not reduced modulo
+  256, so `256`, `300`, `512` and `999` all collapsed to one address. A host with a typo'd target
+  therefore booted, reported healthy, and talked to a device nobody wrote down; a typo'd
+  `AmsRouter:NetId` started the embedded router under an address every route it served could only
+  reach by accident. Both now fail at startup, naming the key and the offending value.
+
+  **A configured Net ID is a declaration, so it gets one rule.** Routes and raw-channel seed
+  entries were already held to the strict six-octet 0–255 check; these two keys were not, and the
+  validator's own remarks called the gap a deferred behaviour change rather than a principle. It
+  is deferred no longer: the rule, its explanation and its one message template now live in
+  `AmsNetIdRule`, and all four configured Net IDs go through it. The project is pre-1.0.0 and
+  0.6.0 is unreleased, so the tightening ships in the same release as the strict route and seed
+  checks rather than contradicting them one release later.
+
+  **The runtime lookup path is deliberately unchanged.** `IAdsRawChannelFactory.Get` stays
+  documented-total: it canonicalises the Net ID, warns once per distinct laundered spelling, and
+  never throws. That asymmetry is load-bearing rather than an oversight — the transport launders
+  identically at `Connect()`, so collapsing the spellings is what keeps the channel key agreeing
+  with the address actually dialled. Strict for declarations, lenient for lookups, and the two
+  are now named that way in one place instead of spelled four ways across six.
+
+  Empty and null keep their existing meanings at both keys: a `Real` target still reports
+  `AmsNetId` as required and missing, and an absent `AmsRouter:NetId` still means "use the system
+  router".
+
 - **The embedded AMS router now starts when raw channels are real, even if every configured PLC
   target is simulated.** Raw channels have no symbol layer to fall back on and cannot route
   without it, so the previous `_hasRealTargets` gate would have left every `Get` failing at

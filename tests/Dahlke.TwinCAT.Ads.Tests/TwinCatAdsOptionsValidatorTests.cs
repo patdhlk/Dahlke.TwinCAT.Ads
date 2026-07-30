@@ -560,4 +560,73 @@ public class TwinCatAdsOptionsValidatorTests
 
         await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
     }
+
+    // ------------------------------------------------------------------
+    // 0.6.0: laundering declarations now fail
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// An out-of-range octet in a target's Net ID FAILS the host rather than being
+    /// laundered onto a different device.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is the 0.6.0 behaviour change.</b> Until 0.6.0 this key was validated
+    /// with <c>AmsNetId.TryParse</c>, which returns <see langword="true"/> for
+    /// <c>999.1.1.1.1.1</c> and yields <c>0.1.1.1.1.1</c> — so the host booted and
+    /// talked to a device nobody wrote down, and <c>256</c>, <c>300</c> and
+    /// <c>999</c> all reached the same one. A target's Net ID is a DECLARATION whose
+    /// typo has no correct reading, so it is now held to the same strict rule as a
+    /// route and a raw-channel seed. Without this test the tightening could silently
+    /// revert to the laundering spelling.
+    /// </remarks>
+    [Theory]
+    [InlineData("999.1.1.1.1.1")]
+    [InlineData("256.1.1.1.1.1")]
+    [InlineData("1.2.3.4.5.256")]
+    public void Target_LaunderableAmsNetId_FailsAtStartup(string amsNetId)
+    {
+        var options = ValidOptions();
+        options.Targets["plc1"] = ValidTarget(amsNetId: amsNetId);
+
+        var result = Validate(options);
+
+        Assert.False(result.Succeeded);
+        var failure = Assert.Single(result.Failures!);
+        Assert.Contains("PlcTargets:plc1:AmsNetId", failure);
+        Assert.Contains(amsNetId, failure);
+    }
+
+    /// <summary>
+    /// The same 0.6.0 tightening for <c>AmsRouter:NetId</c>: an out-of-range octet
+    /// fails the host rather than starting the embedded router under a laundered
+    /// address, where every route it serves would be reachable only by accident.
+    /// </summary>
+    [Theory]
+    [InlineData("999.1.1.1.1.1")]
+    [InlineData("256.1.1.1.1.1")]
+    [InlineData("1.2.3.4.5.256")]
+    public void Router_LaunderableNetId_FailsAtStartup(string netId)
+    {
+        var result = Validate(ValidOptions(routerNetId: netId));
+
+        Assert.False(result.Succeeded);
+        var failure = Assert.Single(result.Failures!);
+        Assert.Contains("AmsRouter:NetId", failure);
+        Assert.Contains(netId, failure);
+    }
+
+    /// <summary>
+    /// Removing <c>AmsRouter:NetId</c> is a legitimate fix unique to that key — it
+    /// falls back to the system router — so the failure says so rather than only
+    /// naming the bad value. It rides on the SAME failure, because an operator
+    /// counting failures should count misconfigurations, not sentences.
+    /// </summary>
+    [Fact]
+    public void Router_InvalidNetId_SaysRemovingTheKeyIsAFix()
+    {
+        var result = Validate(ValidOptions(routerNetId: "999.1.1.1.1.1"));
+
+        var failure = Assert.Single(result.Failures!);
+        Assert.Contains("system router", failure);
+    }
 }
