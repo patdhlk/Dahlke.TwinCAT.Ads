@@ -76,15 +76,6 @@ internal sealed class FakeManagedConnection : IManagedConnection
     // also write it for the pool-loop tests.
     public bool IsConnected { get; set; }
 
-    // Not exercised by the pool; no-op implementations to satisfy IAdsConnection.
-    public ConnectionState State => ConnectionState.Disconnected;
-    public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
-
-    /// <summary>Test helper: raises <see cref="ConnectionStateChanged"/>.</summary>
-    public void RaiseConnectionStateChanged(ConnectionState previous, ConnectionState next)
-        => ConnectionStateChanged?.Invoke(
-            this, new ConnectionStateChangedEventArgs(PlcId, next, previous));
-
     // ---- Synchronisation hooks ------------------------------------------
 
     /// <summary>Completes when <see cref="Connect"/> is called. Re-arm with <see cref="RearmConnectCalled"/>.</summary>

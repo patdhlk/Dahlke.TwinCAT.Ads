@@ -577,12 +577,6 @@ public class AdsConnectionFacadeTests
         public string DisplayName => PlcId;
         public bool IsConnected { get; set; }
 
-        // No-op implementations to satisfy IAdsConnection after the connection-state surface was added.
-        public ConnectionState State => ConnectionState.Disconnected;
-#pragma warning disable CS0067
-        public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
-#pragma warning restore CS0067
-
         public object? ReadResult { get; set; }
         public string? LastReadPath { get; private set; }
         public (string Path, object Value)? LastWrite { get; private set; }

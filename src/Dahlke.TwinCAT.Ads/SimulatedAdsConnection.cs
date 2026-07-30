@@ -46,7 +46,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// each subscriber when it is first registered, not when values are pre-loaded).
 /// </para>
 /// </remarks>
-public sealed class SimulatedAdsConnection : IManagedConnection
+public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
 {
     private readonly ILogger<SimulatedAdsConnection> _logger;
     private readonly ConcurrentDictionary<string, object?> _symbols = new(StringComparer.OrdinalIgnoreCase);

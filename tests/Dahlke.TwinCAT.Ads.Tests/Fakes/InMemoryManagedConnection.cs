@@ -88,12 +88,6 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     // (the facade's SetCurrent path and IsConnected observation both read this).
     public bool IsConnected { get; set; } = true;
 
-    public ConnectionState State => ConnectionState.Connected;
-
-#pragma warning disable CS0067 // Never raised — this double has no lifecycle transitions.
-    public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
-#pragma warning restore CS0067
-
     // ---- Reads -----------------------------------------------------------
 
     public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
