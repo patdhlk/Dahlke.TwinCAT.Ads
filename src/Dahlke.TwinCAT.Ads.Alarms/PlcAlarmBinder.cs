@@ -200,6 +200,11 @@ internal static class PlcAlarmBinder
 
         if (source is IDictionary<string, object?> typedMap)
         {
+            // NOTE: ExpandoObject implements IDictionary<string, object> under the hood,
+            // and nullable-reference annotations erase at runtime, so ExpandoObject
+            // instances land HERE rather than in ReadDynamicMember below. Real ADS
+            // dynamic payloads (e.g. Beckhoff's DynamicValue) are not IDictionary and do
+            // take the dynamic branch — see ReadDynamicMember and DynamicMemberNames.
             if (typedMap.TryGetValue(member, out var value))
                 return value;
 
@@ -227,23 +232,61 @@ internal static class PlcAlarmBinder
         return ReadDynamicMember(source, member, context, plcId);
     }
 
+    /// <summary>
+    /// Reads <paramref name="member"/> off a genuine dynamic object via a DLR
+    /// <see cref="System.Runtime.CompilerServices.CallSite"/>, matching the exact
+    /// spelling first. On a miss, retries once against whichever of
+    /// <see cref="DynamicMemberNames"/> is a case-insensitive match for
+    /// <paramref name="member"/> — the package's member lookup is case-insensitive
+    /// everywhere, and the dictionary branch above already honours that; a dynamic
+    /// object that disagreed with its own dictionary-shaped sibling on casing would be
+    /// a latent bug, not a stylistic wrinkle. A miss on both the exact name and (if
+    /// found) the retried spelling produces the same <see cref="Missing"/> diagnostic.
+    /// </summary>
     private static object? ReadDynamicMember(object source, string member, string context, string plcId)
     {
         try
         {
-            var binder = Microsoft.CSharp.RuntimeBinder.Binder.GetMember(
-                CSharpBinderFlags.None, member, typeof(PlcAlarmBinder),
-                [CSharpArgumentInfo.Create(CSharpArgumentInfoFlags.None, null)]);
-
-            var site = System.Runtime.CompilerServices.CallSite<Func<
-                System.Runtime.CompilerServices.CallSite, object, object?>>.Create(binder);
-
-            return site.Target(site, source);
+            return InvokeGetMember(source, member);
         }
         catch (RuntimeBinderException ex)
         {
-            throw Missing(member, context, plcId, DynamicMemberNames(source), ex);
+            var available = DynamicMemberNames(source).ToList();
+
+            // Retry once, but only when exactly one present member matches
+            // case-insensitively — an ambiguous match (e.g. both "sKey" and "SKEY"
+            // present) is not this package's call to arbitrate, so it falls through
+            // to the ordinary missing-member diagnostic instead.
+            var caseInsensitiveMatches = available
+                .Where(name => string.Equals(name, member, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (caseInsensitiveMatches.Count == 1)
+            {
+                try
+                {
+                    return InvokeGetMember(source, caseInsensitiveMatches[0]);
+                }
+                catch (RuntimeBinderException)
+                {
+                    // Fall through to the same Missing diagnostic as a straight miss.
+                }
+            }
+
+            throw Missing(member, context, plcId, available, ex);
         }
+    }
+
+    private static object? InvokeGetMember(object source, string member)
+    {
+        var binder = Microsoft.CSharp.RuntimeBinder.Binder.GetMember(
+            CSharpBinderFlags.None, member, typeof(PlcAlarmBinder),
+            [CSharpArgumentInfo.Create(CSharpArgumentInfoFlags.None, null)]);
+
+        var site = System.Runtime.CompilerServices.CallSite<Func<
+            System.Runtime.CompilerServices.CallSite, object, object?>>.Create(binder);
+
+        return site.Target(site, source);
     }
 
     private static IEnumerable<string> DynamicMemberNames(object source) =>

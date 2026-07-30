@@ -6,10 +6,17 @@ namespace Dahlke.TwinCAT.Ads.Alarms.Tests;
 /// Unit tests for <see cref="PlcAlarmBinder"/>.
 /// </summary>
 /// <remarks>
-/// Every behavioural test runs against BOTH shapes the binder will really meet:
-/// the dictionary tree the simulated connection carries, and the dynamic object a
-/// real ADS notification payload decodes to. The original branch tested only a
-/// shape its own tests invented, which is why it could be green while wrong.
+/// Every behavioural test runs against every shape the binder will really meet: the
+/// dictionary tree the simulated connection carries, an <see cref="ExpandoObject"/>,
+/// and a true dynamic object with no <see cref="System.Collections.IDictionary"/> in
+/// sight. The middle one is a trap worth naming: <see cref="ExpandoObject"/>
+/// implements <see cref="IDictionary{TKey, TValue}"/> under the hood, and nullable
+/// annotations erase at runtime, so it is caught by PlcAlarmBinder's dictionary
+/// branch, not its DLR dynamic-binding branch. Only <see cref="TrueDynamicEntry"/>
+/// forces a read through that branch — which is the one every real ADS notification
+/// actually takes. The original branch tested only a shape its own tests invented,
+/// which is why it could be green while wrong; testing <see cref="ExpandoObject"/>
+/// alone here would have repeated that mistake with better manners.
 /// </remarks>
 public class PlcAlarmBinderTests
 {
@@ -56,10 +63,57 @@ public class PlcAlarmBinderTests
         return entry;
     }
 
+    /// <summary>
+    /// A genuine dynamic object — deliberately NOT an <see cref="IDictionary"/> —
+    /// standing in for Beckhoff's own <c>DynamicValue</c>, the shape a real ADS
+    /// notification payload actually decodes to. Unlike <see cref="ExpandoObject"/>,
+    /// this type has no dictionary interface for PlcAlarmBinder to catch, so every
+    /// read is forced through its DLR <c>CallSite</c> dynamic-binding branch.
+    /// </summary>
+    private sealed class TrueDynamicEntry : DynamicObject
+    {
+        private readonly Dictionary<string, object?> _values = new(StringComparer.Ordinal);
+
+        public void Set(string name, object? value) => _values[name] = value;
+
+        public void Remove(string name) => _values.Remove(name);
+
+        public override bool TryGetMember(GetMemberBinder binder, out object? result) =>
+            _values.TryGetValue(binder.Name, out result);
+
+        public override IEnumerable<string> GetDynamicMemberNames() => _values.Keys;
+    }
+
+    /// <summary>Builds the same entry as a TRUE dynamic object — see <see cref="TrueDynamicEntry"/>.</summary>
+    private static TrueDynamicEntry AsTrueDynamic(
+        string sKey = "BMK1Err404", string id = "BMK1", uint errorCode = 404,
+        int errorType = 3, bool isActive = true, bool needsAck = true, bool isAcked = false,
+        ushort year = 2026, ushort month = 6, ushort day = 17)
+    {
+        var time = new TrueDynamicEntry();
+        time.Set("wYear", year); time.Set("wMonth", month); time.Set("wDayOfWeek", (ushort)3); time.Set("wDay", day);
+        time.Set("wHour", (ushort)12); time.Set("wMinute", (ushort)0); time.Set("wSecond", (ushort)0);
+        time.Set("wMilliseconds", (ushort)0);
+
+        var entry = new TrueDynamicEntry();
+        entry.Set("sKey", sKey); entry.Set("Id", id); entry.Set("ErrorCode", errorCode); entry.Set("ErrorType", errorType);
+        entry.Set("IsActive", isActive); entry.Set("NeedsAck", needsAck); entry.Set("IsAcked", isAcked);
+        entry.Set("PLCTimeStamp", time);
+        return entry;
+    }
+
+    /// <summary>
+    /// Yields all three shapes <see cref="PlcAlarmBinder"/> may see: the dictionary
+    /// tree, <see cref="ExpandoObject"/> (routed through the dictionary branch — see
+    /// the class remarks), and <see cref="TrueDynamicEntry"/> (routed through the
+    /// DLR dynamic-binding branch). Kept the historical "Both" name since it is
+    /// already the <c>[MemberData]</c> reference below.
+    /// </summary>
     public static TheoryData<object> BothShapes() => new()
     {
         new object?[] { AsDictionary() },
         new object?[] { AsDynamic() },
+        new object?[] { AsTrueDynamic() },
     };
 
     [Theory]
@@ -139,6 +193,61 @@ public class PlcAlarmBinderTests
 
         Assert.Contains("IsAcked", ex.Message, StringComparison.Ordinal);
         Assert.Contains(Path, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Bind_MissingMember_Throws_NamingTheMemberAndPath_ForTrueDynamicObject()
+    {
+        // ExpandoObject is caught by the dictionary branch (see the class remarks), so
+        // the above test never actually proves the "members present" diagnostic works
+        // on the branch that produces it for real hardware: GetDynamicMemberNames() is
+        // the ONLY source of that list here, unlike the dictionary branch's Keys. This
+        // proves the list reflects real member names rather than being empty or garbage.
+        var entry = AsTrueDynamic();
+        entry.Remove("IsAcked");
+        object?[] array = [entry];
+
+        var ex = Assert.Throws<PlcAlarmShapeException>(
+            () => PlcAlarmBinder.Bind(array, PlcId, Path, PlcClockKind.Unspecified, null));
+
+        Assert.Contains("IsAcked", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(Path, ex.Message, StringComparison.Ordinal);
+        Assert.Contains("sKey", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("ErrorCode", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Bind_TrueDynamicObject_CaseInsensitiveMemberName_Resolves()
+    {
+        // Member lookup is case-insensitive everywhere in this package; the dictionary
+        // branch already honours that explicitly. A dynamic object that disagreed
+        // would be a latent bug, not a stylistic wrinkle — differently-cased names on
+        // both the entry itself and the nested TIMESTRUCT must still resolve.
+        var time = new TrueDynamicEntry();
+        time.Set("WYEAR", (ushort)2026);
+        time.Set("wMonth", (ushort)6);
+        time.Set("wDay", (ushort)17);
+        time.Set("wHour", (ushort)12);
+        time.Set("wMinute", (ushort)0);
+        time.Set("wSecond", (ushort)0);
+        time.Set("wMilliseconds", (ushort)0);
+
+        var entry = new TrueDynamicEntry();
+        entry.Set("SKEY", "BMK1Err404");
+        entry.Set("Id", "BMK1");
+        entry.Set("ErrorCode", 404U);
+        entry.Set("ErrorType", 3);
+        entry.Set("IsActive", true);
+        entry.Set("NeedsAck", true);
+        entry.Set("IsAcked", false);
+        entry.Set("PLCTimeStamp", time);
+        object?[] array = [entry];
+
+        var alarms = PlcAlarmBinder.Bind(array, PlcId, Path, PlcClockKind.Unspecified, null);
+
+        var alarm = Assert.Single(alarms);
+        Assert.Equal("BMK1Err404", alarm.Key);
+        Assert.Equal(new DateTime(2026, 6, 17, 12, 0, 0), alarm.PlcTimestamp);
     }
 
     [Fact]
