@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using TwinCAT.Ads;
 using TwinCAT.Ads.TcpRouter;
 using TwinCAT.Router;
+using Route = TwinCAT.Ads.Configuration.Route;
 
 namespace Dahlke.TwinCAT.Ads;
 
@@ -100,10 +101,16 @@ internal class AdsRouterService : BackgroundService
     private readonly string? _netId;
     private readonly bool _needsRouter;
 
+    // Snapshot taken in the constructor alongside _netId, so the routes handed to a
+    // router are the ones validated at startup and cannot change under a retry.
+    private readonly IReadOnlyList<AmsRouteOptions> _routes;
+
     // IConfiguration is optional — null when the application does not register
     // it (pure code-first scenario).  When present the full application config is
-    // forwarded to AmsTcpIpRouter so Beckhoff-specific keys (AmsRouter:TcpPort,
-    // static-routes, etc.) remain honoured.
+    // forwarded to AmsTcpIpRouter so Beckhoff-specific keys (AmsRouter:TcpPort and
+    // the rest) remain honoured. Remote ROUTES are NOT among them: four candidate
+    // spellings were measured through this overload and all yielded zero routes, so
+    // they come from AmsRouterOptions.Routes and are added explicitly below.
     private readonly IConfiguration? _configuration;
 
     // Same backoff envelope as the pool's connection loops: a 2-second minimum
@@ -137,6 +144,7 @@ internal class AdsRouterService : BackgroundService
     {
         var value = options.Value;
         _netId = value.Router.NetId;
+        _routes = value.Router.Routes.ToArray();
         _needsRouter = NeedsRouter(value);
         _configuration = configuration;
         _loggerFactory = loggerFactory;
@@ -230,6 +238,21 @@ internal class AdsRouterService : BackgroundService
             if (string.IsNullOrEmpty(_netId))
             {
                 _logger.LogInformation("Embedded ADS router disabled — using system router");
+
+                // Configured routes have nowhere to go: there is no embedded router
+                // and the system router owns its own route table. Saying so is the
+                // point — a route silently ignored is the failure this section was
+                // added to remove.
+                if (_routes.Count > 0)
+                {
+                    _logger.LogWarning(
+                        "Ignoring {Count} configured AmsRouter:Routes entr{Suffix} — the embedded " +
+                        "router is disabled because AmsRouter:NetId is not set, and the system " +
+                        "router keeps its own route table. Set AmsRouter:NetId to use them.",
+                        _routes.Count,
+                        _routes.Count == 1 ? "y" : "ies");
+                }
+
                 _readySignal.SetReady();
                 return;
             }
@@ -344,12 +367,12 @@ internal class AdsRouterService : BackgroundService
     {
         AmsTcpIpRouter router = CreateRouter();
 
+        // The whole body of the handler lives in HandleRouterStatusChanged so the
+        // route-adding step is reachable from a test: AmsTcpIpRouter cannot be faked,
+        // and StartAsync does not return until the router stops, so this hook is both
+        // the only "after start" moment and the only testable one.
         router.RouterStatusChanged += (_, e) =>
-        {
-            _logger.LogInformation("ADS-Router Status: {Status}", e.RouterStatus);
-            if (e.RouterStatus == RouterStatus.Started)
-                signal.SetReady();
-        };
+            HandleRouterStatusChanged(e.RouterStatus, signal, router.TryAddRoute);
 
         try
         {
@@ -371,18 +394,138 @@ internal class AdsRouterService : BackgroundService
     }
 
     /// <summary>
+    /// The body of the <c>RouterStatusChanged</c> hook: logs the status and, once the
+    /// router reports <c>RouterStatus.Started</c>, adds the configured remote routes
+    /// and THEN resolves <paramref name="signal"/> as Ready.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Routes are added here, after the router has started.</b> That ordering is
+    /// what was verified against live hardware — a route added after <c>StartAsync</c>
+    /// connected, where the same code path without one failed with
+    /// <c>TargetMachineNotFound</c>. Before-start was never isolated as a variable, so
+    /// this matches what is proven rather than what seems equivalent. It is also the
+    /// only moment available: <c>StartAsync</c> does not return until the router
+    /// stops.
+    /// </para>
+    /// <para>
+    /// <b>Routes before <c>SetReady</c>, deliberately.</b> The signal is what releases
+    /// the connection pool's real-target loops, so resolving it first would let a pool
+    /// connection race a route that is not in the table yet — reintroducing the exact
+    /// <c>TargetMachineNotFound</c> this exists to prevent, intermittently.
+    /// </para>
+    /// <para>
+    /// Extracted from the lambda as an <see langword="internal"/> seam because
+    /// <c>AmsTcpIpRouter</c> cannot be faked: a test drives this with a recording
+    /// <paramref name="tryAddRoute"/> and so covers both the loop and the fact that
+    /// the started hook calls it.
+    /// </para>
+    /// </remarks>
+    /// <param name="status">The status the router just reported.</param>
+    /// <param name="signal">The readiness signal to resolve on a successful start.</param>
+    /// <param name="tryAddRoute">
+    /// The router's <c>TryAddRoute</c>, returning <see langword="false"/> when the
+    /// route was rejected.
+    /// </param>
+    internal void HandleRouterStatusChanged(
+        RouterStatus status,
+        AdsRouterReadySignal signal,
+        Func<Route, bool> tryAddRoute)
+    {
+        _logger.LogInformation("ADS-Router Status: {Status}", status);
+
+        if (status != RouterStatus.Started)
+            return;
+
+        ApplyConfiguredRoutes(tryAddRoute);
+        signal.SetReady();
+    }
+
+    /// <summary>
+    /// Hands every configured <see cref="AmsRouteOptions"/> entry to the router's
+    /// <c>TryAddRoute</c>, logging each at Information and a rejected one at Warning.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A rejected route is logged rather than thrown, because throwing here would
+    /// re-enter the retry loop and tear down a router that is otherwise working —
+    /// making one unreachable device cost every reachable one. It is logged at Warning
+    /// naming the entry, since a silently dropped route is the failure mode this
+    /// method exists to remove.
+    /// </para>
+    /// <para>
+    /// <b>The Net ID is re-checked against the strict six-octet rule.</b>
+    /// <see cref="TwinCatAdsOptionsValidator"/> already rejects a malformed one at
+    /// startup, so this is unreachable through a hosted registration — but
+    /// <c>AmsNetId.Parse</c> LAUNDERS an out-of-range octet rather than throwing
+    /// (<c>999.1.1.1.1.1</c> becomes <c>0.1.1.1.1.1</c>), so a path that ever bypassed
+    /// validation would add a route pointing at a device the operator never named.
+    /// Skipping and warning keeps that impossible instead of merely unlikely.
+    /// </para>
+    /// </remarks>
+    /// <param name="tryAddRoute">The router's <c>TryAddRoute</c>.</param>
+    internal void ApplyConfiguredRoutes(Func<Route, bool> tryAddRoute)
+    {
+        foreach (var configured in _routes)
+        {
+            if (!RawSeedParser.IsWellFormedNetId(configured.NetId))
+            {
+                _logger.LogWarning(
+                    "Skipping route '{Name}': NetId '{NetId}' is not six dot-separated octets " +
+                    "in the range 0-255, and the ADS stack would silently ZERO the bad octet " +
+                    "rather than reject it — the route would address a different device",
+                    configured.Name,
+                    configured.NetId);
+                continue;
+            }
+
+            var route = new Route(
+                configured.Name,
+                AmsNetId.Parse(configured.NetId),
+                configured.Address);
+
+            if (tryAddRoute(route))
+            {
+                _logger.LogInformation(
+                    "Added ADS route '{Name}' for {NetId} at {Address}",
+                    configured.Name,
+                    configured.NetId,
+                    configured.Address);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "The embedded ADS router REJECTED route '{Name}' for {NetId} at {Address}. " +
+                    "That target will fail with TargetMachineNotFound; check for a route already " +
+                    "registered under the same name or Net ID",
+                    configured.Name,
+                    configured.NetId,
+                    configured.Address);
+            }
+        }
+    }
+
+    /// <summary>
     /// Constructs an <c>AmsTcpIpRouter</c>, re-evaluating the strategy on every
     /// call so a fresh instance is built per retry attempt.
     /// </summary>
     /// <remarks>
     /// Strategy A — config pass-through (IConfiguration present AND
     ///   AmsRouter:NetId set in that configuration): use
-    ///   <c>AmsTcpIpRouter(IConfiguration, ILoggerFactory)</c> so all
-    ///   Beckhoff-specific keys (AmsRouter:TcpPort, StaticRoutes, etc.) are
-    ///   honoured.
+    ///   <c>AmsTcpIpRouter(IConfiguration, ILoggerFactory)</c> so Beckhoff-specific
+    ///   keys such as AmsRouter:TcpPort are honoured.
     /// Strategy B — typed NetId (all other cases): use
     ///   <c>AmsTcpIpRouter(AmsNetId, ILoggerFactory)</c> — the Net ID from
     ///   options is forwarded directly; all other settings use Beckhoff defaults.
+    /// <para>
+    /// Remote ROUTES are added by <see cref="ApplyConfiguredRoutes"/> under BOTH
+    /// strategies, and never come from the configuration handed to Beckhoff: no key
+    /// under <c>AmsRouter</c> reaches its route table — <c>StaticRoutes:0:*</c>,
+    /// <c>RemoteConnections:R:*</c>, <c>Router:StaticRoutes:0:*</c> and
+    /// <c>Ams:StaticRoutes:0:*</c> were all measured yielding zero routes. Beckhoff's
+    /// only file source is a TwinCAT <c>StaticRoutes.xml</c> on disk, absent on a
+    /// machine without a TwinCAT installation.
+    /// </para>
     /// </remarks>
     private AmsTcpIpRouter CreateRouter() =>
         UseConfigurationPassThrough(_configuration)

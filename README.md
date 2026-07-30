@@ -478,6 +478,37 @@ Returns `Healthy` when every target is connected, `Degraded` when some — but n
 | Key | Type | Description |
 |-----|------|-------------|
 | `NetId` | `string` | AMS Net ID for the embedded TCP/IP router. Omit to use the system TwinCAT router. |
+| `Routes` | `List<AmsRouteOptions>` | Remote routes the embedded router adds once it has started — see below. Empty by default. Validated at startup whether or not the embedded router is enabled |
+
+Each `Routes` entry:
+
+| Property | Type | Default | Description |
+|-----|------|---------|-------------|
+| `Name` | `string` | `""` | Required, and unique within `Routes`. The router keys its route table by name |
+| `NetId` | `string` | `""` | Required. The remote device's AMS Net ID: six dot-separated octets each in 0–255. Enforced **strictly** — `999.1.1.1.1.1` fails the host rather than being laundered to `0.1.1.1.1.1` |
+| `Address` | `string` | `""` | Required. The device's IP address (`192.168.1.223`) or host name (`cx-01a2b3`); either is resolved by the router |
+
+**Without a route, a host with no TwinCAT installation cannot reach a remote PLC at all** — every
+operation answers `TargetMachineNotFound`. This is invisible on Windows, where the OS router
+already holds the routes, and it is why `Routes` exists rather than a `StaticRoutes` key: no key
+under `AmsRouter` reaches Beckhoff's route table (four spellings were measured yielding zero
+routes), and its only file source is a TwinCAT `StaticRoutes.xml` on disk.
+
+```json
+{
+  "AmsRouter": {
+    "NetId": "192.168.1.220.1.1",
+    "Routes": [
+      { "Name": "rack", "NetId": "5.138.44.199.1.1", "Address": "192.168.1.223" }
+    ]
+  }
+}
+```
+
+Entries are added **after** the router has started and **before** the readiness signal releases
+the connection pool, so a pool connection never races a missing route. A route the router rejects
+is logged at `Warning` naming it rather than throwing — one unreachable device must not cost every
+reachable one.
 
 ### `PlcTargets` section
 

@@ -113,6 +113,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical failure mode the array shape was adopted to eliminate, reached by different routes;
   entry and slot counts are now both checked.
 
+- **`AmsRouter:Routes` — remote routes for the embedded router.** Without this, a host on a
+  machine with no TwinCAT installation could not reach a remote PLC **at all**: the embedded
+  router started with an empty route table and `AmsRouterOptions` exposed only `NetId`, so
+  nothing could tell it where the device was. Verified against a live rack — the identical code
+  path fails with `TargetMachineNotFound` without a route and succeeds with one, same machine and
+  same Net ID.
+
+  It was invisible on Windows, where the OS router already holds the routes, which is also why
+  the hardware suite had never been runnable off Windows.
+
+  ```json
+  "AmsRouter": {
+    "NetId": "192.168.1.220.1.1",
+    "Routes": [
+      { "Name": "rack", "NetId": "5.138.44.199.1.1", "Address": "192.168.1.223" }
+    ]
+  }
+  ```
+
+  **A new option rather than a Beckhoff configuration key, because no such key exists.** Four
+  candidate spellings were measured against the `AmsTcpIpRouter(IConfiguration, …)` overload —
+  `StaticRoutes:0:*`, `RemoteConnections:R:*`, `Router:StaticRoutes:0:*` and
+  `Ams:StaticRoutes:0:*` — and all yielded zero routes. Beckhoff's only other source is a TwinCAT
+  `StaticRoutes.xml` on disk, absent on exactly the machines that need the embedded router.
+
+  `Address` takes an IP address or a host name; the router resolves either. Entries are added
+  **after** the router has started — the ordering that was verified on hardware — and **before**
+  the readiness signal releases the connection pool, so a pool connection never races a route
+  that is not in the table yet. Each is logged at `Information` with its name, Net ID and
+  address; a route the router rejects is logged at `Warning` naming it rather than thrown, since
+  throwing would tear down a working router and make one unreachable device cost every reachable
+  one. Routes configured while `AmsRouter:NetId` is unset are warned about rather than ignored in
+  silence.
+
+  A route's `NetId` is validated with the **strict** six-octet 0–255 check shared with
+  raw-channel seed entries, deliberately not `AmsNetId.TryParse`: that method *launders* an
+  out-of-range octet, returning `true` for `999.1.1.1.1.1` and yielding `0.1.1.1.1.1`, so
+  delegating would let a typo'd route silently address a different device. `Name` and `Address`
+  must be non-empty, and duplicate names fail the host because the router keys routes by name.
+  Routes are validated whether or not the embedded router is enabled, so a typo left behind after
+  a switch to the system router still fails rather than waiting to be rediscovered. A route
+  element the configuration binder discards — `"Routes": [ "rack" ]`, a bare value where an
+  object belongs — fails the host too, the same protection seed entries and slots already have.
+
 ### Changed
 
 - **The embedded AMS router now starts when raw channels are real, even if every configured PLC

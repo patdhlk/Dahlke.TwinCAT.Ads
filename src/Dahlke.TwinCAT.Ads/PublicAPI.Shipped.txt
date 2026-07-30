@@ -83,10 +83,20 @@ Dahlke.TwinCAT.Ads.AdsValueResult.Succeeded.get -> bool
 Dahlke.TwinCAT.Ads.AdsValueResult.SymbolPath.get -> string?
 Dahlke.TwinCAT.Ads.AdsValueResult.TypeName.get -> string?
 Dahlke.TwinCAT.Ads.AdsValueResult.Value.get -> object?
+Dahlke.TwinCAT.Ads.AmsRouteOptions
+Dahlke.TwinCAT.Ads.AmsRouteOptions.Address.get -> string!
+Dahlke.TwinCAT.Ads.AmsRouteOptions.Address.set -> void
+Dahlke.TwinCAT.Ads.AmsRouteOptions.AmsRouteOptions() -> void
+Dahlke.TwinCAT.Ads.AmsRouteOptions.Name.get -> string!
+Dahlke.TwinCAT.Ads.AmsRouteOptions.Name.set -> void
+Dahlke.TwinCAT.Ads.AmsRouteOptions.NetId.get -> string!
+Dahlke.TwinCAT.Ads.AmsRouteOptions.NetId.set -> void
 Dahlke.TwinCAT.Ads.AmsRouterOptions
 Dahlke.TwinCAT.Ads.AmsRouterOptions.AmsRouterOptions() -> void
 Dahlke.TwinCAT.Ads.AmsRouterOptions.NetId.get -> string?
 Dahlke.TwinCAT.Ads.AmsRouterOptions.NetId.set -> void
+Dahlke.TwinCAT.Ads.AmsRouterOptions.Routes.get -> System.Collections.Generic.List<Dahlke.TwinCAT.Ads.AmsRouteOptions!>!
+Dahlke.TwinCAT.Ads.AmsRouterOptions.Routes.set -> void
 Dahlke.TwinCAT.Ads.ConnectionMode
 Dahlke.TwinCAT.Ads.ConnectionMode.Real = 0 -> Dahlke.TwinCAT.Ads.ConnectionMode
 Dahlke.TwinCAT.Ads.ConnectionMode.Simulated = 1 -> Dahlke.TwinCAT.Ads.ConnectionMode

@@ -144,6 +144,8 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
 
     private static void ValidateRouter(TwinCatAdsOptions options, List<string> failures)
     {
+        ValidateRouterRoutes(options, failures);
+
         var netId = options.Router?.NetId;
 
         // Null or empty means "use system router" — always valid.
@@ -156,6 +158,85 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
                 $"Router.NetId '{netId}' is not a valid AMS Net ID. " +
                 $"Expected six dot-separated octets, e.g. '127.0.0.1.1.1'. " +
                 $"Fix 'AmsRouter:NetId', or remove the key to disable the embedded router.");
+        }
+    }
+
+    /// <summary>
+    /// Validates <see cref="AmsRouterOptions.Routes"/>. Every entry needs a name, an
+    /// address and a strictly well-formed Net ID, and names must be unique.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Validated in BOTH router modes, even when <c>AmsRouter:NetId</c> is unset and
+    /// the entries will be ignored, so a typo left behind after switching to the
+    /// system router still fails the host rather than sitting silently broken until
+    /// someone switches back. This matches how raw-channel seeds are treated.
+    /// </para>
+    /// <para>
+    /// <b>The Net ID check is <c>RawSeedParser.IsWellFormedNetId</c>, NOT
+    /// <see cref="AmsNetId.TryParse"/>.</b> That method LAUNDERS an out-of-range
+    /// octet instead of rejecting it — <c>AmsNetId.TryParse("999.1.1.1.1.1")</c>
+    /// returns <see langword="true"/> and yields <c>0.1.1.1.1.1</c>, so <c>256</c>,
+    /// <c>300</c> and <c>999</c> all collapse to the same address. Delegating would
+    /// let a typo'd route pass startup and then quietly address a DIFFERENT DEVICE
+    /// than the one written in configuration. A route is a declaration whose typo has
+    /// no correct reading, so it is rejected — the same rule, and the same shared
+    /// method, as a raw-channel seed entry.
+    /// </para>
+    /// <para>
+    /// Note this is stricter than <see cref="ValidateRouter"/>'s own check of
+    /// <c>AmsRouter:NetId</c>, which still uses <see cref="AmsNetId.TryParse"/>.
+    /// Tightening that is a behaviour change to an already-shipped key and belongs to
+    /// its own change rather than being smuggled in here.
+    /// </para>
+    /// </remarks>
+    private static void ValidateRouterRoutes(TwinCatAdsOptions options, List<string> failures)
+    {
+        var router = options.Router;
+        if (router is null)
+            return;
+
+        // Routes the binder threw away. Relayed verbatim: already path-scoped and
+        // actionable, exactly like RawChannels' SeedBindingErrors.
+        failures.AddRange(router.RouteBindingErrors);
+
+        var seenNames = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < router.Routes.Count; i++)
+        {
+            var route = router.Routes[i];
+
+            if (string.IsNullOrWhiteSpace(route.Name))
+            {
+                failures.Add(
+                    $"AmsRouter:Routes:{i}:Name is required — the embedded router keys its route " +
+                    $"table by name. Give the route a name unique within 'AmsRouter:Routes'.");
+            }
+            else if (seenNames.TryGetValue(route.Name, out var first))
+            {
+                failures.Add(
+                    $"AmsRouter:Routes:{i}:Name '{route.Name}' duplicates " +
+                    $"'AmsRouter:Routes:{first}:Name'. The embedded router keys routes by name " +
+                    $"— two routes sharing one are not two routes — so give each a distinct name.");
+            }
+            else
+            {
+                seenNames[route.Name] = i;
+            }
+
+            if (!RawSeedParser.IsWellFormedNetId(route.NetId))
+            {
+                failures.Add(
+                    $"AmsRouter:Routes:{i}:NetId '{route.NetId}' is not six dot-separated octets " +
+                    $"in the range 0-255 (e.g. '5.138.44.199.1.1').");
+            }
+
+            if (string.IsNullOrWhiteSpace(route.Address))
+            {
+                failures.Add(
+                    $"AmsRouter:Routes:{i}:Address is required — set it to the device's IP address " +
+                    $"(e.g. '192.168.1.223') or host name.");
+            }
         }
     }
 

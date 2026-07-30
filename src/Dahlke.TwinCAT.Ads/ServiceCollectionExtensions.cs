@@ -239,16 +239,28 @@ public static class ServiceCollectionExtensions
                 // type to bind onto. See InitialValueBinder.
                 InitialValueBinder.Bind(plcTargets, o.Targets);
 
-                // Router.NetId ← AmsRouter:NetId (existing layout).
+                // Router ← AmsRouter:NetId and AmsRouter:Routes (existing layout).
                 //
-                // ONE PROPERTY, not the section. A second property added to
+                // TWO PROPERTIES, not the section. A third property added to
                 // AmsRouterOptions is NOT picked up here and would stay at its default
                 // however a host spells it in configuration — the same way RawChannels
                 // shipped dead. OptionsSectionsAreBoundTests does not cover this: it
                 // guards new sections on TwinCatAdsOptions, not new members of a section
-                // bound property-by-property. Extend this line, or switch to a
+                // bound property-by-property. Extend these lines, or switch to a
                 // whole-section Bind as RawChannels below does.
-                o.Router.NetId = configuration.GetSection("AmsRouter").GetValue<string>("NetId");
+                var amsRouter = configuration.GetSection("AmsRouter");
+                o.Router.NetId = amsRouter.GetValue<string>("NetId");
+
+                // Routes is ASSIGNED, not Bind-appended, so a host that registers
+                // twice ends up with one copy of each route rather than two. That
+                // matters more here than for RawChannels:Seed: routes are keyed by
+                // name and a duplicate name is a startup FAILURE, so appending would
+                // break every host calling AddTwinCatAds twice.
+                var routesSection = amsRouter.GetSection("Routes");
+                var routes = routesSection.Get<List<AmsRouteOptions>>();
+                if (routes is not null)
+                    o.Router.Routes = routes;
+                RecordDiscardedRoutes(routesSection, o.Router);
 
                 // SymbolDump: bind legacy key first (lower precedence), then
                 // new section over it (higher precedence wins).
@@ -371,6 +383,54 @@ public static class ServiceCollectionExtensions
                 $"\"0x11\" cannot bind to a slot and is dropped silently, leaving the target " +
                 $"reachable but unseeded.");
         }
+    }
+
+    /// <summary>
+    /// Detects <c>AmsRouter:Routes</c> entries the binder silently DISCARDED and
+    /// records them for the validator to report.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same mechanism as <see cref="RecordDiscardedSeedEntries"/>, for the same
+    /// reason: <c>ConfigurationBinder</c> swallows a failure inside a collection
+    /// element and drops the element. No route member is convertible-typed — all three
+    /// are <see cref="string"/> — but a conversion failure is not the only route to a
+    /// drop. An element written as a SCALAR where an object belongs,
+    /// <c>"Routes": [ "rack" ]</c>, cannot bind to a complex type and is dropped with
+    /// no error at all. A route that vanishes is precisely the failure this section
+    /// exists to remove: the host starts, the router runs, and every operation against
+    /// the device answers <c>TargetMachineNotFound</c>.
+    /// </para>
+    /// <para>
+    /// <b>Clears first, unlike the seed check.</b> <c>Routes</c> is ASSIGNED by the
+    /// binding step rather than Bind-appended, so a second registration pass sees the
+    /// same counts as the first and recomputes the same answer — the recompute is
+    /// meaningful, so a stale message from an earlier pass should not survive
+    /// alongside it. The seed check cannot clear, because its bound count doubles on a
+    /// second pass and clearing would erase a real shortfall.
+    /// </para>
+    /// </remarks>
+    private static void RecordDiscardedRoutes(
+        IConfigurationSection routesSection,
+        AmsRouterOptions options)
+    {
+        options.RouteBindingErrors.Clear();
+
+        if (!routesSection.Exists())
+            return;
+
+        var configured = routesSection.GetChildren().Count();
+
+        if (options.Routes.Count >= configured)
+            return;
+
+        options.RouteBindingErrors.Add(
+            $"AmsRouter:Routes declares {configured} " +
+            $"rout{(configured == 1 ? "e" : "es")} but only {options.Routes.Count} could be bound; " +
+            $"the configuration binder DISCARDED the rest instead of reporting them. Each route " +
+            $"must be an OBJECT with 'Name', 'NetId' and 'Address' — a bare value such as " +
+            $"\"rack\" cannot bind to a route and is dropped silently, leaving the target " +
+            $"unreachable with no error at startup.");
     }
 
     /// <summary>
