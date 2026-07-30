@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.0] - 2026-07-29
+## [0.6.0] - 2026-07-30
 
 ### Added
 
@@ -157,6 +157,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   element the configuration binder discards — `"Routes": [ "rack" ]`, a bare value where an
   object belongs — fails the host too, the same protection seed entries and slots already have.
 
+- **`IAdsConnectionPool.GetTargetStates()`** — a public per-target status snapshot
+  (`PlcTargetStatus { PlcId, Mode, State }`, ordered by id), so dashboards and status
+  endpoints read the same truth the health check reports without scraping `/health`.
+
 ### Changed
 
 - **The embedded AMS router now starts when raw channels are real, even if every configured PLC
@@ -191,7 +195,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BeckhoffManagedRawConnection` is now the single permitted `#pragma warning disable CS0618`
   site, so consumers no longer carry it.
 
+- **The internal connection seam no longer carries the consumer state surface.**
+  `IManagedConnection` is decoupled from `IAdsConnection`: connection-state ownership lives
+  with the pool and is surfaced through the facade, so the internal `AdsConnection` (and the
+  test doubles) no longer implement a `State` property nothing read and a
+  `ConnectionStateChanged` event nothing could raise. `SimulatedAdsConnection` keeps both —
+  handing a sim directly to code expecting an `IAdsConnection` is a supported testing pattern,
+  and for a connection that is permanently connected they are honest — and now implements
+  `IAdsConnection` directly. No public API was removed.
+
+- `TwinCatAdsHealthCheck` consumes `IAdsConnectionPool` instead of the concrete pool, and its
+  documentation no longer describes a router-release distinction the code never performed.
+
 ### Fixed
+
+- **`Connected` now means "can carry ADS traffic", proven before it is published.** (#12)
+  Beckhoff's `AdsClient.Connect` is purely local — it associates an AMS address and succeeds
+  even when the peer is unreachable — and the pool used to declare `Connected` on its strength
+  alone. The first real round trip (subscription re-registration, or the health check) was what
+  discovered the dead link: a physical cable-pull test measured three connect attempts and
+  ~30 s of noisy recovery, and a misconfigured `AmsNetId` reported `IsConnected == true` while
+  every operation failed with `TargetMachineNotFound`.
+
+  The pool now proves the link with one `ReadState` round trip between `Connect()` and the
+  publish point. A failed probe is a failed connect attempt — torn down unpublished, backed
+  off, retried — so the `Connected` transition, the facade's routing, `IsConnected`, and
+  durable-subscription re-registration all wait for a link that has answered. One outage now
+  produces exactly one `Connected` and one re-registration pass.
 
 - **Configured symbol-layer timeouts were unreachable: Beckhoff's invisible 5000 ms default was
   the real bound.** `AdsClient.Timeout` was never assigned anywhere in `src/`, so the Beckhoff

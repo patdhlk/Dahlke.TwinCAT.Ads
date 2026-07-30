@@ -2,6 +2,7 @@ using System.Reactive.Linq;
 using Dahlke.TwinCAT.Ads.Reactive;
 using Dahlke.TwinCAT.Ads.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Dahlke.TwinCAT.Ads.Tests;
 
@@ -9,6 +10,27 @@ public class ReactiveExtensionsTests
 {
     private static SimulatedAdsConnection NewSim()
         => new("plc1", "PLC 1", NullLoggerFactory.Instance);
+
+    /// <summary>
+    /// A facade routing to <paramref name="current"/> — the <see cref="IAdsConnection"/>
+    /// shape a pool consumer actually holds, so the Rx extensions are exercised
+    /// through the production surface (durable subscriptions, facade state event)
+    /// rather than against a bare managed connection.
+    /// </summary>
+    private static AdsConnectionFacade NewFacade(IManagedConnection current, string plcId = "plc1")
+    {
+        var facade = new AdsConnectionFacade(
+            plcId,
+            new PlcTargetOptions { DisplayName = plcId, TimeoutMs = 5000 },
+            new FakeTimeProvider(),
+            NullLogger.Instance);
+        facade.SetCurrent(current);
+        return facade;
+    }
+
+    private static void RaiseStateChanged(
+        AdsConnectionFacade facade, string plcId, ConnectionState previous, ConnectionState next)
+        => facade.OnStateChanged(new ConnectionStateChangedEventArgs(plcId, next, previous));
 
     [Fact]
     public async Task ObserveValue_Typed_EmitsOnChange()
@@ -48,8 +70,9 @@ public class ReactiveExtensionsTests
     public async Task ObserveValue_Dispose_DeletesUnderlyingNotification()
     {
         var conn = new FakeManagedConnection("plc1") { IsConnected = true };
+        var facade = NewFacade(conn);
 
-        var sub = conn.ObserveValue("MAIN.x", cycleTimeMs: 100).Subscribe(_ => { });
+        var sub = facade.ObserveValue("MAIN.x", cycleTimeMs: 100).Subscribe(_ => { });
         await conn.SubscribeCalled.WaitAsync(TimeSpan.FromSeconds(5));
 
         var record = Assert.Single(conn.Subscriptions);
@@ -64,11 +87,12 @@ public class ReactiveExtensionsTests
     {
         var conn = new FakeManagedConnection("plc1") { IsConnected = true };
         conn.SubscribeThrowsOnce = new InvalidOperationException("symbol not found");
+        var facade = NewFacade(conn);
 
         Exception? error = null;
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        using var sub = conn.ObserveValue("MAIN.missing", cycleTimeMs: 100)
+        using var sub = facade.ObserveValue("MAIN.missing", cycleTimeMs: 100)
             .Subscribe(_ => { }, ex => { error = ex; done.TrySetResult(); });
 
         await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -79,13 +103,13 @@ public class ReactiveExtensionsTests
     [Fact]
     public void ObserveConnectionState_EmitsRaisedEvents()
     {
-        var conn = new FakeManagedConnection("plc1");
+        var facade = NewFacade(new FakeManagedConnection("plc1"));
         var received = new List<ConnectionStateChangedEventArgs>();
 
-        using var sub = conn.ObserveConnectionState().Subscribe(received.Add);
+        using var sub = facade.ObserveConnectionState().Subscribe(received.Add);
 
-        conn.RaiseConnectionStateChanged(ConnectionState.Disconnected, ConnectionState.Connecting);
-        conn.RaiseConnectionStateChanged(ConnectionState.Connecting, ConnectionState.Connected);
+        RaiseStateChanged(facade, "plc1", ConnectionState.Disconnected, ConnectionState.Connecting);
+        RaiseStateChanged(facade, "plc1", ConnectionState.Connecting, ConnectionState.Connected);
 
         Assert.Equal(2, received.Count);
         Assert.Equal("plc1", received[0].PlcId);
@@ -96,13 +120,13 @@ public class ReactiveExtensionsTests
     [Fact]
     public void ObserveConnectionState_Dispose_Unsubscribes()
     {
-        var conn = new FakeManagedConnection("plc1");
+        var facade = NewFacade(new FakeManagedConnection("plc1"));
         var count = 0;
 
-        var sub = conn.ObserveConnectionState().Subscribe(_ => count++);
-        conn.RaiseConnectionStateChanged(ConnectionState.Disconnected, ConnectionState.Connecting);
+        var sub = facade.ObserveConnectionState().Subscribe(_ => count++);
+        RaiseStateChanged(facade, "plc1", ConnectionState.Disconnected, ConnectionState.Connecting);
         sub.Dispose();
-        conn.RaiseConnectionStateChanged(ConnectionState.Connecting, ConnectionState.Connected);
+        RaiseStateChanged(facade, "plc1", ConnectionState.Connecting, ConnectionState.Connected);
 
         Assert.Equal(1, count);
     }
@@ -164,8 +188,8 @@ public class ReactiveExtensionsTests
     [Fact]
     public void ObserveAllConnectionStates_MergesEveryTarget()
     {
-        var plc1 = new FakeManagedConnection("plc1");
-        var plc2 = new FakeManagedConnection("plc2");
+        var plc1 = NewFacade(new FakeManagedConnection("plc1"), "plc1");
+        var plc2 = NewFacade(new FakeManagedConnection("plc2"), "plc2");
         var pool = new FakeConnectionPool(
             new Dictionary<string, IAdsConnection>(StringComparer.OrdinalIgnoreCase)
             {
@@ -176,8 +200,8 @@ public class ReactiveExtensionsTests
         var received = new List<ConnectionStateChangedEventArgs>();
         using var sub = pool.ObserveAllConnectionStates().Subscribe(received.Add);
 
-        plc1.RaiseConnectionStateChanged(ConnectionState.Disconnected, ConnectionState.Connecting);
-        plc2.RaiseConnectionStateChanged(ConnectionState.Disconnected, ConnectionState.Connected);
+        RaiseStateChanged(plc1, "plc1", ConnectionState.Disconnected, ConnectionState.Connecting);
+        RaiseStateChanged(plc2, "plc2", ConnectionState.Disconnected, ConnectionState.Connected);
 
         Assert.Equal(2, received.Count);
         Assert.Contains(received, e => e.PlcId == "plc1" && e.State == ConnectionState.Connecting);

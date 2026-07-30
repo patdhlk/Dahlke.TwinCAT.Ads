@@ -427,12 +427,6 @@ public class GenericReadWriteTests
         public string DisplayName => PlcId;
         public bool IsConnected { get; set; }
 
-        public ConnectionState State => ConnectionState.Disconnected;
-
-#pragma warning disable CS0067
-        public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
-#pragma warning restore CS0067
-
         public string? LastTypedReadPath { get; private set; }
         public (string Path, object? Value)? LastTypedWrite { get; private set; }
 

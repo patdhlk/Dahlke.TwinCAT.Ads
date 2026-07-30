@@ -376,6 +376,7 @@ public class AdsConnectionFacadeTests
         var (pool, factory, time, signal) = CreatePool("plc1");
 
         var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
         first.IsAliveResults.Enqueue(false); // health check fails -> rebuild
         factory.Enqueue(first);
         var second = new FakeManagedConnection("plc1");
@@ -447,6 +448,7 @@ public class AdsConnectionFacadeTests
 
         // First connection connects, then fails its health check -> teardown.
         var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
         first.IsAliveResults.Enqueue(false); // health check fails -> rebuild
         // Second connection is a RecordingConnection so we can assert the read hit it.
         var second = new RecordingConnection("plc1") { IsConnected = true, ReadResult = 314 };
@@ -574,12 +576,6 @@ public class AdsConnectionFacadeTests
         public string PlcId { get; }
         public string DisplayName => PlcId;
         public bool IsConnected { get; set; }
-
-        // No-op implementations to satisfy IAdsConnection after the connection-state surface was added.
-        public ConnectionState State => ConnectionState.Disconnected;
-#pragma warning disable CS0067
-        public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
-#pragma warning restore CS0067
 
         public object? ReadResult { get; set; }
         public string? LastReadPath { get; private set; }

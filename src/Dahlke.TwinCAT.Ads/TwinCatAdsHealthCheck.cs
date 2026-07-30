@@ -45,9 +45,9 @@ namespace Dahlke.TwinCAT.Ads;
 /// </remarks>
 internal sealed class TwinCatAdsHealthCheck : IHealthCheck
 {
-    private readonly AdsConnectionPool _pool;
+    private readonly IAdsConnectionPool _pool;
 
-    internal TwinCatAdsHealthCheck(AdsConnectionPool pool)
+    internal TwinCatAdsHealthCheck(IAdsConnectionPool pool)
     {
         _pool = pool;
     }
@@ -98,10 +98,10 @@ internal sealed class TwinCatAdsHealthCheck : IHealthCheck
                 data: data));
         }
 
-        // No target connected at all.
-        // If real targets exist and none are connected, check whether router loops
-        // have been released. All-real-disconnected with unreleased loops means the
-        // router has not yet become ready (or never will).
+        // No target connected at all. When real targets exist, hint at the two
+        // states this covers — router not ready yet, or a total outage. The check
+        // reads connection states only; it does not (and cannot, through
+        // IAdsConnectionPool) distinguish the two, so the message hedges.
         if (realTargets.Count > 0 && connectedRealCount == 0)
         {
             var description = "Unhealthy: all real target(s) disconnected. Router may not be ready yet.";

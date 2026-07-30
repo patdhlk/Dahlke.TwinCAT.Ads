@@ -323,26 +323,12 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     internal ConnectionState GetState(string plcId)
         => _states.TryGetValue(plcId, out var state) ? state : ConnectionState.Disconnected;
 
-    /// <summary>
-    /// Returns a snapshot of per-target connection state for health reporting.
-    /// Each tuple contains the target identifier, its configured
-    /// <see cref="ConnectionMode"/>, and the current <see cref="ConnectionState"/>
-    /// as observed by the connection loop at the moment of the call.
-    /// </summary>
-    /// <remarks>
-    /// The list is ordered by target identifier (ordinal, case-insensitive) for a
-    /// stable, predictable representation in dashboards and health-check responses.
-    /// This is a lightweight read of in-memory state and does not block.
-    /// </remarks>
-    /// <returns>
-    /// A read-only list of <c>(PlcId, Mode, State)</c> tuples, ordered by target
-    /// identifier, representing a point-in-time snapshot of each target's state.
-    /// </returns>
-    internal IReadOnlyList<(string PlcId, ConnectionMode Mode, ConnectionState State)> GetTargetStates()
+    /// <inheritdoc/>
+    public IReadOnlyList<PlcTargetStatus> GetTargetStates()
     {
         return _targets
             .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(kvp => (
+            .Select(kvp => new PlcTargetStatus(
                 kvp.Key,
                 kvp.Value.Mode,
                 _states.TryGetValue(kvp.Key, out var s) ? s : ConnectionState.Disconnected))
@@ -654,34 +640,56 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                     // cancellation catch into the cleanup block, which tears the
                     // connection down without ever publishing it.
                     cts.Token.ThrowIfCancellationRequested();
-                    _connections[plcId] = ads;
-                    // Publish the live connection into the stable facade so
-                    // GetConnection's facade now routes here. Piggybacks the
-                    // _connections write — same point, same instance.
-                    if (_facades.TryGetValue(plcId, out var facadeToSet))
-                        facadeToSet.SetCurrent(ads);
-                    published = true;
-                    SetState(plcId, ConnectionState.Connected);
-                    // Release StartAsync's first-connect await as soon as this
-                    // target publishes its first live connection.
-                    firstConnectSignal?.TrySetResult();
-                    delay = MinReconnectDelay;
 
-                    _logger.LogInformation("PLC {PlcId} connected, starting health check", plcId);
-
-                    // Log symbol tree if enabled in options
-                    if (_symbolDump.Enabled)
-                        ads.LogSymbolTree(_symbolDump);
-
-                    // Health check loop: checks if connection is still alive
-                    while (!cts.Token.IsCancellationRequested)
+                    // Prove the link BEFORE publishing. Beckhoff's Connect() is
+                    // purely local — it associates an AMS address and succeeds
+                    // even when the peer is unreachable — so Connected on the
+                    // strength of Connect() alone means "local socket
+                    // association", not "can carry ADS traffic". Publishing
+                    // then would hand subscription re-registration and callers
+                    // a dead link that only the first real round trip discovers
+                    // (issue #12: three connect attempts and ~30 s per cable
+                    // pull). One ReadState round trip here makes Connected mean
+                    // what callers assume. A failed probe is a failed connect
+                    // attempt: fall through unpublished to the cleanup block,
+                    // back off, retry.
+                    if (!await ads.IsAliveAsync(cts.Token).ConfigureAwait(false))
                     {
-                        await Task.Delay(HealthCheckInterval, _timeProvider, cts.Token).ConfigureAwait(false);
+                        _logger.LogWarning(
+                            "PLC {PlcId}: connected locally but the link cannot carry ADS traffic yet, retrying in {Delay}s",
+                            plcId, delay.TotalSeconds);
+                    }
+                    else
+                    {
+                        _connections[plcId] = ads;
+                        // Publish the live connection into the stable facade so
+                        // GetConnection's facade now routes here. Piggybacks the
+                        // _connections write — same point, same instance.
+                        if (_facades.TryGetValue(plcId, out var facadeToSet))
+                            facadeToSet.SetCurrent(ads);
+                        published = true;
+                        SetState(plcId, ConnectionState.Connected);
+                        // Release StartAsync's first-connect await as soon as this
+                        // target publishes its first live connection.
+                        firstConnectSignal?.TrySetResult();
+                        delay = MinReconnectDelay;
 
-                        if (!await ads.IsAliveAsync(cts.Token).ConfigureAwait(false))
+                        _logger.LogInformation("PLC {PlcId} connected, starting health check", plcId);
+
+                        // Log symbol tree if enabled in options
+                        if (_symbolDump.Enabled)
+                            ads.LogSymbolTree(_symbolDump);
+
+                        // Health check loop: checks if connection is still alive
+                        while (!cts.Token.IsCancellationRequested)
                         {
-                            _logger.LogWarning("PLC {PlcId}: health check failed, reconnecting...", plcId);
-                            break; // Exit inner loop -> reconnect
+                            await Task.Delay(HealthCheckInterval, _timeProvider, cts.Token).ConfigureAwait(false);
+
+                            if (!await ads.IsAliveAsync(cts.Token).ConfigureAwait(false))
+                            {
+                                _logger.LogWarning("PLC {PlcId}: health check failed, reconnecting...", plcId);
+                                break; // Exit inner loop -> reconnect
+                            }
                         }
                     }
                 }

@@ -274,6 +274,15 @@ conn.ConnectionStateChanged += (_, e) =>
 
 `IsConnected` and `State` are snapshots. Operation methods do not consult them; they apply the wait-then-throw contract directly.
 
+`Connected` means the link has been **proven by a real ADS round trip** — the pool issues a `ReadState` probe after `Connect()` and only publishes the connection when the probe answers, then keeps it honest with a periodic health check. A locally "connected" socket whose peer is unreachable (dead route, misconfigured `AmsNetId`, cable pulled) reports `Disconnected`, not a false green.
+
+For dashboards and status endpoints, the pool exposes a per-target snapshot:
+
+```csharp
+IReadOnlyList<PlcTargetStatus> states = pool.GetTargetStates();
+// [ PlcTargetStatus { PlcId = "plc1", Mode = Real, State = Connected }, ... ]
+```
+
 ## Wait-then-Throw Semantics
 
 When no live connection is available (connecting, mid-outage), every operation on an `IAdsConnection` waits up to the target's `TimeoutMs` milliseconds for a connection to be published, then throws `AdsConnectionUnavailableException`. After the pool is stopped (host shutdown), operations fail fast without waiting.

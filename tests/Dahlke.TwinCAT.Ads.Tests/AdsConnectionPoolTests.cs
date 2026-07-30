@@ -278,9 +278,11 @@ public class AdsConnectionPoolTests
         var fail1 = factory.Enqueue(new FakeManagedConnection("plc1") { ConnectShouldThrow = true });
         // Iteration 2: Create succeeds, Connect throws -> backoff becomes 8s.
         var fail2 = factory.Enqueue(new FakeManagedConnection("plc1") { ConnectShouldThrow = true });
-        // Iteration 3: Connect succeeds, then first health check fails -> backoff reset to 2s.
+        // Iteration 3: Connect succeeds and the link probe passes -> backoff
+        // reset to 2s; then the first health check fails -> rebuild.
         var healthy = new FakeManagedConnection("plc1");
-        healthy.IsAliveResults.Enqueue(false);
+        healthy.IsAliveResults.Enqueue(true);  // connect-time link probe passes
+        healthy.IsAliveResults.Enqueue(false); // first health check fails
         factory.Enqueue(healthy);
         // Iteration 4: Connect succeeds; we observe it arrives after the MINIMUM
         // backoff (2s) following the reset, proving the reset.
@@ -302,12 +304,9 @@ public class AdsConnectionPoolTests
         await WaitForConnection(pool, "plc1", healthy);
         Assert.Same(healthy, CurrentOf(pool, "plc1"));
 
-        // Healthy connect resets backoff to 2s. Inner health loop: Task.Delay(5s)
-        // then IsAliveAsync returns false -> break -> grace(2s) -> backoff(2s) -> attempt 4.
-        // Drive the 5s health interval until IsAliveAsync fires.
-        await AdvanceUntil(time, healthy.IsAliveCalled, Health);
-
-        // Now grace(2s) + reset backoff(2s) before attempt 4.
+        // Healthy connect (its link probe consumed the first scripted IsAlive
+        // result) reset backoff to 2s. Drive the 5s health interval so the
+        // scripted false fires, then grace(2s) + reset backoff(2s) -> attempt 4.
         await AdvanceUntilCreateCount(time, factory, 4);
         await Await(afterReset.ConnectCalled);
         Assert.Equal(4, factory.CreateCount);
@@ -321,6 +320,7 @@ public class AdsConnectionPoolTests
         var (pool, factory, time, signal) = CreatePool("plc1");
 
         var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(true);   // connect-time link probe passes
         first.IsAliveResults.Enqueue(true);   // 1st health check passes
         first.IsAliveResults.Enqueue(false);  // 2nd health check fails -> rebuild
         factory.Enqueue(first);
@@ -335,10 +335,11 @@ public class AdsConnectionPoolTests
         await WaitForConnection(pool, "plc1", first);
         Assert.Same(first, CurrentOf(pool, "plc1"));
 
-        // 1st health check (passes). Advance 5s until IsAliveAsync fires.
+        // 1st health check (passes). Advance 5s until IsAliveAsync fires again
+        // (the connect-time probe was call #1).
         first.RearmIsAliveCalled();
         await AdvanceUntil(time, first.IsAliveCalled, Health);
-        Assert.Equal(1, first.IsAliveCount);
+        Assert.Equal(2, first.IsAliveCount);
         Assert.Same(first, CurrentOf(pool, "plc1")); // still alive
 
         // 2nd health check (fails) -> inner loop breaks -> cleanup.
