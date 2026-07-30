@@ -12,14 +12,13 @@ namespace Dahlke.TwinCAT.Ads.Tests.Fakes;
 /// <para>
 /// This double exists so the contract suite can exercise the
 /// <see cref="AdsConnectionFacade"/> plumbing (snapshot-then-route, durable subscriptions)
-/// against a managed connection that honours the SAME documented semantics the
-/// <see cref="SimulatedAdsConnection"/> honours, WITHOUT sharing its implementation. The two
-/// data planes are deliberately separate code: the contract suite runs one shared behavioural
-/// spec against both, so if either drifts from the documented contract a contract [Fact] fails.
-/// The only production code reused here is <see cref="AdsValueConverter"/> — the converter IS
-/// the documented conversion contract (direct cast, <see cref="IConvertible"/> widening,
-/// invariant-culture string parsing), so re-implementing it would test a different spec, not
-/// the real one.
+/// against a managed connection with test-controllable lifecycle state. Its data plane
+/// composes the SAME shared modules as <see cref="SimulatedAdsConnection"/> —
+/// <see cref="InMemoryPlcStore{TKey, TValue}"/>, <see cref="SubscriberRegistry{TKey, TValue}"/>,
+/// <see cref="SimulatedSymbolTree"/>, <see cref="AdsValueConverter"/> — so the store, fire-rule,
+/// delivery, tree and conversion semantics are ONE implementation, pinned by those modules'
+/// own unit tests; the contract suite pins the adapter glue (exception shapes, batch
+/// semantics, metadata inference) on both harnesses.
 /// </para>
 /// <para>
 /// <b>Semantics mirrored</b> (see <see cref="IAdsConnection"/> XML docs for the authoritative
@@ -68,8 +67,8 @@ namespace Dahlke.TwinCAT.Ads.Tests.Fakes;
 /// </remarks>
 internal sealed class InMemoryManagedConnection : IManagedConnection
 {
-    private readonly ConcurrentDictionary<string, object?> _symbols = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, SubscriberList> _subscribers = new();
+    private readonly InMemoryPlcStore<string, object?> _store = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SubscriberRegistry<string, object?> _subscribers = new(StringComparer.OrdinalIgnoreCase);
 
     // Written by WriteControlAsync, read by GetAdsStateAsync — volatile mirrors
     // SimulatedAdsConnection's equivalent field so the contract fact holds here too.
@@ -94,7 +93,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     {
         ct.ThrowIfCancellationRequested();
 
-        if (!_symbols.TryGetValue(symbolPath, out var stored))
+        if (!_store.TryRead(symbolPath, out var stored))
             throw new AdsErrorException(
                 $"In-memory symbol '{symbolPath}' has no stored value; cannot read it as '{typeof(T).Name}'.",
                 AdsErrorCode.DeviceSymbolNotFound);
@@ -105,7 +104,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        _symbols.TryGetValue(symbolPath, out var value);
+        _store.TryRead(symbolPath, out var value);
         return Task.FromResult(value);
     }
 
@@ -121,7 +120,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     {
         ct.ThrowIfCancellationRequested();
 
-        if (!_symbols.TryGetValue(symbolPath, out var value))
+        if (!_store.TryRead(symbolPath, out var value))
             throw new AdsErrorException(
                 $"In-memory symbol '{symbolPath}' has no stored value; cannot read its metadata.",
                 AdsErrorCode.DeviceSymbolNotFound);
@@ -138,7 +137,8 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        StoreAndFire(symbolPath, value);
+        if (_store.Write(symbolPath, value))
+            _subscribers.Fire(symbolPath, value);
         return Task.CompletedTask;
     }
 
@@ -157,7 +157,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
             // documented in-memory/sim batch semantic. Type metadata is carried either way, as a
             // real connection carries it — InferPlcType maps a null to ("UNKNOWN", "Unknown")
             // rather than leaving the fields null.
-            _symbols.TryGetValue(path, out var value);
+            _store.TryRead(path, out var value);
             var (typeName, category) = SimulatedAdsConnection.InferPlcType(value);
             results[path] = AdsValueResult.Success(value, path, typeName, category);
         }
@@ -179,7 +179,8 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
                 continue;
             }
 
-            StoreAndFire(path, value);
+            if (_store.Write(path, value))
+                _subscribers.Fire(path, value);
             results[path] = AdsValueResult.Success(null, path);
         }
         return Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(results);
@@ -221,8 +222,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var list = _subscribers.GetOrAdd(symbolPath, _ => new SubscriberList());
-        return Task.FromResult(list.Add(callback));
+        return Task.FromResult(_subscribers.Subscribe(symbolPath, callback));
     }
 
     public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
@@ -263,119 +263,14 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-
-        var prefix = string.Empty;
-        if (!string.IsNullOrEmpty(parentPath))
-        {
-            var canonicalParent = ResolveStoredCasing(parentPath)
-                ?? throw new AdsErrorException($"In-memory symbol '{parentPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
-            prefix = canonicalParent + ".";
-        }
-
-        var childNames = _symbols.Keys
-            .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
-            .Select(k => k.Substring(prefix.Length).Split('.')[0])
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var result = childNames
-            .Select(name => BuildSymbolInfo(prefix + name, includeChildren))
-            .ToList();
-
-        return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
+        return Task.FromResult(SimulatedSymbolTree.GetSymbols(_store, parentPath, includeChildren));
     }
 
     /// <inheritdoc cref="GetSymbolsAsync"/>
     public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-
-        var result = AllPaths()
-            .Where(p => p.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-            .Select(p => BuildSymbolInfo(p, includeChildren))
-            .ToList();
-
-        return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
-    }
-
-    /// <summary>
-    /// Resolves <paramref name="path"/> to its as-seeded casing by locating a stored key at or
-    /// beneath it, or <see langword="null"/> when nothing is seeded there — mirrors
-    /// <see cref="SimulatedAdsConnection"/>'s equivalent helper; see its remarks.
-    /// </summary>
-    private string? ResolveStoredCasing(string path)
-    {
-        foreach (var key in _symbols.Keys)
-        {
-            if (key.Equals(path, StringComparison.OrdinalIgnoreCase))
-                return key;
-            if (key.Length > path.Length && key[path.Length] == '.' &&
-                key.AsSpan(0, path.Length).Equals(path, StringComparison.OrdinalIgnoreCase))
-                return key[..path.Length];
-        }
-        return null;
-    }
-
-    private IEnumerable<string> AllPaths()
-    {
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var key in _symbols.Keys)
-        {
-            var segments = key.Split('.');
-            for (var i = 1; i <= segments.Length; i++)
-                paths.Add(string.Join('.', segments.Take(i)));
-        }
-        return paths;
-    }
-
-    private AdsSymbolInfo BuildSymbolInfo(string path, bool includeChildren)
-    {
-        var isLeaf = _symbols.TryGetValue(path, out var value);
-        var (typeName, category) = isLeaf ? SimulatedAdsConnection.InferPlcType(value) : ("STRUCT", "Struct");
-
-        List<AdsSymbolInfo>? children = null;
-        if (includeChildren)
-        {
-            var prefix = path + ".";
-            var childNames = _symbols.Keys
-                .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
-                .Select(k => k.Substring(prefix.Length).Split('.')[0])
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (childNames.Count > 0)
-                children = childNames.Select(n => BuildSymbolInfo(prefix + n, includeChildren: true)).ToList();
-        }
-
-        return new AdsSymbolInfo(path, typeName, category, ByteSize: 0, Comment: null, children);
-    }
-
-    /// <summary>
-    /// Stores <paramref name="value"/> at <paramref name="symbolPath"/> and fires subscribers
-    /// when the value changed (on-change semantics). The first write to a path always fires.
-    /// </summary>
-    private void StoreAndFire(string symbolPath, object? value)
-    {
-        object? capturedPrevious = null;
-        var isFirstWrite = true;
-        _symbols.AddOrUpdate(
-            symbolPath,
-            addValueFactory: _ => value,
-            updateValueFactory: (_, existing) =>
-            {
-                capturedPrevious = existing;
-                isFirstWrite = false;
-                return value;
-            });
-
-        if (isFirstWrite || !Equals(capturedPrevious, value))
-        {
-            if (_subscribers.TryGetValue(symbolPath, out var list))
-                list.Fire(symbolPath, value);
-        }
+        return Task.FromResult(SimulatedSymbolTree.Search(_store, pattern, includeChildren));
     }
 
     // ---- Lifecycle no-ops ------------------------------------------------
@@ -388,56 +283,4 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
 
     public void Dispose() => IsConnected = false;
 
-    /// <summary>
-    /// Thread-safe per-path subscriber list. A snapshot is taken under the lock, then each
-    /// callback is invoked outside the lock; a throwing callback is swallowed so it cannot
-    /// abort the write or suppress other subscribers (matching the documented contract).
-    /// </summary>
-    private sealed class SubscriberList
-    {
-        private readonly object _lock = new();
-        private readonly Dictionary<long, Action<string, object?>> _callbacks = new();
-        private long _nextId;
-
-        public IDisposable Add(Action<string, object?> callback)
-        {
-            long id;
-            lock (_lock)
-            {
-                id = _nextId++;
-                _callbacks[id] = callback;
-            }
-            return new Registration(this, id);
-        }
-
-        private void Remove(long id)
-        {
-            lock (_lock)
-                _callbacks.Remove(id);
-        }
-
-        public void Fire(string path, object? value)
-        {
-            Action<string, object?>[] snapshot;
-            lock (_lock)
-                snapshot = [.. _callbacks.Values];
-
-            foreach (var cb in snapshot)
-            {
-                try { cb(path, value); }
-                catch { /* swallowed: a callback must not abort the write or suppress others. */ }
-            }
-        }
-
-        private sealed class Registration(SubscriberList owner, long id) : IDisposable
-        {
-            private int _disposed;
-
-            public void Dispose()
-            {
-                if (Interlocked.Exchange(ref _disposed, 1) == 0)
-                    owner.Remove(id);
-            }
-        }
-    }
 }

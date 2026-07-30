@@ -4,9 +4,12 @@ using TwinCAT.Ads;
 namespace Dahlke.TwinCAT.Ads.Tests.Fakes;
 
 /// <summary>
-/// A store-backed <see cref="IManagedRawConnection"/> double whose data plane
-/// mirrors the documented raw contract INDEPENDENTLY of
-/// <see cref="SimulatedRawConnection"/>, so the contract suite pins both.
+/// A store-backed <see cref="IManagedRawConnection"/> double composing the SAME
+/// shared data-plane modules as <see cref="SimulatedRawConnection"/>
+/// (<see cref="InMemoryPlcStore{TKey, TValue}"/> +
+/// <see cref="SubscriberRegistry{TKey, TValue}"/>), so the store and fire-rule
+/// semantics are one implementation pinned by their own unit tests; the contract
+/// suite pins the ADAPTER glue on both raw harnesses.
 /// </summary>
 /// <remarks>
 /// Also the fault-injection point for the facade's timeout, retry and
@@ -15,9 +18,11 @@ namespace Dahlke.TwinCAT.Ads.Tests.Fakes;
 /// </remarks>
 internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
 {
-    private readonly ConcurrentDictionary<(uint Ig, uint Io), byte[]> _store = new();
-    private readonly ConcurrentDictionary<uint, (uint Ig, uint Io, Action<ReadOnlyMemory<byte>> OnData)> _subs = new();
-    private uint _nextHandle = 1;
+    private readonly InMemoryPlcStore<(uint Ig, uint Io), byte[]> _store =
+        new(changeComparer: ByteSequenceEqualityComparer.Instance);
+    private readonly SubscriberRegistry<(uint Ig, uint Io), byte[]> _subscribers = new();
+    private readonly ConcurrentDictionary<uint, IDisposable> _notifications = new();
+    private uint _nextHandle;
 
     /// <summary>Number of times <see cref="Connect"/> has been called on this instance.</summary>
     public int ConnectCount { get; private set; }
@@ -65,7 +70,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
     private readonly TaskCompletionSource _stalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>Handles currently registered — asserts re-registration happened exactly once.</summary>
-    public IReadOnlyCollection<uint> LiveHandles => _subs.Keys.ToArray();
+    public IReadOnlyCollection<uint> LiveHandles => _notifications.Keys.ToArray();
 
     public bool IsConnected { get; private set; }
 
@@ -90,7 +95,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
             throw new ObjectDisposedException(nameof(InMemoryManagedRawConnection));
     }
 
-    public void Seed(uint ig, uint io, byte[] data) => _store[(ig, io)] = data;
+    public void Seed(uint ig, uint io, byte[] data) => _store.Seed((ig, io), data);
 
     public void Connect()
     {
@@ -102,7 +107,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
     {
         await GateAsync(ct).ConfigureAwait(false);
 
-        if (!_store.TryGetValue((ig, io), out var data))
+        if (!_store.TryRead((ig, io), out var data))
             throw new AdsErrorException("slot not seeded", AdsErrorCode.DeviceInvalidOffset);
 
         var count = Math.Min(data.Length, destination.Length);
@@ -113,8 +118,9 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
     public async Task WriteAsync(uint ig, uint io, ReadOnlyMemory<byte> source, CancellationToken ct)
     {
         await GateAsync(ct).ConfigureAwait(false);
-        _store[(ig, io)] = source.ToArray();
-        Notify(ig, io);
+        var bytes = source.ToArray();
+        if (_store.Write((ig, io), bytes))
+            _subscribers.Fire((ig, io), bytes);
     }
 
     public async Task<int> ReadWriteAsync(
@@ -136,23 +142,16 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
     {
         await GateAsync(ct).ConfigureAwait(false);
         OnAddNotification?.Invoke();
-        var handle = Interlocked.Increment(ref _nextHandle) - 1;
-        _subs[handle] = (ig, io, onData);
+        var handle = Interlocked.Increment(ref _nextHandle);
+        _notifications[handle] = _subscribers.Subscribe((ig, io), (_, data) => onData(data));
         return handle;
     }
 
     public async Task RemoveNotificationAsync(uint handle, CancellationToken ct)
     {
         await GateAsync(ct).ConfigureAwait(false);
-        _subs.TryRemove(handle, out _);
-    }
-
-    /// <summary>Fires every subscription watching this slot, as a real device would on change.</summary>
-    private void Notify(uint ig, uint io)
-    {
-        foreach (var (_, sub) in _subs)
-            if (sub.Ig == ig && sub.Io == io && _store.TryGetValue((ig, io), out var data))
-                sub.OnData(data);
+        if (_notifications.TryRemove(handle, out var registration))
+            registration.Dispose();
     }
 
     private async Task GateAsync(CancellationToken ct)
@@ -180,6 +179,8 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
     {
         Volatile.Write(ref _disposed, true);
         IsConnected = false;
-        _subs.Clear();
+        foreach (var handle in _notifications.Keys)
+            if (_notifications.TryRemove(handle, out var registration))
+                registration.Dispose();
     }
 }

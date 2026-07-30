@@ -33,11 +33,17 @@ namespace Dahlke.TwinCAT.Ads;
 /// never invent a file handle.
 /// </para>
 /// <para>
-/// <b>Subscriptions fire on write</b> to the watched slot, mirroring
-/// <see cref="SimulatedAdsConnection"/>'s fire-on-change. <c>cycleTimeMs</c> is
-/// ignored and no coalescing is performed. They are per-connection, not per-store:
-/// disposing this transport drops them, exactly as disposing a real
-/// <c>AdsClient</c> drops its notification registrations.
+/// <b>Subscriptions fire on CHANGE</b> of the watched slot's byte content —
+/// genuinely mirroring <see cref="SimulatedAdsConnection"/> and, more
+/// importantly, the real transport, which registers
+/// <c>AdsTransMode.OnChange</c>: rewriting the same bytes is silent. The rule
+/// itself lives in the shared <see cref="InMemoryPlcStore{TKey, TValue}"/> the
+/// factory-owned <see cref="SimulatedRawStore"/> wraps; delivery lives in this
+/// connection's own <see cref="SubscriberRegistry{TKey, TValue}"/>.
+/// <c>cycleTimeMs</c> is ignored and no coalescing is performed. Subscriptions
+/// are per-connection, not per-store: disposing this transport drops them,
+/// exactly as disposing a real <c>AdsClient</c> drops its notification
+/// registrations.
 /// </para>
 /// <para>
 /// <b>Disposal is enforced, not advisory.</b> Every operation throws
@@ -50,11 +56,14 @@ namespace Dahlke.TwinCAT.Ads;
 internal sealed class SimulatedRawConnection : IManagedRawConnection
 {
     private readonly SimulatedRawStore _store;
-    private readonly ConcurrentDictionary<uint, Subscription> _subscriptions = new();
+
+    // Per-connection delivery over the factory-owned durable slots — see the
+    // class remarks for why the lifetimes differ.
+    private readonly SubscriberRegistry<(uint Ig, uint Io), byte[]> _subscribers = new();
+    private readonly ConcurrentDictionary<uint, IDisposable> _notifications = new();
     private readonly string _amsNetId;
     private readonly int _port;
-    private readonly object _handleLock = new();
-    private uint _nextHandle = 1;
+    private uint _nextHandle;
     private bool _disposed;
 
     public SimulatedRawConnection(string amsNetId, int port, SimulatedRawStore store)
@@ -63,8 +72,6 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection
         _port = port;
         _store = store;
     }
-
-    private sealed record Subscription(uint Ig, uint Io, Action<ReadOnlyMemory<byte>> OnData);
 
     public bool IsConnected { get; private set; }
 
@@ -88,7 +95,7 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection
         ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
 
-        if (!_store.Slots.TryGetValue((ig, io), out var data))
+        if (!_store.Slots.TryRead((ig, io), out var data))
         {
             throw new AdsErrorException(
                 $"No simulated data seeded at index group 0x{ig:X} offset {io} " +
@@ -105,8 +112,9 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection
     {
         ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
-        _store.Slots[(ig, io)] = source.ToArray();
-        FireNotifications(ig, io);
+        var bytes = source.ToArray();
+        if (_store.Slots.Write((ig, io), bytes))
+            _subscribers.Fire((ig, io), bytes);
         return Task.CompletedTask;
     }
 
@@ -132,11 +140,8 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection
         ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
 
-        uint handle;
-        lock (_handleLock)
-            handle = _nextHandle++;
-
-        _subscriptions[handle] = new Subscription(ig, io, onData);
+        var handle = Interlocked.Increment(ref _nextHandle);
+        _notifications[handle] = _subscribers.Subscribe((ig, io), (_, data) => onData(data));
         return Task.FromResult(handle);
     }
 
@@ -144,24 +149,17 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection
     {
         ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
-        _subscriptions.TryRemove(handle, out _);
+        if (_notifications.TryRemove(handle, out var registration))
+            registration.Dispose();
         return Task.CompletedTask;
-    }
-
-    private void FireNotifications(uint ig, uint io)
-    {
-        if (!_store.Slots.TryGetValue((ig, io), out var data))
-            return;
-
-        foreach (var (_, subscription) in _subscriptions)
-            if (subscription.Ig == ig && subscription.Io == io)
-                subscription.OnData(data);
     }
 
     public void Dispose()
     {
         Volatile.Write(ref _disposed, true);
         IsConnected = false;
-        _subscriptions.Clear();
+        foreach (var handle in _notifications.Keys)
+            if (_notifications.TryRemove(handle, out var registration))
+                registration.Dispose();
     }
 }

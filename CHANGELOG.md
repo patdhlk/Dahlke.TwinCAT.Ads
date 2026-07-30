@@ -220,6 +220,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shutdown-linked restore bound). No public API or behaviour change — the existing facade,
   contract, and raw-channel suites pass unchanged.
 
+- **One in-memory PLC instead of four.** The store, the fire rule, the subscriber mechanics
+  and the symbol-tree derivation behind every simulated/in-memory data plane — the symbol
+  simulation, the raw simulation, and the test project's two in-memory doubles — were four
+  separate implementations of the same invariants. They now compose three shared internal
+  modules (`InMemoryPlcStore` — slots + the one fire rule; `SubscriberRegistry` —
+  snapshot-then-fire delivery with per-callback isolation; `SimulatedSymbolTree` — the
+  dotted-path tree walk), each pinned by its own unit tests. Store lifetime remains each
+  owner's stated choice: the symbol sim's store dies with its connection, the raw store
+  stays factory-owned so seeds survive idle eviction.
+
+  Two behaviours changed with the consolidation, both deliberate:
+  - **Raw simulated notifications now fire on CHANGE of byte content, not on every write** —
+    matching the real transport, which registers `AdsTransMode.OnChange`, and matching what
+    the raw sim's own documentation already claimed. (The raw surface is new in this release,
+    so no shipped behaviour changes.) Pinned by a new contract fact on both raw harnesses.
+  - **Symbol subscription paths are now case-insensitive like the store they watch.** The
+    subscriber dictionaries compared case-sensitively while the stores compared
+    case-insensitively, so a subscriber registered under one casing silently never fired for
+    a writer using another.
+
 ### Fixed
 
 - **`Connected` now means "can carry ADS traffic", proven before it is published.** (#12)

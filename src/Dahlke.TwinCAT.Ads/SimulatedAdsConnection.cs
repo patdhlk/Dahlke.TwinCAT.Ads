@@ -49,17 +49,24 @@ namespace Dahlke.TwinCAT.Ads;
 public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
 {
     private readonly ILogger<SimulatedAdsConnection> _logger;
-    private readonly ConcurrentDictionary<string, object?> _symbols = new(StringComparer.OrdinalIgnoreCase);
+
+    // Value store + fire rule, owned per connection: the store dies with the
+    // connection, which is why ForceReconnect is a documented no-op for
+    // simulated targets — replacing the connection would wipe values written
+    // since startup. The change semantics (first-write-fires, same-value-silent)
+    // live in the shared store module.
+    private readonly InMemoryPlcStore<string, object?> _store = new(StringComparer.OrdinalIgnoreCase);
 
     // Written by WriteControlAsync, read by GetAdsStateAsync; volatile gives lock-free
     // cross-thread visibility for this simple flag-like field (same rationale as the
     // facade's _stopped/_state fields).
     private volatile AdsState _adsState = AdsState.Run;
 
-    // Per-path subscriber list. Each entry is a list of (unique id → callback) pairs.
-    // ConcurrentDictionary provides thread-safe path lookup; the inner lock guards
-    // the list under concurrent subscribe/dispose/fire operations.
-    private readonly ConcurrentDictionary<string, SubscriberList> _subscribers = new();
+    // Subscriber delivery, owned per connection alongside the store. The
+    // mechanics (snapshot-then-fire, per-callback isolation, idempotent
+    // disposal) live in the shared registry module; the key comparer matches the
+    // store's so subscription casing never has to match the writer's.
+    private readonly SubscriberRegistry<string, object?> _subscribers;
 
     /// <inheritdoc />
     public string PlcId { get; }
@@ -103,6 +110,11 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
         PlcId = plcId;
         DisplayName = displayName;
         _logger = loggerFactory.CreateLogger<SimulatedAdsConnection>();
+        _subscribers = new SubscriberRegistry<string, object?>(
+            StringComparer.OrdinalIgnoreCase,
+            onCallbackError: (path, ex) => _logger.LogWarning(ex,
+                "Subscription callback for path {Path} threw an exception; notification continues for other subscribers.",
+                path));
         _logger.LogInformation("Simulated ADS connection {PlcId} ({DisplayName}) started", plcId, displayName);
     }
 
@@ -118,8 +130,8 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     public void SetInitialValues(IReadOnlyDictionary<string, object?> values)
     {
         foreach (var (key, value) in values)
-            _symbols[key] = value;
-        // No callbacks fired — seeding does not notify subscribers.
+            _store.Seed(key, value);
+        // No callbacks fired — the store's Seed cannot signal, by design.
     }
 
     /// <summary>
@@ -176,7 +188,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     {
         ct.ThrowIfCancellationRequested();
 
-        if (!_symbols.TryGetValue(symbolPath, out var stored))
+        if (!_store.TryRead(symbolPath, out var stored))
             // Same exception shape a real connection surfaces for an unknown
             // symbol, so callers (and the contract tests) see one consistent
             // exception type across simulated and real targets.
@@ -197,7 +209,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        _symbols.TryGetValue(symbolPath, out var value);
+        _store.TryRead(symbolPath, out var value);
         return Task.FromResult(value);
     }
 
@@ -221,7 +233,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     {
         ct.ThrowIfCancellationRequested();
 
-        if (!_symbols.TryGetValue(symbolPath, out var value))
+        if (!_store.TryRead(symbolPath, out var value))
             throw new AdsErrorException(
                 $"Simulated symbol '{symbolPath}' has no stored value; cannot read its metadata.",
                 AdsErrorCode.DeviceSymbolNotFound);
@@ -294,27 +306,11 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     {
         ct.ThrowIfCancellationRequested();
 
-        // The update factory runs OUTSIDE any lock and may be invoked multiple times in
-        // ConcurrentDictionary's CAS retry loop. capturedPrevious is overwritten on each
-        // invocation, so after AddOrUpdate returns it holds the value displaced by the
-        // WINNING compare-and-swap — which is exactly the "previous" the change check needs.
-        // The factory must therefore stay side-effect-free (capture only).
-        object? capturedPrevious = null;
-        var isFirstWrite = true;
-        _symbols.AddOrUpdate(
-            symbolPath,
-            addValueFactory: _ => value,
-            updateValueFactory: (_, existing) =>
-            {
-                capturedPrevious = existing;
-                isFirstWrite = false;
-                return value;
-            });
-
-        // On-change: fire only when the value actually changed.
-        // First write (path absent) always counts as a change.
-        if (isFirstWrite || !Equals(capturedPrevious, value))
-            FireCallbacks(symbolPath, value);
+        // The store decides (first write, or changed by Equals — the one fire
+        // rule, including its CAS-capture concurrency contract); the registry
+        // delivers.
+        if (_store.Write(symbolPath, value))
+            _subscribers.Fire(symbolPath, value);
 
         return Task.CompletedTask;
     }
@@ -391,23 +387,11 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
                 continue;
             }
 
-            // Same atomic AddOrUpdate pattern as WriteValueAsync — see that method's remarks.
-            object? capturedPrevious = null;
-            var isFirstWrite = true;
-            _symbols.AddOrUpdate(
-                path,
-                addValueFactory: _ => value,
-                updateValueFactory: (_, existing) =>
-                {
-                    capturedPrevious = existing;
-                    isFirstWrite = false;
-                    return value;
-                });
-
-            // FireCallbacks never rethrows (per-callback exceptions are caught and logged
-            // inside the subscriber list), so no try/catch is needed around the loop body.
-            if (isFirstWrite || !Equals(capturedPrevious, value))
-                FireCallbacks(path, value);
+            // Same store-decides/registry-delivers step as WriteValueAsync. Fire
+            // never rethrows (per-callback exceptions are isolated inside the
+            // registry), so no try/catch is needed around the loop body.
+            if (_store.Write(path, value))
+                _subscribers.Fire(path, value);
 
             results[path] = AdsValueResult.Success(null, path);
         }
@@ -495,9 +479,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     {
         ct.ThrowIfCancellationRequested();
 
-        var list = _subscribers.GetOrAdd(symbolPath, _ => new SubscriberList());
-        var registration = list.Add(callback);
-        return Task.FromResult<IDisposable>(registration);
+        return Task.FromResult(_subscribers.Subscribe(symbolPath, callback));
     }
 
     /// <inheritdoc />
@@ -541,14 +523,6 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
             },
             ct);
 
-    private void FireCallbacks(string symbolPath, object? newValue)
-    {
-        if (!_subscribers.TryGetValue(symbolPath, out var list))
-            return;
-
-        list.Fire(symbolPath, newValue, _logger);
-    }
-
     /// <inheritdoc />
     /// <remarks>
     /// The simulated store is a flat map of dotted paths, so the symbol tree is derived from the
@@ -570,108 +544,20 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-
-        var prefix = string.Empty;
-        if (!string.IsNullOrEmpty(parentPath))
-        {
-            var canonicalParent = ResolveStoredCasing(parentPath)
-                ?? throw new AdsErrorException($"Symbol '{parentPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
-            prefix = canonicalParent + ".";
-        }
-
-        var childNames = _symbols.Keys
-            .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
-            .Select(k => k.Substring(prefix.Length).Split('.')[0])
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var result = childNames
-            .Select(name => BuildSymbolInfo(prefix + name, includeChildren))
-            .ToList();
-
-        return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
+        return Task.FromResult(SimulatedSymbolTree.GetSymbols(_store, parentPath, includeChildren));
     }
 
     /// <inheritdoc />
     /// <remarks>
     /// Matches the same substring rule as a real connection, case-insensitively. Walks every
-    /// seeded leaf path plus every synthetic container path above it — see
-    /// <see cref="AllPaths"/> — so its cost is proportional to the number of seeded symbols.
+    /// seeded leaf path plus every synthetic container path above it (see
+    /// <see cref="SimulatedSymbolTree"/>), so its cost is proportional to the number of seeded
+    /// symbols.
     /// </remarks>
     public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-
-        var result = AllPaths()
-            .Where(p => p.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-            .Select(p => BuildSymbolInfo(p, includeChildren))
-            .ToList();
-
-        return Task.FromResult<IReadOnlyList<AdsSymbolInfo>>(result);
-    }
-
-    /// <summary>
-    /// Resolves <paramref name="path"/> to its as-seeded casing by locating a stored key at or
-    /// beneath it, or <see langword="null"/> when nothing is seeded there. PLC symbol paths are
-    /// case-insensitive, so a mis-cased caller lookup (e.g. <c>GetSymbolsAsync("main")</c> against
-    /// a symbol seeded as <c>MAIN.Speed</c>) must still report <see cref="AdsSymbolInfo.InstancePath"/>
-    /// in the casing the symbol was actually seeded with, not echo back whatever the caller typed.
-    /// </summary>
-    private string? ResolveStoredCasing(string path)
-    {
-        foreach (var key in _symbols.Keys)
-        {
-            if (key.Equals(path, StringComparison.OrdinalIgnoreCase))
-                return key;
-            if (key.Length > path.Length && key[path.Length] == '.' &&
-                key.AsSpan(0, path.Length).Equals(path, StringComparison.OrdinalIgnoreCase))
-                return key[..path.Length];
-        }
-        return null;
-    }
-
-    /// <summary>Every stored leaf path plus every synthetic container path above it.</summary>
-    private IEnumerable<string> AllPaths()
-    {
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var key in _symbols.Keys)
-        {
-            var segments = key.Split('.');
-            for (var i = 1; i <= segments.Length; i++)
-                paths.Add(string.Join('.', segments.Take(i)));
-        }
-        return paths;
-    }
-
-    /// <summary>
-    /// Builds symbol metadata for one simulated path, recursing into children on demand. A path
-    /// with a stored value is a leaf, mapped via <see cref="InferPlcType"/> (the same inference
-    /// <see cref="ReadValueWithMetadataAsync"/> uses); a path with no stored value is a synthetic
-    /// <c>STRUCT</c> container implied by deeper seeded paths.
-    /// </summary>
-    private AdsSymbolInfo BuildSymbolInfo(string path, bool includeChildren)
-    {
-        var isLeaf = _symbols.TryGetValue(path, out var value);
-        var (typeName, category) = isLeaf ? InferPlcType(value) : ("STRUCT", "Struct");
-
-        List<AdsSymbolInfo>? children = null;
-        if (includeChildren)
-        {
-            var prefix = path + ".";
-            var childNames = _symbols.Keys
-                .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.Length > prefix.Length)
-                .Select(k => k.Substring(prefix.Length).Split('.')[0])
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (childNames.Count > 0)
-                children = childNames.Select(n => BuildSymbolInfo(prefix + n, includeChildren: true)).ToList();
-        }
-
-        return new AdsSymbolInfo(path, typeName, category, ByteSize: 0, Comment: null, children);
+        return Task.FromResult(SimulatedSymbolTree.Search(_store, pattern, includeChildren));
     }
 
     void IManagedConnection.Connect() { }
@@ -686,78 +572,4 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// </summary>
     public void Dispose() { }
 
-    // -------------------------------------------------------------------------
-    // Thread-safe per-path subscriber list.
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Holds all callbacks registered for a single symbol path.
-    /// A simple lock (not ConcurrentDictionary) is used for the inner list because
-    /// the three operations — add, remove, snapshot-and-fire — need to be atomic as
-    /// a group. Under concurrent write+dispose the lock ensures a callback is either
-    /// included in a fire snapshot (and fires) or absent from it (disposed before
-    /// the snapshot was taken), with no torn reads.
-    /// </summary>
-    private sealed class SubscriberList
-    {
-        private readonly object _lock = new();
-        private readonly Dictionary<long, Action<string, object?>> _callbacks = new();
-        private long _nextId;
-
-        /// <summary>Adds a callback and returns a disposable that removes it.</summary>
-        public IDisposable Add(Action<string, object?> callback)
-        {
-            long id;
-            lock (_lock)
-            {
-                id = _nextId++;
-                _callbacks[id] = callback;
-            }
-            return new Registration(this, id);
-        }
-
-        /// <summary>Removes the callback with the given id. Idempotent.</summary>
-        public void Remove(long id)
-        {
-            lock (_lock)
-                _callbacks.Remove(id);
-        }
-
-        /// <summary>
-        /// Takes a snapshot of current callbacks under the lock, then invokes each
-        /// outside the lock so callbacks cannot deadlock on re-entrant writes.
-        /// Exceptions per callback are caught and logged; they do not suppress others.
-        /// </summary>
-        public void Fire(string path, object? value, ILogger logger)
-        {
-            Action<string, object?>[] snapshot;
-            lock (_lock)
-                snapshot = [.. _callbacks.Values];
-
-            foreach (var cb in snapshot)
-            {
-                try
-                {
-                    cb(path, value);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex,
-                        "Subscription callback for path {Path} threw an exception; notification continues for other subscribers.",
-                        path);
-                }
-            }
-        }
-
-        private sealed class Registration(SubscriberList owner, long id) : IDisposable
-        {
-            private int _disposed;
-
-            public void Dispose()
-            {
-                if (Interlocked.Exchange(ref _disposed, 1) == 0)
-                    owner.Remove(id);
-            }
-        }
-    }
 }
