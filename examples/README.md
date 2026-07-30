@@ -61,7 +61,10 @@ dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler
 dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler -- --real
 ```
 
+The full output, verbatim — check your run against it:
+
 ```text
+info: Dahlke.TwinCAT.Ads.Alarms.PlcAlarmMonitor[0] Monitoring alarms on plc1 at GVL.Errors every 200 ms
 [RAISED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
 [RAISED] BMK1Err500 (Warning) — Conveyor 1: drive overtemperature
 [CLEARED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
@@ -69,8 +72,11 @@ Outstanding after the fault cleared:
   BMK1Err404 on BMK1 (Error) active=False acknowledged=False
   BMK1Err500 on BMK1 (Warning) active=True acknowledged=False
 AcknowledgeAsync("BMK1Err404") -> True
+info: Dahlke.TwinCAT.Ads.Alarms.PlcAlarmMonitor[0] Acknowledged BMK1Err404 on plc1 (slot 0)
 [ACKNOWLEDGED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
 [ENDED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
+Outstanding after the acknowledgement:
+  BMK1Err500 on BMK1 (Warning) active=True acknowledged=False
 ```
 
 `BMK1Err404` stays outstanding after its fault clears because it still awaits acknowledgement — that is the point of the run. The `--real` mode is worth trying with the PLC switched off: the host starts anyway, logs that alarm monitoring could not be registered, and registers it when the target comes up.

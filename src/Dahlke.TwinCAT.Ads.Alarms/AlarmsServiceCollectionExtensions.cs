@@ -49,11 +49,14 @@ public static class AlarmsServiceCollectionExtensions
         {
             var options = sp.GetRequiredService<IOptions<PlcAlarmsOptions>>().Value;
 
-            return string.IsNullOrWhiteSpace(options.TextCatalog)
-                ? NullAlarmTextCatalog.Instance
-                : new JsonAlarmTextCatalog(
-                    options.TextCatalog,
-                    sp.GetService<ILogger<JsonAlarmTextCatalog>>());
+            if (string.IsNullOrWhiteSpace(options.TextCatalog))
+                return NullAlarmTextCatalog.Instance;
+
+            // GetService, not GetRequiredService: a plain ServiceCollection with no host
+            // has no IHostEnvironment, and that must keep working.
+            return new JsonAlarmTextCatalog(
+                ResolveCatalogPath(options.TextCatalog, sp.GetService<IHostEnvironment>()),
+                sp.GetService<ILogger<JsonAlarmTextCatalog>>());
         });
 
         services.TryAddSingleton<PlcAlarmMonitor>();
@@ -61,5 +64,42 @@ public static class AlarmsServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<PlcAlarmMonitor>());
 
         return services;
+    }
+
+    /// <summary>
+    /// Anchors a relative <see cref="PlcAlarmsOptions.TextCatalog"/> to the host's content
+    /// root, leaving an absolute path exactly as configured.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="JsonAlarmTextCatalog"/> opens the path it is given, so an unresolved
+    /// relative path is interpreted against the PROCESS working directory. That is the same
+    /// directory as the content root under <c>dotnet run</c> and almost never is for a
+    /// published or service-hosted app, which turns the most natural configuration —
+    /// <c>"TextCatalog": "alarms.json"</c> next to <c>appsettings.json</c> — into a startup
+    /// <see cref="FileNotFoundException"/> on deployment and nowhere else. Anchoring here
+    /// makes the two agree.
+    /// </para>
+    /// <para>
+    /// An absolute path passes through untouched: it is an explicit instruction, and a
+    /// deployment that names a catalog outside the content root means it.
+    /// </para>
+    /// </remarks>
+    /// <param name="textCatalog">The configured path; already known to be non-blank.</param>
+    /// <param name="environment">
+    /// The host environment, or <see langword="null"/> when the container has none — a plain
+    /// <see cref="ServiceCollection"/> built without a host. Then there is no content root to
+    /// resolve against and the path is used as written.
+    /// </param>
+    internal static string ResolveCatalogPath(string textCatalog, IHostEnvironment? environment)
+    {
+        if (environment is null ||
+            Path.IsPathRooted(textCatalog) ||
+            string.IsNullOrWhiteSpace(environment.ContentRootPath))
+        {
+            return textCatalog;
+        }
+
+        return Path.Combine(environment.ContentRootPath, textCatalog);
     }
 }

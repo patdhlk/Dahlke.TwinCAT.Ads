@@ -24,17 +24,10 @@ if (useRealPlc)
 else
     builder.Services.AddTwinCatAdsSimulation(builder.Configuration);
 
+// PlcAlarms:TextCatalog is "alarms.json" — a relative path, which AddTwinCatAdsAlarms
+// resolves against the content root pinned above, so the catalog is found whether this
+// runs from the repo root, from the output directory, or published.
 builder.Services.AddTwinCatAdsAlarms(builder.Configuration);
-
-// PlcAlarms:TextCatalog is opened as given, so a relative path resolves against the
-// PROCESS working directory — which `dotnet run` sets to the project folder but a
-// published app does not. Anchor it to the app directory instead. PostConfigure runs
-// after AddTwinCatAdsAlarms' own binding delegate, so this always wins.
-builder.Services.PostConfigure<PlcAlarmsOptions>(o =>
-{
-    if (!string.IsNullOrWhiteSpace(o.TextCatalog) && !Path.IsPathRooted(o.TextCatalog))
-        o.TextCatalog = Path.Combine(AppContext.BaseDirectory, o.TextCatalog);
-});
 
 // Registered AFTER AddTwinCatAdsAlarms deliberately: hosted services start in
 // registration order, so the monitor's subscription is live before the driver's

@@ -270,13 +270,14 @@ dotnet add package Dahlke.TwinCAT.Ads.Alarms
 }
 ```
 
-A target absent from `PlcAlarms:Targets` is simply not monitored — the package is opt-in per target. Every misconfiguration (a `plcId` with no matching entry under `PlcTargets`, a missing `SymbolPath`, a non-positive `CycleTimeMs`) is reported at startup, all at once.
+A target absent from `PlcAlarms:Targets` is simply not monitored — the package is opt-in per target. Every misconfiguration (a `plcId` with no matching entry under `PlcTargets`, a missing `SymbolPath`, a non-positive `CycleTimeMs`) is reported at startup, all at once. A relative `TextCatalog` resolves against the host's content root, so `"alarms.json"` means the file next to `appsettings.json` whatever the working directory happens to be.
 
 ```csharp
 builder.Services
     .AddTwinCatAds(builder.Configuration)
     .AddTwinCatAdsAlarms(builder.Configuration);
 
+var app = builder.Build();
 var monitor = app.Services.GetRequiredService<IPlcAlarmMonitor>();
 
 foreach (var alarm in monitor.GetOutstanding())
@@ -541,6 +542,7 @@ builder.Services
     .AddHealthChecks()
     .AddTwinCatAdsHealthCheck(); // name defaults to "twincat_ads"
 
+var app = builder.Build();
 app.MapHealthChecks("/health");
 ```
 
@@ -647,7 +649,7 @@ Read by `AddTwinCatAdsAlarms` — see [PLC alarms](#plc-alarms).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `TextCatalog` | `string?` | `null` | Path to a JSON file mapping `sKey` to text. A sibling `<name>.<culture>.json` is preferred per key, falling back to the neutral file. Omit for no catalog; a configured path that cannot be read fails startup |
+| `TextCatalog` | `string?` | `null` | Path to a JSON file mapping `sKey` to text. **A relative path resolves against the host's content root** — the directory holding `appsettings.json` — not the process working directory; an absolute path is used as written. A sibling `<name>.<culture>.json` is preferred per key, falling back to the neutral file. Omit for no catalog; a configured path that cannot be read fails startup |
 | `Targets` | `Dictionary<string, PlcAlarmTargetOptions>` | `{}` | Per-target alarm settings, keyed by the same target id as `PlcTargets`. A target absent here is not monitored |
 
 Each `Targets` entry:

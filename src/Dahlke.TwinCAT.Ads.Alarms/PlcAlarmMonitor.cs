@@ -319,11 +319,18 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
         }
         catch (PlcAlarmShapeException ex)
         {
-            // Loud and non-recoverable by design: a shape mismatch has no correct
-            // reading, and continuing would publish a plausible but wrong alarm list.
+            // Loud, and the whole snapshot is dropped rather than partially bound: a shape
+            // mismatch has no correct reading, and continuing would publish a plausible but
+            // wrong alarm list. It is NOT terminal, though — the subscription stays live, so
+            // a transient malformation recovers by itself on the next good notification, and
+            // the outstanding set meanwhile keeps its last good reading rather than emptying.
+            // Still Error: if the PLC's type really has changed, someone must fix it.
             _logger.LogError(ex,
-                "Alarm array on {PlcId} does not match the shape this package binds; alarm " +
-                "monitoring for this target is not reporting valid data", plcId);
+                "Alarm array on {PlcId} at {SymbolPath} does not match the shape this package " +
+                "binds; this snapshot is dropped and the last good reading is kept. The " +
+                "subscription remains active and monitoring resumes on the next notification " +
+                "that binds. If this repeats, the PLC's ST_ErrorEntry no longer matches",
+                plcId, target.SymbolPath);
         }
         catch (Exception ex)
         {

@@ -79,7 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for an array of N entries with M members, N×M round-trips per notification.
 
   Ships with a JSON alarm text catalog (`sKey` → text, with per-key culture fallback) and
-  startup validation that reports every misconfiguration at once.
+  startup validation that reports every misconfiguration at once. A relative `TextCatalog`
+  resolves against the host's content root rather than the process working directory — the two
+  coincide under `dotnet run` and almost never do for a published or service-hosted app, so
+  anchoring to the working directory would turn the most natural configuration into a
+  `FileNotFoundException` that only appears on deployment. An absolute path is used as written.
   `AddTwinCatAdsAlarmHealthCheck()` reports from the worst outstanding severity — and **only**
   that. It is not a liveness check: a target still waiting for its first connection has no
   alarms and so reports healthy, indistinguishable from one that is connected and quiet.
