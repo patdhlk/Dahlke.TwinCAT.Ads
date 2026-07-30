@@ -5,6 +5,91 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-30
+
+### Added
+
+- **PLC alarm tracking — the new `Dahlke.TwinCAT.Ads.Alarms` companion package.** Point it at
+  a TwinCAT alarm array and inject `IPlcAlarmMonitor` for a live set of the alarms outstanding
+  right now, plus a stream of `Raised` / `Acknowledged` / `Cleared` / `Reoccurred` / `Ended`
+  transitions as events or an `IObservable<AlarmTransition>`.
+
+  **An alarm is outstanding while its fault is present OR it still awaits acknowledgement.**
+  This is the ISA-18.2 "returned to normal, unacknowledged" state, and it is the whole reason
+  the rule is computed rather than read off `IsActive`. A PLC alarm array is fixed-size with
+  permanent slots: an alarm ends by `IsActive := FALSE`, never by leaving the array. Treating
+  absence from the array as resolution — the obvious reading — detects nothing at all, and
+  dropping an alarm the moment its fault clears loses every fault that self-clears before an
+  operator sees it.
+
+  **Identity is the PLC's `sKey`, never `Id`.** `Id` is the equipment identifier (BMK) and is
+  shared by every alarm on one machine, so keying on it collapses simultaneous alarms into a
+  single entry. `sKey` is `'<BMK>Err<Code>'`. `EquipmentId` is still surfaced, for grouping
+  and filtering, which is what it is actually for.
+
+  **A PLC that is unreachable at boot does not fail the host.** The facade's *first*
+  subscription registration is not durable — it waits out `TimeoutMs`, throws, and retains
+  nothing for a later reconnect — so letting that escape startup would take down alarm
+  monitoring for every PLC that *is* up because one is down. Each target is registered
+  independently instead: a failure is logged at `Error` and the target is re-attempted the next
+  time its connection reports `Connected`, after which the core library's durable subscriptions
+  carry it across reconnects on their own. Until then that target reports no alarms, and the
+  rest of the fleet is monitored normally. On a plant where PLCs are powered down for
+  maintenance, the alternative is a service that will not start. Only unreachability is
+  forgiven: a `SymbolPath` the PLC does not have is a fault no reconnect will fix, and still
+  brings the host down.
+
+  **Transitions for one target are published in the order they were computed.** ADS
+  notifications arrive on a background thread and two snapshots for one target can overlap, so
+  the diff and the publication are held under one per-target lock. Without it a consumer folding
+  the stream into its own state could end on `Raised` after `Ended` and show a cleared alarm as
+  live — the wrong direction for an alarm system to fail in. The price is explicit: **a handler
+  that blocks delays that target's next snapshot**, so handlers must be quick. Other targets are
+  unaffected; the lock is per target, and ordering is not claimed across targets.
+
+  **`AlarmChanged` isolates its handlers; `Transitions` deliberately does not.** Each event
+  handler is invoked separately, so one that throws is logged and the rest still receive the
+  transition — invoking the multicast delegate directly would silently starve every handler
+  registered after the first thrower. `Transitions` is an ordinary observable and keeps the
+  standard Rx contract, under which throwing from `OnNext` is an observer bug: a subscriber that
+  throws can skip the ones after it. Swallowing observer exceptions there would make this
+  observable behave unlike every other one an Rx consumer composes with. Both paths guarantee
+  the same thing at the boundary — the exception never escapes onto the notification thread, and
+  the next transition is still delivered.
+
+  **Acknowledgement verifies the slot before writing.** `AcknowledgeAsync` writes `IsAcked`
+  on the array entry, but slots are permanent and reused, so an index alone does not identify
+  an alarm — it first reads the slot's `sKey` back and writes only if the alarm is still there.
+  A window remains between that read and the write; closing it would need a PLC-side
+  compare-and-set the contract does not offer. A `false` return means "nothing was written",
+  never "the PLC rejected it": ADS failures propagate rather than being folded into the result.
+
+  **A shape mismatch throws rather than degrading — and then recovers.** If the PLC's
+  `ST_ErrorEntry` stops matching what the package binds, the binder raises
+  `PlcAlarmShapeException` naming the offending member and the symbol path. Defaulting instead
+  would publish a plausible-looking but wrong alarm list indefinitely, and for alarms that is
+  worse than no list. The monitor logs that at `Error` and drops the whole snapshot — the
+  outstanding set keeps its last good reading rather than a half-bound one — but the
+  subscription stays live, so a transient malformation recovers on the next well-formed
+  notification instead of requiring a restart.
+
+  **Notification cost is one payload decode, no round-trips.** The monitor subscribes through
+  the untyped `SubscribeAsync`, which serves the whole array from the notification payload.
+  The metadata overload would instead build a neutral tree with one ADS read per member —
+  for an array of N entries with M members, N×M round-trips per notification.
+
+  Ships with a JSON alarm text catalog (`sKey` → text, with per-key culture fallback) and
+  startup validation that reports every misconfiguration at once.
+  `AddTwinCatAdsAlarmHealthCheck()` reports from the worst outstanding severity — and **only**
+  that. It is not a liveness check: a target still waiting for its first connection has no
+  alarms and so reports healthy, indistinguishable from one that is connected and quiet.
+  Register the core's `AddTwinCatAdsHealthCheck()` alongside it, which is what answers whether
+  a target can be seen at all.
+
+- **`Dahlke.TwinCAT.Ads.Examples.ErrorHandler`** — a console example that walks a scripted
+  alarm lifecycle in simulation: two alarms on one machine, one that clears before it is
+  acknowledged, and an `AcknowledgeAsync` write-back that is what finally ends it.
+
 ## [0.6.0] - 2026-07-30
 
 ### Added

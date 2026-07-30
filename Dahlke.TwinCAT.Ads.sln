@@ -27,6 +27,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dahlke.TwinCAT.Ads.Alarms",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dahlke.TwinCAT.Ads.Alarms.Tests", "tests\Dahlke.TwinCAT.Ads.Alarms.Tests\Dahlke.TwinCAT.Ads.Alarms.Tests.csproj", "{FC26B888-168C-4062-BEDD-2DC117B82D1D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dahlke.TwinCAT.Ads.Examples.ErrorHandler", "examples\Dahlke.TwinCAT.Ads.Examples.ErrorHandler\Dahlke.TwinCAT.Ads.Examples.ErrorHandler.csproj", "{2728C591-0112-4F51-A487-616025F39040}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -145,6 +147,18 @@ Global
 		{FC26B888-168C-4062-BEDD-2DC117B82D1D}.Release|x64.Build.0 = Release|Any CPU
 		{FC26B888-168C-4062-BEDD-2DC117B82D1D}.Release|x86.ActiveCfg = Release|Any CPU
 		{FC26B888-168C-4062-BEDD-2DC117B82D1D}.Release|x86.Build.0 = Release|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Debug|x64.Build.0 = Debug|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Debug|x86.Build.0 = Debug|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Release|x64.ActiveCfg = Release|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Release|x64.Build.0 = Release|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Release|x86.ActiveCfg = Release|Any CPU
+		{2728C591-0112-4F51-A487-616025F39040}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -159,5 +173,6 @@ Global
 		{F23F59F4-229B-4BF7-863B-1757093FFAF2} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
 		{FE0AF16C-CA80-4BDB-A8BE-B3667C9A08E0} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{FC26B888-168C-4062-BEDD-2DC117B82D1D} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{2728C591-0112-4F51-A487-616025F39040} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
 	EndGlobalSection
 EndGlobal

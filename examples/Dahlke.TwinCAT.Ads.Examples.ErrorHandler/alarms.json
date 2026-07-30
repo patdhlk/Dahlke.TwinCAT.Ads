@@ -1,0 +1,5 @@
+{
+  "BMK1Err404": "Conveyor 1: material jam at the infeed",
+  "BMK1Err500": "Conveyor 1: drive overtemperature",
+  "BMK2Err404": "Palletiser: material jam"
+}

@@ -13,6 +13,7 @@ A .NET library for TwinCAT ADS with durable connections, typed symbol access, si
 - **Wait-then-throw semantics** — operations wait up to the configured `TimeoutMs` for a connection, then throw `AdsConnectionUnavailableException`; `TimeoutException` for hardware/network stalls; `OperationCanceledException` only for caller cancellation
 - **Durable subscriptions** — survive reconnects automatically; the returned `IDisposable` stays valid through outages; simulated subscriptions fire on changed writes
 - **Reactive (Rx) companion** — optional `Dahlke.TwinCAT.Ads.Reactive` package surfaces value-change and connection-state notifications as `IObservable<T>` streams
+- **PLC alarm tracking** — the optional `Dahlke.TwinCAT.Ads.Alarms` package keeps a live set of outstanding alarms from a TwinCAT alarm array and streams `Raised` / `Acknowledged` / `Cleared` / `Reoccurred` / `Ended` transitions; acknowledgement writes back to the PLC, with a health check and a JSON text catalog
 - **ADS sum commands** — batch writes, and batch reads of scalars, execute as a single round-trip on real connections; per-symbol `AdsValueResult` for granular success/failure
 - **Connection state observability** — `State` property (tri-state), `IsConnected` snapshot, `ConnectionStateChanged` event
 - **Raw ADS channels** — `IAdsRawChannelFactory` addresses any `(amsNetId, port)` by index group and index offset for targets the symbol API cannot reach (EtherCAT, the TwinCAT system service); cached, never disposed by the caller, with durable device notifications and a seedable simulation store
@@ -31,6 +32,12 @@ Optionally add the Rx companion for `IObservable<T>` streams (see [Reactive (Rx)
 
 ```bash
 dotnet add package Dahlke.TwinCAT.Ads.Reactive
+```
+
+Optionally add the alarms companion to track a PLC alarm array (see [PLC alarms](#plc-alarms)). It also depends on the core package:
+
+```bash
+dotnet add package Dahlke.TwinCAT.Ads.Alarms
 ```
 
 ## Quick Start
@@ -243,6 +250,65 @@ using var states = pool.ObserveAllConnectionStates()
 ```
 
 Each notification is an `AdsValueChange<T>` record (`Symbol`, `Value`). Notifications arrive on a background thread — add `.ObserveOn(...)` before updating UI. To share one underlying ADS notification among multiple subscribers, add `.Publish().RefCount()`. See [`examples/Dahlke.TwinCAT.Ads.Examples.Reactive`](examples/Dahlke.TwinCAT.Ads.Examples.Reactive/) for a runnable demo.
+
+## PLC alarms
+
+The optional **`Dahlke.TwinCAT.Ads.Alarms`** package tracks a TwinCAT alarm array — an `ARRAY[..] OF ST_ErrorEntry` whose entries carry `sKey`, `Id`, `ErrorCode`, `ErrorType`, `IsActive`, `NeedsAck`, `IsAcked` and a `PLCTimeStamp`.
+
+```bash
+dotnet add package Dahlke.TwinCAT.Ads.Alarms
+```
+
+```json
+{
+  "PlcAlarms": {
+    "TextCatalog": "alarms.json",
+    "Targets": {
+      "plc1": { "SymbolPath": "GVL.Errors", "CycleTimeMs": 200, "PlcClock": "Local" }
+    }
+  }
+}
+```
+
+A target absent from `PlcAlarms:Targets` is simply not monitored — the package is opt-in per target. Every misconfiguration (a `plcId` with no matching entry under `PlcTargets`, a missing `SymbolPath`, a non-positive `CycleTimeMs`) is reported at startup, all at once.
+
+```csharp
+builder.Services
+    .AddTwinCatAds(builder.Configuration)
+    .AddTwinCatAdsAlarms(builder.Configuration);
+
+var monitor = app.Services.GetRequiredService<IPlcAlarmMonitor>();
+
+foreach (var alarm in monitor.GetOutstanding())
+    Console.WriteLine($"{alarm.Key} ({alarm.Severity}): {alarm.Text}");
+
+monitor.AlarmChanged += (_, t) => Console.WriteLine($"{t.Kind}: {t.Alarm.Key}");
+
+await monitor.AcknowledgeAsync("plc1", "BMK1Err404", CancellationToken.None);
+```
+
+**An alarm is outstanding while its fault is present OR it still awaits acknowledgement.** A PLC alarm array is fixed-size with permanent slots — an alarm ends by `IsActive := FALSE`, never by leaving the array — and when `NeedsAck` is set the entry outlives its fault condition until an operator acknowledges it. So a fault that self-clears before anyone looks still reaches you, `Cleared` marks the fault ending while the alarm stays outstanding, and `Ended` fires only once the alarm is genuinely finished.
+
+**Identity is `sKey`, not `Id`.** `Id` names the equipment (BMK) and is shared by every alarm on that machine; `sKey` is `'<BMK>Err<Code>'`. Group by `EquipmentId`, key by `Key`.
+
+**A PLC that is down at boot does not fail the host.** Its first subscription attempt cannot succeed, so it is logged at `Error` and retried automatically the next time that target's connection reports `Connected` — every other target monitors normally in the meantime, and the offline one simply reports no alarms until it comes back. Once a target is registered the core library's durable subscriptions take over and carry it across later reconnects. Only unreachability is treated this way: a `SymbolPath` the PLC does not have is a configuration fault that no reconnect will fix, and still fails startup.
+
+**Transitions for one target arrive in the order they were computed**, so a consumer folding the stream into its own state never sees a `Raised` land after the `Ended` that followed it. That ordering is bought by holding the target's lock across delivery, which means **a handler that blocks delays that target's next snapshot** — do the minimum on the notification thread and hand the work off. Ordering is per target, not across targets.
+
+`AlarmChanged` and `Transitions` treat a throwing consumer differently, on purpose. `AlarmChanged` handlers are isolated from one another: a handler that throws is logged and the remaining handlers still receive that transition. `Transitions` is an ordinary `IObservable<AlarmTransition>` and follows the standard Rx contract — throwing from `OnNext` is an observer bug, and a subscriber that throws can starve the subscribers after it for that transition. Either way the exception never escapes onto the notification thread, and the next transition is still delivered.
+
+**A shape mismatch is loud, but not fatal.** If the PLC's `ST_ErrorEntry` stops matching what the package binds, it throws `PlcAlarmShapeException` naming the member and the symbol path rather than degrading to defaults — a silently wrong alarm list is worse than an absent one. That snapshot is dropped whole and logged at `Error`, the outstanding set keeps its last good reading, and the subscription survives to recover on the next well-formed notification.
+
+```csharp
+builder.Services
+    .AddHealthChecks()
+    .AddTwinCatAdsHealthCheck()        // can each target be reached at all?
+    .AddTwinCatAdsAlarmHealthCheck();  // how bad are the alarms it can see?
+```
+
+`AddTwinCatAdsAlarmHealthCheck()` reports Degraded at `Warning` and Unhealthy at `Error` by default, from the worst severity outstanding. **It reports only that** — it says nothing about whether monitoring is live, so a target still waiting for its first connection has no alarms and looks healthy here, indistinguishable from one that is connected and genuinely quiet. Register the core's `AddTwinCatAdsHealthCheck()` alongside it for per-target connectivity; the two together are the full picture.
+
+See [`examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler`](examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler/) for a runnable demo that walks a whole alarm lifecycle in simulation.
 
 ## Connection Lookup
 
@@ -575,6 +641,23 @@ An entry or slot the configuration binder cannot bind also fails the host at sta
 
 The legacy `AdsSymbolTreeDump: true` key is still honoured; `AdsSymbolDump` takes precedence when both are present.
 
+### `PlcAlarms` section (optional, `Dahlke.TwinCAT.Ads.Alarms`)
+
+Read by `AddTwinCatAdsAlarms` — see [PLC alarms](#plc-alarms).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `TextCatalog` | `string?` | `null` | Path to a JSON file mapping `sKey` to text. A sibling `<name>.<culture>.json` is preferred per key, falling back to the neutral file. Omit for no catalog; a configured path that cannot be read fails startup |
+| `Targets` | `Dictionary<string, PlcAlarmTargetOptions>` | `{}` | Per-target alarm settings, keyed by the same target id as `PlcTargets`. A target absent here is not monitored |
+
+Each `Targets` entry:
+
+| Property | Type | Default | Description |
+|-----|------|---------|-------------|
+| `SymbolPath` | `string` | `""` | Required. Fully-qualified path of the PLC's alarm array (e.g. `GVL.Errors`) |
+| `CycleTimeMs` | `int` | `200` | How often the PLC pushes array changes. Must be greater than zero |
+| `PlcClock` | `PlcClockKind` | `Unspecified` | What clock the PLC's `TIMESTRUCT` runs on: `Unspecified`, `Utc` or `Local`. `TIMESTRUCT` carries no time zone, so this cannot be inferred — the default states no claim rather than stamping a wrong `DateTimeKind` on every alarm |
+
 ## IEC 61131-3 Type Mapping
 
 `Iec61131Converter` is a table-driven utility that maps IEC 61131-3 elementary type names to and from .NET types, supplies typed default values, and converts boxed values — reusing the same invariant-culture conversion core as typed reads. It exposes two tiers:
@@ -602,11 +685,12 @@ The forward map is many-to-one: the bit-string types and unsigned-integer types 
 
 ## Examples
 
-Runnable projects live in [`examples/`](examples/) — both work out of the box in simulation mode, no PLC required:
+Runnable projects live in [`examples/`](examples/) — all work out of the box in simulation mode, no PLC required:
 
 - [`Dahlke.TwinCAT.Ads.Examples.Cli`](examples/Dahlke.TwinCAT.Ads.Examples.Cli/) — console app demonstrating typed reads, writes, batch operations, ADS state, and subscriptions
 - [`Dahlke.TwinCAT.Ads.Examples.MinimalApi`](examples/Dahlke.TwinCAT.Ads.Examples.MinimalApi/) — ASP.NET Core minimal API exposing PLC symbols over HTTP with a health endpoint
 - [`Dahlke.TwinCAT.Ads.Examples.Reactive`](examples/Dahlke.TwinCAT.Ads.Examples.Reactive/) — console app demonstrating Rx `IObservable` streams: typed/untyped value changes with operator composition, and merged connection-state across targets
+- [`Dahlke.TwinCAT.Ads.Examples.ErrorHandler`](examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler/) — console app walking a whole PLC alarm lifecycle: two alarms on one machine, one clearing before it is acknowledged, and an acknowledgement written back to the PLC
 
 ## License
 
