@@ -492,47 +492,6 @@ public class AmsRouterRouteTests
     }
 
     /// <summary>
-    /// A Net ID with an out-of-range octet is SKIPPED rather than handed to the
-    /// router, even though startup validation should already have rejected it.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <c>AmsNetId.Parse</c> does not throw on <c>999.1.1.1.1.1</c> — it ZEROES the
-    /// bad octet and yields <c>0.1.1.1.1.1</c>. Handing that to the router would
-    /// register a route addressing a device the operator never named, which is worse
-    /// than no route at all: it fails somewhere else, silently.
-    /// </para>
-    /// <para>
-    /// The service is constructed directly here, bypassing options validation, which
-    /// is the only way to reach this branch. That is the point — it is a
-    /// defence-in-depth check, and the test says so rather than pretending the
-    /// configuration path can produce it.
-    /// </para>
-    /// </remarks>
-    [Theory]
-    [InlineData("999.1.1.1.1.1")]
-    [InlineData("1.2.3.4.5")]
-    [InlineData("")]
-    public void LaunderableNetId_IsSkippedAndWarned_RatherThanHandedToTheRouter(string netId)
-    {
-        var log = new RecordingLoggerProvider();
-        var recorder = new RouteRecorder();
-        var signal = new AdsRouterReadySignal();
-
-        var service = RouterService(
-            log,
-            "192.168.1.220.1.1",
-            new AmsRouteOptions { Name = "rack", NetId = netId, Address = "192.168.1.223" });
-
-        service.HandleRouterStatusChanged(RouterStatus.Started, signal, recorder.TryAddRoute);
-
-        Assert.Empty(recorder.Added);
-        Assert.Contains(
-            log.Entries,
-            e => e.Level == LogLevel.Warning && e.Message.Contains("Skipping route 'rack'"));
-    }
-
-    /// <summary>
     /// Routes configured while the embedded router is DISABLED are announced as
     /// ignored, not dropped in silence.
     /// </summary>

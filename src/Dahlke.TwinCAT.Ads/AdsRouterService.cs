@@ -454,13 +454,17 @@ internal class AdsRouterService : BackgroundService
     /// method exists to remove.
     /// </para>
     /// <para>
-    /// <b>The Net ID is re-checked against the strict six-octet rule.</b>
-    /// <see cref="TwinCatAdsOptionsValidator"/> already rejects a malformed one at
-    /// startup, so this is unreachable through a hosted registration — but
-    /// <c>AmsNetId.Parse</c> LAUNDERS an out-of-range octet rather than throwing
-    /// (<c>999.1.1.1.1.1</c> becomes <c>0.1.1.1.1.1</c>), so a path that ever bypassed
-    /// validation would add a route pointing at a device the operator never named.
-    /// Skipping and warning keeps that impossible instead of merely unlikely.
+    /// <b>The Net ID goes to <c>AmsNetId.Parse</c> unchecked, and that is safe by
+    /// construction rather than by luck.</b> <c>AmsNetId.Parse</c> LAUNDERS an
+    /// out-of-range octet rather than throwing (<c>999.1.1.1.1.1</c> becomes
+    /// <c>0.1.1.1.1.1</c>), so an unvalidated value here would add a route pointing at
+    /// a device the operator never named. It cannot arrive: every configured route is
+    /// held to <c>AmsNetIdRule.Require</c> by
+    /// <see cref="TwinCatAdsOptionsValidator"/>, this service is
+    /// <see langword="internal"/>, and its single registration carries
+    /// <c>ValidateOnStart</c>. A defence-in-depth re-check lived here until 0.6.0; it
+    /// was removed when the rule gained one enforcement point, because two responses
+    /// to one input class is how the two drift apart.
     /// </para>
     /// </remarks>
     /// <param name="tryAddRoute">The router's <c>TryAddRoute</c>.</param>
@@ -468,17 +472,6 @@ internal class AdsRouterService : BackgroundService
     {
         foreach (var configured in _routes)
         {
-            if (!RawSeedParser.IsWellFormedNetId(configured.NetId))
-            {
-                _logger.LogWarning(
-                    "Skipping route '{Name}': NetId '{NetId}' is not six dot-separated octets " +
-                    "in the range 0-255, and the ADS stack would silently ZERO the bad octet " +
-                    "rather than reject it — the route would address a different device",
-                    configured.Name,
-                    configured.NetId);
-                continue;
-            }
-
             var route = new Route(
                 configured.Name,
                 AmsNetId.Parse(configured.NetId),
