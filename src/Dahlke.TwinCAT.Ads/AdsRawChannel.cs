@@ -104,9 +104,6 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     /// <summary>When this channel last completed an operation. Read by the sweeper.</summary>
     internal DateTimeOffset LastUseUtc => new(Volatile.Read(ref _lastUseTicks), TimeSpan.Zero);
 
-    /// <summary>Total transports created — proves retry re-creates rather than reuses.</summary>
-    internal int ConnectAttempts { get; private set; }
-
     /// <summary>
     /// Live subscription count. A channel with any live subscription is pinned
     /// against idle eviction — the sweeper will not release a transport that is
@@ -395,7 +392,6 @@ internal sealed class AdsRawChannel : IAdsRawChannel
                     ex);
             }
 
-            ConnectAttempts++;
 
             // Restore BEFORE publishing, so no operation can observe a
             // half-restored channel; the transport gate held here is what keeps

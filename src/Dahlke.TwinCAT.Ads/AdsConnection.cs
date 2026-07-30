@@ -641,7 +641,8 @@ internal sealed class AdsConnection : IManagedConnection
                 result.ErrorCode);
 
         var info = result.DeviceInfo;
-        return new AdsDeviceInfo(info.Name, AdsVersionFormatter.Format(info.Version));
+        var v = info.Version;
+        return new AdsDeviceInfo(info.Name, $"{v.Version}.{v.Revision}.{v.Build}");
     }
 
     /// <inheritdoc />

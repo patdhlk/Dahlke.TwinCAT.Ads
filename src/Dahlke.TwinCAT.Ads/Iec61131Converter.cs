@@ -29,6 +29,16 @@ namespace Dahlke.TwinCAT.Ads;
 /// exactly as a typed read does (invariant-culture <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/>
 /// after a direct-assignable fast path).
 /// </para>
+/// <para>
+/// <b>Why this tier is public despite having no in-library caller of its public
+/// door</b> (a deliberate decision, recorded so it is not re-litigated): the
+/// library's own configuration binding goes through the lenient
+/// <see cref="Beckhoff"/> tier, but that tier is BUILT on this one — every
+/// <see cref="Beckhoff"/> method normalises and then delegates here, so the
+/// strict core is load-bearing, not dead. Its public accessibility exists for
+/// consumers that validate or convert canonical IEC names themselves; hiding it
+/// would only push the same tables into consumer code.
+/// </para>
 /// </remarks>
 public static class Iec61131Converter
 {

@@ -240,6 +240,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     case-insensitively, so a subscriber registered under one casing silently never fired for
     a writer using another.
 
+- **Production-dead internal surface pruned** (no public API change). `AdsVersionFormatter`
+  (25 lines for one interpolated string, one caller) is inlined; `AdsConnectionFacade.Clear()`
+  (zero production callers, a doc claiming a pool-stop role `MarkStopped` actually fills) and
+  `AdsRawChannel.ConnectAttempts` (written, never read) are deleted. The facade's
+  `CurrentForTesting` is renamed `Current` with an honest doc — it backs the public
+  `TryGetSimulatedConnection`, so its name and "exposed for tests" doc were lying about a
+  production dependency. `Iec61131Converter`'s strict tier is deliberately KEPT public, with
+  the rationale now recorded in its doc: the lenient `Beckhoff` tier is built by delegation on
+  the strict core, so it is load-bearing — and its public door exists for consumers, not for
+  the library.
+
 ### Fixed
 
 - **`Connected` now means "can carry ADS traffic", proven before it is published.** (#12)

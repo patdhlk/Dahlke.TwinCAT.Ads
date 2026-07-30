@@ -406,10 +406,10 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         // connection and type-test it. Returns false for real targets (the current
         // connection is an AdsConnection, not a SimulatedAdsConnection), unknown
         // ids (no facade), and unstarted/mid-startup simulated targets (the loop has
-        // not yet published a connection, so CurrentForTesting is null). Never throws
+        // not yet published a connection, so Current is null). Never throws
         // — this is a test-support API.
         if (_facades.TryGetValue(plcId, out var facade)
-            && facade.CurrentForTesting is SimulatedAdsConnection sim)
+            && facade.Current is SimulatedAdsConnection sim)
         {
             simulated = sim;
             return true;

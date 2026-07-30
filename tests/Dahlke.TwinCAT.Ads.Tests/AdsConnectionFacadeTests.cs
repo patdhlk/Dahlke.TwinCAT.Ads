@@ -70,7 +70,7 @@ public class AdsConnectionFacadeTests
         facade.SetCurrent(underlying);
 
         Assert.True(facade.IsConnected);
-        Assert.Same(underlying, facade.CurrentForTesting);
+        Assert.Same(underlying, facade.Current);
 
         var value = await facade.ReadValueAsync("MAIN.x", CancellationToken.None);
         Assert.Equal(42, value);
@@ -92,12 +92,12 @@ public class AdsConnectionFacadeTests
 
         // A stale teardown of the OLD connection must not blank the live one.
         facade.ClearCurrent(first);
-        Assert.Same(second, facade.CurrentForTesting);
+        Assert.Same(second, facade.Current);
         Assert.True(facade.IsConnected);
 
         // Clearing the matching instance does clear it.
         facade.ClearCurrent(second);
-        Assert.Null(facade.CurrentForTesting);
+        Assert.Null(facade.Current);
         Assert.False(facade.IsConnected);
     }
 
@@ -113,7 +113,7 @@ public class AdsConnectionFacadeTests
         underlying.IsConnected = true;
         Assert.True(facade.IsConnected);
 
-        facade.Clear();
+        facade.ClearCurrent(underlying);
         Assert.False(facade.IsConnected); // no current at all
     }
 
@@ -286,7 +286,7 @@ public class AdsConnectionFacadeTests
     private static async Task WaitForCurrent(AdsConnectionFacade facade, object expected)
     {
         var deadline = DateTime.UtcNow + RealTimeout;
-        while (!ReferenceEquals(facade.CurrentForTesting, expected))
+        while (!ReferenceEquals(facade.Current, expected))
         {
             if (DateTime.UtcNow > deadline)
                 throw new TimeoutException("Facade never routed to the expected underlying connection.");
@@ -397,7 +397,7 @@ public class AdsConnectionFacadeTests
         // SAME facade instance from GetConnection before and after the reconnect.
         Assert.Same(facadeBefore, facadeAfter);
         // ...but it now routes to a DIFFERENT underlying connection.
-        Assert.Same(second, facadeBefore.CurrentForTesting);
+        Assert.Same(second, facadeBefore.Current);
         Assert.NotSame(first, second);
 
         await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);
@@ -431,7 +431,7 @@ public class AdsConnectionFacadeTests
         Assert.False(facade.IsConnected);
 
         // Drive time forward until the healthy connection is published.
-        await AdvanceUntil(time, () => ReferenceEquals(facade.CurrentForTesting, healthy), Health);
+        await AdvanceUntil(time, () => ReferenceEquals(facade.Current, healthy), Health);
         Assert.True(facade.IsConnected);
 
         await pool.StopAsync(CancellationToken.None).WaitAsync(RealTimeout);
@@ -481,7 +481,7 @@ public class AdsConnectionFacadeTests
         // observes IsAlive==false and tears the first connection down.
         time.Advance(Health);
         // The first connection is now being cleared; wait for the outage.
-        await WaitUntil(() => facade.CurrentForTesting is null);
+        await WaitUntil(() => facade.Current is null);
 
         // Issue the operation DURING the outage — it parks waiting for reconnection.
         var readTask = facade.ReadValueAsync("MAIN.v", CancellationToken.None);
@@ -491,7 +491,7 @@ public class AdsConnectionFacadeTests
         // second connection is published into the facade.
         await AdvanceUntil(
             time,
-            () => ReferenceEquals(facade.CurrentForTesting, second),
+            () => ReferenceEquals(facade.Current, second),
             TimeSpan.FromSeconds(1));
 
         // The parked op resumed against the NEW connection and completed.
@@ -552,7 +552,7 @@ public class AdsConnectionFacadeTests
         await localPool.StartAsync(CancellationToken.None);
 
         var facade = Assert.IsType<AdsConnectionFacade>(localPool.GetConnection("plc1"));
-        await WaitUntil(() => ReferenceEquals(facade.CurrentForTesting, recording));
+        await WaitUntil(() => ReferenceEquals(facade.Current, recording));
 
         var value = await facade.ReadValueAsync("MAIN.n", CancellationToken.None);
         Assert.Equal(123, value);
