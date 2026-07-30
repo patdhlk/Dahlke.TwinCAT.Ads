@@ -88,3 +88,5 @@ Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.GetOutstanding(string! plcId) -> Syst
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.Transitions.get -> System.IObservable<Dahlke.TwinCAT.Ads.Alarms.AlarmTransition!>!
 Dahlke.TwinCAT.Ads.Alarms.AlarmsServiceCollectionExtensions
 static Dahlke.TwinCAT.Ads.Alarms.AlarmsServiceCollectionExtensions.AddTwinCatAdsAlarms(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+Dahlke.TwinCAT.Ads.Alarms.AlarmsHealthChecksBuilderExtensions
+static Dahlke.TwinCAT.Ads.Alarms.AlarmsHealthChecksBuilderExtensions.AddTwinCatAdsAlarmHealthCheck(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder! builder, string! name = "twincat_ads_alarms", Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity degradedAt = Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Warning, Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity unhealthyAt = Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Error, System.Collections.Generic.IEnumerable<string!>? tags = null) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
