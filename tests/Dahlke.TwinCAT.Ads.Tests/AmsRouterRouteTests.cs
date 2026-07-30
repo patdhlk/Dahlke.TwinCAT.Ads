@@ -492,47 +492,6 @@ public class AmsRouterRouteTests
     }
 
     /// <summary>
-    /// A Net ID with an out-of-range octet is SKIPPED rather than handed to the
-    /// router, even though startup validation should already have rejected it.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <c>AmsNetId.Parse</c> does not throw on <c>999.1.1.1.1.1</c> — it ZEROES the
-    /// bad octet and yields <c>0.1.1.1.1.1</c>. Handing that to the router would
-    /// register a route addressing a device the operator never named, which is worse
-    /// than no route at all: it fails somewhere else, silently.
-    /// </para>
-    /// <para>
-    /// The service is constructed directly here, bypassing options validation, which
-    /// is the only way to reach this branch. That is the point — it is a
-    /// defence-in-depth check, and the test says so rather than pretending the
-    /// configuration path can produce it.
-    /// </para>
-    /// </remarks>
-    [Theory]
-    [InlineData("999.1.1.1.1.1")]
-    [InlineData("1.2.3.4.5")]
-    [InlineData("")]
-    public void LaunderableNetId_IsSkippedAndWarned_RatherThanHandedToTheRouter(string netId)
-    {
-        var log = new RecordingLoggerProvider();
-        var recorder = new RouteRecorder();
-        var signal = new AdsRouterReadySignal();
-
-        var service = RouterService(
-            log,
-            "192.168.1.220.1.1",
-            new AmsRouteOptions { Name = "rack", NetId = netId, Address = "192.168.1.223" });
-
-        service.HandleRouterStatusChanged(RouterStatus.Started, signal, recorder.TryAddRoute);
-
-        Assert.Empty(recorder.Added);
-        Assert.Contains(
-            log.Entries,
-            e => e.Level == LogLevel.Warning && e.Message.Contains("Skipping route 'rack'"));
-    }
-
-    /// <summary>
     /// Routes configured while the embedded router is DISABLED are announced as
     /// ignored, not dropped in silence.
     /// </summary>
@@ -592,10 +551,17 @@ public class AmsRouterRouteTests
     /// <b>Measured, not folklore:</b> <c>AmsNetId.TryParse("999.1.1.1.1.1")</c> returns
     /// <see langword="true"/> and yields <c>0.1.1.1.1.1</c> — the octet is ZEROED, so
     /// <c>256</c>, <c>300</c> and <c>999</c> all collapse to the same address.
-    /// Validation therefore uses <c>RawSeedParser.IsWellFormedNetId</c>, shared with
-    /// raw-channel seed validation, so the two can never drift apart. Delegating to
-    /// Beckhoff would let this configuration start a host whose route points somewhere
-    /// nobody wrote down.
+    /// Validation therefore uses <c>AmsNetIdRule</c>, shared with every other
+    /// configured Net ID, so they can never drift apart. Delegating to Beckhoff would
+    /// let this configuration start a host whose route points somewhere nobody wrote
+    /// down.
+    /// <para>
+    /// <b>This is now the ONLY thing standing between a typo'd route and the wire.</b>
+    /// <c>AdsRouterService</c> re-checked the rule before handing a route to
+    /// <c>AmsNetId.Parse</c> until 0.6.0, when that unreachable guard was deleted in
+    /// favour of one enforcement point. If this test is ever weakened, nothing
+    /// downstream catches what it stops.
+    /// </para>
     /// </remarks>
     [Theory]
     [InlineData("999.1.1.1.1.1")]
@@ -619,7 +585,7 @@ public class AmsRouterRouteTests
     /// </summary>
     /// <remarks>
     /// Pinned as an executable fact because the whole argument for
-    /// <c>RawSeedParser.IsWellFormedNetId</c> rests on it. If a future Beckhoff version
+    /// <c>AmsNetIdRule</c> rests on it. If a future Beckhoff version
     /// starts rejecting the value instead, this test says so and the reasoning in the
     /// validator can be revisited deliberately.
     /// </remarks>
@@ -629,7 +595,7 @@ public class AmsRouterRouteTests
         Assert.True(AmsNetId.TryParse("999.1.1.1.1.1", out var laundered));
         Assert.Equal("0.1.1.1.1.1", laundered.ToString());
 
-        Assert.False(RawSeedParser.IsWellFormedNetId("999.1.1.1.1.1"));
+        Assert.False(AmsNetIdRule.IsWellFormed("999.1.1.1.1.1"));
     }
 
     /// <summary>

@@ -80,13 +80,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
             return;
         }
 
-        if (!AmsNetId.TryParse(target.AmsNetId, out _))
-        {
-            failures.Add(
-                $"Target '{targetId}': AmsNetId '{target.AmsNetId}' is not a valid AMS Net ID. " +
-                $"Expected six dot-separated octets, e.g. '192.168.1.10.1.1'. " +
-                $"Fix 'PlcTargets:{targetId}:AmsNetId'.");
-        }
+        AmsNetIdRule.Require($"PlcTargets:{targetId}:AmsNetId", target.AmsNetId, failures);
     }
 
     private static void ValidateTargetPort(
@@ -152,13 +146,9 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
         if (string.IsNullOrEmpty(netId))
             return;
 
-        if (!AmsNetId.TryParse(netId, out _))
-        {
-            failures.Add(
-                $"Router.NetId '{netId}' is not a valid AMS Net ID. " +
-                $"Expected six dot-separated octets, e.g. '127.0.0.1.1.1'. " +
-                $"Fix 'AmsRouter:NetId', or remove the key to disable the embedded router.");
-        }
+        AmsNetIdRule.Require(
+            "AmsRouter:NetId", netId, failures,
+            remedy: "Remove the key to use the system router instead.");
     }
 
     /// <summary>
@@ -173,21 +163,11 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
     /// someone switches back. This matches how raw-channel seeds are treated.
     /// </para>
     /// <para>
-    /// <b>The Net ID check is <c>RawSeedParser.IsWellFormedNetId</c>, NOT
-    /// <see cref="AmsNetId.TryParse"/>.</b> That method LAUNDERS an out-of-range
-    /// octet instead of rejecting it — <c>AmsNetId.TryParse("999.1.1.1.1.1")</c>
-    /// returns <see langword="true"/> and yields <c>0.1.1.1.1.1</c>, so <c>256</c>,
-    /// <c>300</c> and <c>999</c> all collapse to the same address. Delegating would
-    /// let a typo'd route pass startup and then quietly address a DIFFERENT DEVICE
-    /// than the one written in configuration. A route is a declaration whose typo has
-    /// no correct reading, so it is rejected — the same rule, and the same shared
-    /// method, as a raw-channel seed entry.
-    /// </para>
-    /// <para>
-    /// Note this is stricter than <see cref="ValidateRouter"/>'s own check of
-    /// <c>AmsRouter:NetId</c>, which still uses <see cref="AmsNetId.TryParse"/>.
-    /// Tightening that is a behaviour change to an already-shipped key and belongs to
-    /// its own change rather than being smuggled in here.
+    /// The Net ID goes through <see cref="AmsNetIdRule.Require"/>, which explains why
+    /// <c>AmsNetId.TryParse</c> is not delegated to. Since 0.6.0 every configured Net
+    /// ID — a route's, a target's, the router's own and a raw-channel seed's — is held
+    /// to that one rule, so a typo cannot pass startup and then quietly address a
+    /// DIFFERENT DEVICE than the one written in configuration.
     /// </para>
     /// </remarks>
     private static void ValidateRouterRoutes(TwinCatAdsOptions options, List<string> failures)
@@ -224,12 +204,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
                 seenNames[route.Name] = i;
             }
 
-            if (!RawSeedParser.IsWellFormedNetId(route.NetId))
-            {
-                failures.Add(
-                    $"AmsRouter:Routes:{i}:NetId '{route.NetId}' is not six dot-separated octets " +
-                    $"in the range 0-255 (e.g. '5.138.44.199.1.1').");
-            }
+            AmsNetIdRule.Require($"AmsRouter:Routes:{i}:NetId", route.NetId, failures);
 
             if (string.IsNullOrWhiteSpace(route.Address))
             {
@@ -297,12 +272,7 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
         int index,
         List<string> failures)
     {
-        if (!RawSeedParser.IsWellFormedNetId(seed.AmsNetId))
-        {
-            failures.Add(
-                $"RawChannels:Seed:{index}:AmsNetId '{seed.AmsNetId}' is not six dot-separated " +
-                $"octets in the range 0-255 (e.g. '192.168.1.10.3.1').");
-        }
+        AmsNetIdRule.Require($"RawChannels:Seed:{index}:AmsNetId", seed.AmsNetId, failures);
 
         if (seed.Port is < 0 or > 65535)
         {

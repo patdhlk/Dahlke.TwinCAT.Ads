@@ -11,6 +11,11 @@ namespace Dahlke.TwinCAT.Ads;
 /// <see cref="TwinCatAdsOptionsValidator"/>, which rejects malformed seeds at
 /// STARTUP, and by the factory, which materialises them on first use — one
 /// grammar, two consumers, so a seed that validates always binds.
+/// <para>
+/// A seed entry's AMS Net ID is NOT this class's business: that grammar is shared
+/// with targets, routes and runtime channel lookups, and lives in
+/// <see cref="AmsNetIdRule"/>.
+/// </para>
 /// </remarks>
 internal static class RawSeedParser
 {
@@ -62,48 +67,6 @@ internal static class RawSeedParser
 
         bytes = buffer;
         error = null;
-        return true;
-    }
-
-    /// <summary>
-    /// Six dot-separated decimal octets, each in 0-255. The single definition of a
-    /// strictly well-formed AMS Net ID, shared by this parser and
-    /// <see cref="AdsRawChannelFactory"/>.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Deliberately NOT delegated to <c>TwinCAT.Ads.AmsNetId.TryParse</c>.</b>
-    /// That method launders an out-of-range octet instead of rejecting it:
-    /// <c>AmsNetId.TryParse("999.1.1.1.1.1")</c> returns <see langword="true"/> and
-    /// yields <c>0.1.1.1.1.1</c> — the octet is ZEROED, not reduced modulo 256, so
-    /// <c>256</c>, <c>257</c>, <c>300</c>, <c>512</c> and <c>999</c> all collapse to
-    /// the same address. Delegating would let a typo'd seed entry pass startup
-    /// validation and then seed a channel the operator never named — silent data
-    /// corruption rather than a parse failure. Counting six segments, as this did
-    /// before, has the same hole.
-    /// </para>
-    /// <para>
-    /// <b>One rule, two proportionate responses.</b> This parser REJECTS such an ID,
-    /// because a configured seed entry is a declaration whose typo has no correct
-    /// reading. <see cref="IAdsRawChannelFactory.Get"/> cannot reject — it is
-    /// documented total — so it accepts the laundered ID and logs a warning
-    /// instead. Both consult this method, so the two can never drift apart.
-    /// </para>
-    /// </remarks>
-    internal static bool IsWellFormedNetId(string text)
-    {
-        var octets = text.Split('.');
-        if (octets.Length != 6)
-            return false;
-
-        foreach (var octet in octets)
-        {
-            // NumberStyles.None: no sign, no whitespace, no hex — "+1", " 1" and
-            // "0x1" are all malformed in an AMS Net ID.
-            if (!byte.TryParse(octet, NumberStyles.None, CultureInfo.InvariantCulture, out _))
-                return false;
-        }
-
         return true;
     }
 }

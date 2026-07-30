@@ -48,6 +48,15 @@ public sealed class AmsRouterOptions
     /// When <see langword="null"/> or empty the embedded router is disabled
     /// and the system router is used instead.
     /// </summary>
+    /// <remarks>
+    /// A non-empty value is enforced STRICTLY at startup — six dot-separated octets
+    /// each in 0-255, e.g. <c>127.0.0.1.1.1</c> — deliberately not via
+    /// <c>TwinCAT.Ads.AmsNetId.TryParse</c>: that method ZEROES an out-of-range octet
+    /// and returns <see langword="true"/>, so <c>999.1.1.1.1.1</c> would be accepted
+    /// as <c>0.1.1.1.1.1</c> and the embedded router would bind under a different
+    /// address than the one written in configuration. See <c>AmsNetIdRule</c>, which
+    /// every configured Net ID is held to.
+    /// </remarks>
     public string? NetId { get; set; }
 
     /// <summary>

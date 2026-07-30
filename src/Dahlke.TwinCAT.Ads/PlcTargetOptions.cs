@@ -8,6 +8,16 @@ public sealed class PlcTargetOptions
     /// <summary>
     /// AMS Net ID of the target PLC, e.g. <c>192.168.1.10.1.1</c>.
     /// </summary>
+    /// <remarks>
+    /// Enforced STRICTLY at startup for a <see cref="ConnectionMode.Real"/> target —
+    /// six dot-separated octets each in 0-255, deliberately not via
+    /// <c>TwinCAT.Ads.AmsNetId.TryParse</c>: that method ZEROES an out-of-range octet
+    /// and returns <see langword="true"/>, so <c>999.1.1.1.1.1</c> would be accepted
+    /// as <c>0.1.1.1.1.1</c> and the target would address a different device than the
+    /// one written in configuration. See <c>AmsNetIdRule</c>, which every configured
+    /// Net ID is held to. A <see cref="ConnectionMode.Simulated"/> target talks to an
+    /// in-memory store and needs no Net ID at all — see <see cref="Mode"/>.
+    /// </remarks>
     public string AmsNetId { get; set; } = string.Empty;
 
     /// <summary>

@@ -375,7 +375,7 @@ public sealed class EtherCatDiagnostics(IAdsRawChannelFactory channels)
 
 Channels are cached per `(amsNetId, port)` and **never disposed by you** — hold the reference as long as you like. `Get` never blocks and never throws for a present Net ID, however malformed; an unreachable target simply reports `Disconnected` until you operate on it. Only a `null` Net ID throws (`ArgumentNullException`), because that is a caller bug rather than a target that happens not to exist.
 
-The Net ID is trimmed and canonicalised before it is used as a key, so `"1.2.3.4.5.6"`, `"01.2.3.4.5.6"` and `" 1.2.3.4.5.6"` are one channel. An octet outside 0–255 is **zeroed rather than rejected** — `Get("999.1.1.1.1.1", 851)` addresses `0.1.1.1.1.1`, and a warning is logged once per distinct spelling — because that is how the ADS stack resolves the address on the wire. Simulation seed entries are stricter and reject the same value at startup; see [Simulation](#simulation).
+The Net ID is trimmed and canonicalised before it is used as a key, so `"1.2.3.4.5.6"`, `"01.2.3.4.5.6"` and `" 1.2.3.4.5.6"` are one channel. An octet outside 0–255 is **zeroed rather than rejected** — `Get("999.1.1.1.1.1", 851)` addresses `0.1.1.1.1.1`, and a warning is logged once per distinct spelling — because that is how the ADS stack resolves the address on the wire. Configured Net IDs — targets, routes, the router's own and seed entries — are stricter and reject the same value at startup; see [Simulation](#simulation).
 
 Raw channels are unrelated to `PlcTargets`: they need no configured target, and `RawChannels:Seed` names targets only to pre-load their simulated contents, never to declare which ones are reachable. Because a real raw channel cannot route without the embedded AMS router, leaving `RawChannels.Mode` at its default `Real` starts the router even when every configured PLC target is simulated. `AddTwinCatAdsSimulation` forces `RawChannels.Mode` to `Simulated` so it never does.
 
@@ -486,7 +486,7 @@ Returns `Healthy` when every target is connected, `Degraded` when some — but n
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `NetId` | `string` | AMS Net ID for the embedded TCP/IP router. Omit to use the system TwinCAT router. |
+| `NetId` | `string` | AMS Net ID for the embedded TCP/IP router: six dot-separated octets each in 0–255 (e.g. `127.0.0.1.1.1`). Enforced **strictly** — `999.1.1.1.1.1` fails the host rather than being laundered to `0.1.1.1.1.1`. Omit to use the system TwinCAT router. |
 | `Routes` | `List<AmsRouteOptions>` | Remote routes the embedded router adds once it has started — see below. Empty by default. Validated at startup whether or not the embedded router is enabled |
 
 Each `Routes` entry:
@@ -525,7 +525,7 @@ Each key is a PLC identifier used with `GetConnection(plcId)`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `AmsNetId` | `string` | — | AMS Net ID of the PLC (required for `Real` targets) |
+| `AmsNetId` | `string` | — | AMS Net ID of the PLC (required for `Real` targets): six dot-separated octets each in 0–255. Enforced **strictly** — `999.1.1.1.1.1` fails the host rather than being laundered to `0.1.1.1.1.1` |
 | `Port` | `int` | `851` | ADS port number |
 | `DisplayName` | `string` | `""` | Human-readable name for logging |
 | `TimeoutMs` | `int` | `5000` | Per-operation timeout in milliseconds. Must be greater than zero |

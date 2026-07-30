@@ -41,9 +41,9 @@ public sealed class AmsRouteOptions
     /// <c>TwinCAT.Ads.AmsNetId.TryParse</c>: that method ZEROES an out-of-range
     /// octet and returns <see langword="true"/>, so <c>999.1.1.1.1.1</c> would be
     /// accepted as <c>0.1.1.1.1.1</c> and the route would address a different
-    /// device than the one written in configuration. See
-    /// <c>RawSeedParser.IsWellFormedNetId</c>, which both this and the raw-channel
-    /// seed validation share.
+    /// device than the one written in configuration. See <c>AmsNetIdRule</c>, which
+    /// every configured Net ID — this, a target's, the router's own, and a raw-channel
+    /// seed's — is held to.
     /// </remarks>
     public string NetId { get; set; } = string.Empty;
 
