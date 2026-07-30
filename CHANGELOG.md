@@ -207,6 +207,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TwinCatAdsHealthCheck` consumes `IAdsConnectionPool` instead of the concrete pool, and its
   documentation no longer describes a router-release distinction the code never performed.
 
+- **One durable-subscription module instead of two implementations.** The invariants that make
+  a subscription survive its connection — publish-before-first-registration, reserve then
+  commit-or-hand-back (exactly-once per target), restore-on-swap with per-record isolation and
+  retain-on-failure, the rule that a restore never runs on the triggering caller's token, and
+  the disposal/delivery guarantee — were implemented separately in the symbol facade and the
+  raw channel, with the raw copy citing the facade copy in prose and the two restores stating
+  the token rule differently. They now live once, in an internal
+  `DurableSubscriptionRegistry`, unit-tested directly; the facade and the raw channel are its
+  two adapters, each contributing only its genuinely local policy (dispose-vs-
+  `RemoveNotification` discard, the facade's current-pointer commit guard, the raw channel's
+  shutdown-linked restore bound). No public API or behaviour change — the existing facade,
+  contract, and raw-channel suites pass unchanged.
+
 ### Fixed
 
 - **`Connected` now means "can carry ADS traffic", proven before it is published.** (#12)
