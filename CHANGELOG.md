@@ -240,6 +240,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     case-insensitively, so a subscriber registered under one casing silently never fired for
     a writer using another.
 
+- **One owned-loop teardown primitive instead of three hand-rolled copies.** The
+  CTS-ownership discipline — teardown paths cancel-only (never dispose, never throw, any
+  number of times); the owning loop alone retires its signal, in its own `finally`, after it
+  has exited; a signal nobody owns may live undisposed — was implemented three times, in the
+  pool's reconnect loops, the raw factory's idle sweeper, and the raw channel's shutdown
+  signal, each defended by a long comment citing the same root-cause hang (#15). It now lives
+  once in an internal `OwnedLoopCancellation`, unit-tested directly (including the
+  cancel-vs-retire races the three copies each argued about in prose); the three sites become
+  its call sites. The raw factory's stop-before-sweep ordering, previously repeated in
+  `StopAsync` and `Dispose` and asserted only in a comment, is now encoded once in a shared
+  `BeginTeardown`. No behaviour change.
+
 - **Production-dead internal surface pruned** (no public API change). `AdsVersionFormatter`
   (25 lines for one interpolated string, one caller) is inlined; `AdsConnectionFacade.Clear()`
   (zero production callers, a doc claiming a pool-stop role `MarkStopped` actually fills) and

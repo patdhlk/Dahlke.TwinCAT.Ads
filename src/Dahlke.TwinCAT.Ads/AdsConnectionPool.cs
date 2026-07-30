@@ -25,7 +25,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     // SetCurrent and clears it via ClearCurrent at exactly the points it updates
     // _connections.
     private readonly ConcurrentDictionary<string, AdsConnectionFacade> _facades = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, CancellationTokenSource> _reconnectCts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, OwnedLoopCancellation> _reconnectCts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Task> _loopTasks = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConnectionState> _states = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _stoppingCts;
@@ -452,13 +452,12 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
         _logger.LogInformation("ForceReconnect: forcing reconnection to PLC {PlcId}", plcId);
 
-        // Cancel the old loop. Removing it first frees the slot for the replacement
-        // registered below; the old loop disposes this source itself once it exits,
-        // so no caller ever disposes a source a live loop still holds a registration on.
-        if (_reconnectCts.TryRemove(plcId, out var oldCts))
-        {
-            try { oldCts.Cancel(); } catch (ObjectDisposedException) { }
-        }
+        // Stop the old loop. Removing it first frees the slot for the replacement
+        // registered below; the old loop retires its own signal once it exits
+        // (the OwnedLoopCancellation discipline), so a live registration is never
+        // disposed out from under it.
+        if (_reconnectCts.TryRemove(plcId, out var oldSignal))
+            oldSignal.RequestStop();
 
         // Capture the old loop task before StartConnectionLoop overwrites the
         // _loopTasks entry. The cancelled old loop exits promptly; the new loop
@@ -530,42 +529,18 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     }
 
     /// <summary>
-    /// Cancels every per-target reconnect source, so each connection loop observes
-    /// cancellation and exits. Deliberately does NOT dispose them.
+    /// Requests every per-target reconnect loop to stop, so each observes
+    /// cancellation and exits. Request-only, never disposing: each loop retires
+    /// its own signal once it has exited (see
+    /// <see cref="RetireSignalWhenLoopExits"/>). The full discipline — why
+    /// teardown paths must never dispose, and why a late request against a
+    /// finished loop is a safe no-op — lives in
+    /// <see cref="OwnedLoopCancellation"/>; it once wedged this pool's shutdown.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Why cancel-only.</b> <see cref="CancellationTokenSource.Dispose()"/> is not safe
-    /// to call while another thread is inside <see cref="CancellationTokenSource.Cancel()"/>
-    /// on the same source. Only one caller executes the registered callbacks; a second
-    /// <c>Cancel</c> observes the source already cancelling and returns <em>immediately,
-    /// without waiting for those callbacks to run</em>. If that second caller then disposes,
-    /// it can free the registration list while the winner is still walking it, and a
-    /// pending registration is dropped without ever being invoked.
-    /// </para>
-    /// <para>
-    /// That is exactly what wedged shutdown: the connection loop parks on
-    /// <c>Task.Delay(HealthCheckInterval, _timeProvider, cts.Token)</c>, whose completion
-    /// depends entirely on that token registration. Lose the registration and the delay
-    /// never completes, the loop task never finishes, and <see cref="StopAsync"/> waits on
-    /// it forever. The same race surfaced separately as an
-    /// <see cref="ObjectDisposedException"/> out of <c>Cancel</c> — one root cause, two
-    /// symptoms, which is why guarding the exception alone did not fix the hang.
-    /// </para>
-    /// <para>
-    /// Disposal therefore belongs to the loop that created the source: it disposes in its
-    /// own <c>finally</c>, once it has exited and can no longer hold a registration. See
-    /// <see cref="StartConnectionLoop"/>.
-    /// </para>
-    /// </remarks>
     private void CancelReconnectLoops()
     {
-        foreach (var (_, cts) in _reconnectCts)
-        {
-            // The owning loop may have exited and disposed this source already; a
-            // late cancel of an already-finished loop is a no-op, not an error.
-            try { cts.Cancel(); } catch (ObjectDisposedException) { }
-        }
+        foreach (var (_, signal) in _reconnectCts)
+            signal.RequestStop();
     }
 
     /// <summary>
@@ -602,8 +577,8 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         string plcId, PlcTargetOptions options, Task? predecessor = null,
         TaskCompletionSource? firstConnectSignal = null)
     {
-        var cts = new CancellationTokenSource();
-        _reconnectCts[plcId] = cts;
+        var signal = new OwnedLoopCancellation();
+        _reconnectCts[plcId] = signal;
 
         var loop = Task.Run(async () =>
         {
@@ -621,7 +596,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
 
             var delay = MinReconnectDelay;
 
-            while (!cts.Token.IsCancellationRequested)
+            while (!signal.Token.IsCancellationRequested)
             {
                 IManagedConnection? ads = null;
                 var cancelled = false;
@@ -639,7 +614,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                     // stopped pool's facade pointer. Throwing routes through the
                     // cancellation catch into the cleanup block, which tears the
                     // connection down without ever publishing it.
-                    cts.Token.ThrowIfCancellationRequested();
+                    signal.Token.ThrowIfCancellationRequested();
 
                     // Prove the link BEFORE publishing. Beckhoff's Connect() is
                     // purely local — it associates an AMS address and succeeds
@@ -653,7 +628,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                     // what callers assume. A failed probe is a failed connect
                     // attempt: fall through unpublished to the cleanup block,
                     // back off, retry.
-                    if (!await ads.IsAliveAsync(cts.Token).ConfigureAwait(false))
+                    if (!await ads.IsAliveAsync(signal.Token).ConfigureAwait(false))
                     {
                         _logger.LogWarning(
                             "PLC {PlcId}: connected locally but the link cannot carry ADS traffic yet, retrying in {Delay}s",
@@ -681,11 +656,11 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                             ads.LogSymbolTree(_symbolDump);
 
                         // Health check loop: checks if connection is still alive
-                        while (!cts.Token.IsCancellationRequested)
+                        while (!signal.Token.IsCancellationRequested)
                         {
-                            await Task.Delay(HealthCheckInterval, _timeProvider, cts.Token).ConfigureAwait(false);
+                            await Task.Delay(HealthCheckInterval, _timeProvider, signal.Token).ConfigureAwait(false);
 
-                            if (!await ads.IsAliveAsync(cts.Token).ConfigureAwait(false))
+                            if (!await ads.IsAliveAsync(signal.Token).ConfigureAwait(false))
                             {
                                 _logger.LogWarning("PLC {PlcId}: health check failed, reconnecting...", plcId);
                                 break; // Exit inner loop -> reconnect
@@ -702,7 +677,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                 }
                 catch (Exception ex)
                 {
-                    if (cts.Token.IsCancellationRequested)
+                    if (signal.Token.IsCancellationRequested)
                         cancelled = true;
                     else
                         _logger.LogWarning("PLC {PlcId}: connection error: {Message}, retrying in {Delay}s",
@@ -744,17 +719,17 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                     // finish. On the cancelled path the token is already
                     // signalled, so this falls through immediately — StopAsync
                     // must not stall here.
-                    try { await Task.Delay(DisposeGracePeriod, _timeProvider, cts.Token).ConfigureAwait(false); }
+                    try { await Task.Delay(DisposeGracePeriod, _timeProvider, signal.Token).ConfigureAwait(false); }
                     catch { /* Clean up anyway on cancellation */ }
 
                     ads.ForceDisconnect();
                     ads.Dispose();
                 }
 
-                if (cancelled || cts.Token.IsCancellationRequested) break;
+                if (cancelled || signal.Token.IsCancellationRequested) break;
 
                 // Wait before next connection attempt
-                try { await Task.Delay(delay, _timeProvider, cts.Token).ConfigureAwait(false); }
+                try { await Task.Delay(delay, _timeProvider, signal.Token).ConfigureAwait(false); }
                 catch { break; }
 
                 delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxReconnectDelay.Ticks));
@@ -767,27 +742,20 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             firstConnectSignal?.TrySetResult();
         }, CancellationToken.None);
 
-        // The tracked task is the loop PLUS its source disposal, so a caller that
-        // awaits _loopTasks (StopAsync) knows the source is gone by the time it returns.
-        _loopTasks[plcId] = DisposeSourceWhenLoopExits(loop, plcId, cts);
+        // The tracked task is the loop PLUS its signal retirement, so a caller
+        // that awaits _loopTasks (StopAsync) knows the signal is retired by the
+        // time it returns.
+        _loopTasks[plcId] = RetireSignalWhenLoopExits(loop, plcId, signal);
     }
 
     /// <summary>
-    /// Awaits <paramref name="loop"/>, then retires the reconnect source it owned.
+    /// Awaits <paramref name="loop"/>, then retires the signal it owned — the
+    /// owner-retires-in-its-own-finally half of the
+    /// <see cref="OwnedLoopCancellation"/> discipline. The removal is a
+    /// compare-and-remove on the exact instance, so a replacement signal already
+    /// registered by <see cref="ForceReconnect"/> is left in place.
     /// </summary>
-    /// <remarks>
-    /// The loop is the sole owner of its <see cref="CancellationTokenSource"/>, and this is
-    /// the only place one is disposed. By the time <paramref name="loop"/> completes it can
-    /// no longer hold a token registration, so this disposal cannot race a concurrent
-    /// <see cref="CancellationTokenSource.Cancel()"/> the way a teardown-path dispose could —
-    /// which is what previously stranded a loop's health-check delay and wedged
-    /// <see cref="StopAsync"/>. See <see cref="CancelReconnectLoops"/>.
-    /// <para>
-    /// The removal is a compare-and-remove on the exact instance, so a replacement source
-    /// already registered by <see cref="ForceReconnect"/> is left in place.
-    /// </para>
-    /// </remarks>
-    private async Task DisposeSourceWhenLoopExits(Task loop, string plcId, CancellationTokenSource cts)
+    private async Task RetireSignalWhenLoopExits(Task loop, string plcId, OwnedLoopCancellation signal)
     {
         try
         {
@@ -795,8 +763,8 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         }
         finally
         {
-            _reconnectCts.TryRemove(new KeyValuePair<string, CancellationTokenSource>(plcId, cts));
-            cts.Dispose();
+            _reconnectCts.TryRemove(new KeyValuePair<string, OwnedLoopCancellation>(plcId, signal));
+            signal.OwnerRetire();
         }
     }
 }
