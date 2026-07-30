@@ -35,9 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time its connection reports `Connected`, after which the core library's durable subscriptions
   carry it across reconnects on their own. Until then that target reports no alarms, and the
   rest of the fleet is monitored normally. On a plant where PLCs are powered down for
-  maintenance, the alternative is a service that will not start. Only unreachability is
-  forgiven: a `SymbolPath` the PLC does not have is a fault no reconnect will fix, and still
-  brings the host down.
+  maintenance, the alternative is a service that will not start. The attempts also run
+  concurrently, so an unreachable target costs one connection timeout for the whole fleet
+  rather than one each — startup stays prompt, exactly as the connection pool's does. Only
+  unreachability is forgiven: a `SymbolPath` the PLC does not have is a fault no reconnect will
+  fix, and still brings the host down — *if* that target answered at boot. If it did not, there
+  is no startup left to fail and the bad path surfaces on the deferred retry instead, logged at
+  `Error` and re-attempted on every reconnect.
 
   **Transitions for one target are published in the order they were computed.** ADS
   notifications arrive on a background thread and two snapshots for one target can overlap, so

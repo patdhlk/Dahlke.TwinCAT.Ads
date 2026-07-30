@@ -73,10 +73,48 @@ internal sealed class JsonAlarmTextCatalog : IAlarmTextCatalog
         // configuration error worth failing startup for, not a reason to silently
         // strip the text from every alarm.
         using var stream = File.OpenRead(path);
-        var entries = JsonSerializer.Deserialize<Dictionary<string, string>>(stream);
+        var entries = JsonSerializer.Deserialize<Dictionary<string, string>>(stream) ?? [];
 
-        return new Dictionary<string, string>(
-            entries ?? [], StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            return new Dictionary<string, string>(entries, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException ex)
+        {
+            // Two keys differing only in case. The file is hand-authored and lookup here
+            // is case-insensitive, so this is a plausible mistake — but Dictionary's own
+            // message ("An item with the same key has already been added") names neither
+            // the key nor the file, which is worthless in a service's startup log. Say
+            // both. The collision is only searched for on this path, so the good case
+            // still costs one dictionary copy and nothing else.
+            throw new InvalidOperationException(DuplicateKeyMessage(path, entries), ex);
+        }
+    }
+
+    /// <summary>
+    /// Names the file and every set of keys that collide case-insensitively, for the
+    /// diagnostic that replaces <see cref="Dictionary{TKey, TValue}"/>'s bare
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
+    private static string DuplicateKeyMessage(string path, Dictionary<string, string> entries)
+    {
+        // entries still carries BOTH spellings: it comes back from the deserializer with
+        // the default ordinal comparer, which is exactly why the copy above is where the
+        // collision first shows up.
+        var collisions = entries.Keys
+            .GroupBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => string.Join(" / ", group.Select(key => $"'{key}'")))
+            .ToList();
+
+        var detail = collisions.Count > 0
+            ? $"Colliding keys: {string.Join("; ", collisions)}."
+            : "The colliding key could not be identified.";
+
+        return
+            $"The alarm text catalog '{path}' has entries whose keys differ only in case. " +
+            $"Alarm keys are matched case-insensitively, so only one spelling can be kept — " +
+            $"remove or merge the duplicates. {detail}";
     }
 
     private static Dictionary<string, string> LoadLocalized(string path, CultureInfo culture)

@@ -14,13 +14,30 @@ public static class AlarmsHealthChecksBuilderExtensions
     /// </summary>
     /// <param name="builder">The builder to add the check to.</param>
     /// <param name="name">The registration name (default: <c>"twincat_ads_alarms"</c>).</param>
-    /// <param name="degradedAt">The lowest severity that reports Degraded.</param>
-    /// <param name="unhealthyAt">The lowest severity that reports Unhealthy.</param>
+    /// <param name="degradedAt">
+    /// The lowest severity that reports Degraded. Must be less than or equal to
+    /// <paramref name="unhealthyAt"/> — see the remarks.
+    /// </param>
+    /// <param name="unhealthyAt">
+    /// The lowest severity that reports Unhealthy. Must be greater than or equal to
+    /// <paramref name="degradedAt"/> — see the remarks.
+    /// </param>
     /// <param name="tags">Optional tags attached to the registration.</param>
     /// <remarks>
     /// <para>
     /// <c>AddTwinCatAdsAlarms</c> must be registered before this; the monitor is resolved
     /// at the first evaluation, so its absence surfaces then rather than at startup.
+    /// </para>
+    /// <para>
+    /// <b><paramref name="degradedAt"/> must be less than or equal to
+    /// <paramref name="unhealthyAt"/>.</b> The worst outstanding severity is tested against
+    /// <paramref name="unhealthyAt"/> FIRST and against <paramref name="degradedAt"/> only
+    /// if that fails, so passing the two the wrong way round makes Degraded unreachable:
+    /// every severity from <paramref name="unhealthyAt"/> — now the lower of the two —
+    /// upwards reports Unhealthy, everything below it reports Healthy, and nothing ever
+    /// lands in the band between them. This is not validated: with the arguments swapped
+    /// there is no reading of the caller's intent this method could honour instead. If a
+    /// check reports Unhealthy where Degraded was expected, look here first.
     /// </para>
     /// <para>
     /// <b>What this check does and does not tell you.</b> It reports ONLY the severity

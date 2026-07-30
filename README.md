@@ -280,19 +280,30 @@ builder.Services
 var app = builder.Build();
 var monitor = app.Services.GetRequiredService<IPlcAlarmMonitor>();
 
+// Attach handlers BEFORE starting the host: the monitor is a hosted service, so it
+// registers its subscription during startup and the PLC's first snapshot follows
+// immediately — a handler attached afterwards can miss it.
+monitor.AlarmChanged += (_, t) => Console.WriteLine($"{t.Kind}: {t.Alarm.Key}");
+
+await app.StartAsync();
+
+// Only meaningful once the host is running. Before StartAsync nothing is subscribed, so
+// GetOutstanding() is empty and AcknowledgeAsync has nothing to write and returns false.
 foreach (var alarm in monitor.GetOutstanding())
     Console.WriteLine($"{alarm.Key} ({alarm.Severity}): {alarm.Text}");
 
-monitor.AlarmChanged += (_, t) => Console.WriteLine($"{t.Kind}: {t.Alarm.Key}");
-
 await monitor.AcknowledgeAsync("plc1", "BMK1Err404", CancellationToken.None);
+
+await app.WaitForShutdownAsync();
 ```
 
 **An alarm is outstanding while its fault is present OR it still awaits acknowledgement.** A PLC alarm array is fixed-size with permanent slots — an alarm ends by `IsActive := FALSE`, never by leaving the array — and when `NeedsAck` is set the entry outlives its fault condition until an operator acknowledges it. So a fault that self-clears before anyone looks still reaches you, `Cleared` marks the fault ending while the alarm stays outstanding, and `Ended` fires only once the alarm is genuinely finished.
 
 **Identity is `sKey`, not `Id`.** `Id` names the equipment (BMK) and is shared by every alarm on that machine; `sKey` is `'<BMK>Err<Code>'`. Group by `EquipmentId`, key by `Key`.
 
-**A PLC that is down at boot does not fail the host.** Its first subscription attempt cannot succeed, so it is logged at `Error` and retried automatically the next time that target's connection reports `Connected` — every other target monitors normally in the meantime, and the offline one simply reports no alarms until it comes back. Once a target is registered the core library's durable subscriptions take over and carry it across later reconnects. Only unreachability is treated this way: a `SymbolPath` the PLC does not have is a configuration fault that no reconnect will fix, and still fails startup.
+**Every restart re-raises everything outstanding.** The outstanding set lives in memory and starts empty, and ADS delivers one notification on registration — so the first snapshot after a host restart reports every alarm the PLC is currently holding as newly `Raised`. There is no way to tell a two-day-old alarm from one raised while the host was down without persisting the set. Forwarding `Raised` straight to a pager therefore pages the whole outstanding set on every deployment: deduplicate downstream on `Key` plus `PlcTimestamp`, or suppress the first snapshot after start.
+
+**A PLC that is down at boot does not fail the host.** Its first subscription attempt cannot succeed, so it is logged at `Error` and retried automatically the next time that target's connection reports `Connected` — every other target monitors normally in the meantime, and the offline one simply reports no alarms until it comes back. Once a target is registered the core library's durable subscriptions take over and carry it across later reconnects. Registration is attempted for all targets concurrently, so ten offline PLCs cost one connection timeout, not ten. Only unreachability is treated this way: a `SymbolPath` the PLC does not have is a configuration fault that no reconnect will fix, and still fails startup — **provided that target answered at boot**. If it did not, there is no startup left to fail: the bad path surfaces on the deferred retry instead, where it is logged at `Error` and re-attempted on every reconnect, forever. Watch the log for a target that never reports `Monitoring alarms on …`.
 
 **Transitions for one target arrive in the order they were computed**, so a consumer folding the stream into its own state never sees a `Raised` land after the `Ended` that followed it. That ordering is bought by holding the target's lock across delivery, which means **a handler that blocks delays that target's next snapshot** — do the minimum on the notification thread and hand the work off. Ordering is per target, not across targets.
 

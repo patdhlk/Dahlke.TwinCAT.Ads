@@ -10,8 +10,11 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 
 /// <summary>
 /// Turns one alarm-array notification value into <see cref="PlcAlarm"/> instances.
-/// This is the ONLY place in the package that speaks <c>dynamic</c> or knows a PLC
-/// member name.
+/// This is the ONLY place in the package that speaks <c>dynamic</c>, and the only place
+/// that READS a PLC member. It is not quite the only place that names one:
+/// <c>PlcAlarmMonitor.AcknowledgeAsync</c> writes acknowledgements through the symbol
+/// paths <c>…[i].sKey</c> and <c>…[i].IsAcked</c>, which must stay in step with
+/// <see cref="MemberKey"/> and <see cref="MemberIsAcked"/> here.
 /// </summary>
 /// <remarks>
 /// <para>

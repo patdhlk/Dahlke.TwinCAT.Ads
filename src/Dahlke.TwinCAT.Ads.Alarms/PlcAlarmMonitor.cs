@@ -14,11 +14,12 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 /// <see cref="AdsConnectionUnavailableException"/>, and the durable record is rolled back,
 /// so nothing is retained for a later reconnect either. Letting that escape
 /// <see cref="StartAsync"/> would fail hosted-service startup and take down monitoring of
-/// every PLC that IS up. Each target is therefore registered independently: a failure is
-/// logged and the loop continues, and the target is re-attempted when its connection next
-/// reports <see cref="ConnectionState.Connected"/>. Once a target registers, its retry
-/// handler is detached — from then on the facade restores the subscription across
-/// reconnects itself, and a second registration would deliver every notification twice.
+/// every PLC that IS up. Each target is therefore registered independently and
+/// concurrently: a failure is logged, the other targets are unaffected, and the failed one
+/// is re-attempted when its connection next reports
+/// <see cref="ConnectionState.Connected"/>. Once a target registers, its retry handler is
+/// detached — from then on the facade restores the subscription across reconnects itself,
+/// and a second registration would deliver every notification twice.
 /// </para>
 /// <para>
 /// <b>Snapshots are serialised AND published in order.</b> ADS notifications arrive on a
@@ -28,6 +29,17 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 /// price is that a slow handler delays that target's next snapshot — which is why both
 /// this type and <see cref="IPlcAlarmMonitor"/> require handlers to be quick, exactly as
 /// the core library requires of subscription callbacks.
+/// </para>
+/// <para>
+/// <b>The ordering guarantee has one hole: <see cref="Monitor"/> is reentrant.</b> A
+/// handler that SYNCHRONOUSLY causes another notification for the SAME target on the SAME
+/// thread re-enters <see cref="ApplySnapshot"/> through the lock it already holds, so that
+/// second snapshot is applied and published in the middle of the first — which is the
+/// out-of-order delivery the lock exists to prevent. Reachable only under
+/// <c>SimulatedAdsConnection</c>, which fires callbacks on the writing thread, so a handler
+/// that writes back to the simulated PLC can do it; real ADS delivers on a router thread,
+/// where the write and the callback are never the same thread. A handler that hands work
+/// off instead of doing it inline — which this type already requires — is immune either way.
 /// </para>
 /// </remarks>
 internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDisposable
@@ -110,6 +122,14 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
         var connection = _pool.GetConnection(plcId);
         var slot = $"{target.SymbolPath}[{alarm.SlotIndex}]";
 
+        // NOTE: 'sKey' and 'IsAcked' below are PLC member names, and this is the only
+        // place outside PlcAlarmBinder that spells one. They must stay in step with that
+        // type's MemberKey and MemberIsAcked constants — a PLC rename caught by the binder
+        // (which fails loudly, naming the member) would otherwise leave acknowledgement
+        // failing separately, here, against a symbol path that no longer exists. They are
+        // not shared as constants because these two are a WRITE-path contract: they are
+        // appended to a symbol path for ADS, not looked up on a bound notification value.
+        //
         // Slots are permanent and reused, so the index alone does not identify the
         // alarm. Verify the slot still holds it before writing, or an acknowledgement
         // lands on whatever alarm arrived there in the meantime. A window remains
@@ -136,13 +156,51 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Targets are attempted CONCURRENTLY, not one after another. An unreachable target
+    /// costs its facade's whole <c>TimeoutMs</c> before it fails (5 s by default), so a
+    /// serial loop over ten offline PLCs would hold hosted-service startup for the SUM of
+    /// those timeouts — the very thing <c>AdsConnectionPool.StartAsync</c> is documented to
+    /// avoid. Concurrently the cost is the maximum instead. Each attempt is otherwise
+    /// exactly the serial one: distinct targets touch distinct stores and locks, both
+    /// dictionaries are read-only after construction, and everything mutable
+    /// (<c>_subscriptions</c>, <c>_retryDetach</c>, <c>_disposed</c>) is already reached
+    /// only under <c>_lifecycle</c>, because a registration could always complete on a pool
+    /// thread concurrently with any of this.
+    /// </remarks>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        foreach (var (plcId, target) in _targets)
+        // Materialised before awaiting anything, so every attempt is in flight at once
+        // rather than started lazily one await at a time.
+        var attempts = _targets
+            .Select(target => SubscribeOrArmRetryAsync(target.Key, target.Value, cancellationToken))
+            .ToArray();
+
+        var all = Task.WhenAll(attempts);
+
+        try
         {
-            if (!await TrySubscribeAsync(plcId, target, cancellationToken).ConfigureAwait(false))
-                ArmRetry(plcId, target);
+            await all.ConfigureAwait(false);
         }
+        catch (Exception) when (all.Exception is { InnerExceptions.Count: > 1 })
+        {
+            // Awaiting Task.WhenAll rethrows only the FIRST fault. A non-unreachability
+            // failure still has to bring the host down (see TrySubscribeAsync), and now
+            // that all targets are attempted, two of them can fail at once — reporting one
+            // and discarding the other would send an operator round the startup loop once
+            // per misconfigured target. Matches how PlcAlarmsOptionsValidator reports every
+            // misconfiguration at once. A single fault is rethrown unwrapped, unchanged
+            // from the serial version.
+            throw all.Exception;
+        }
+    }
+
+    /// <summary>One target's startup attempt: subscribe, or arm the deferred retry.</summary>
+    private async Task SubscribeOrArmRetryAsync(
+        string plcId, PlcAlarmTargetOptions target, CancellationToken ct)
+    {
+        if (!await TrySubscribeAsync(plcId, target, ct).ConfigureAwait(false))
+            ArmRetry(plcId, target);
     }
 
     /// <inheritdoc />
@@ -178,6 +236,26 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
         foreach (var subscription in subscriptions)
             subscription.Dispose();
 
+        // Complete the stream before disposing it, or every Transitions subscriber
+        // observes shutdown as silence — no OnCompleted, no OnError, just a sequence that
+        // stops — and an operator composing it (TakeUntil, ToTask, an await foreach over
+        // ToAsyncEnumerable) waits forever for a terminal message that never comes. Reached
+        // exactly once: the _disposed check above returns early on any second Dispose, so
+        // this never calls OnCompleted on an already-disposed Subject (which throws
+        // ObjectDisposedException).
+        try
+        {
+            _transitions.OnCompleted();
+        }
+        catch (Exception ex)
+        {
+            // Subject delivers OnCompleted inline to each observer, and a throwing one
+            // would otherwise escape Dispose — that is, escape StopAsync — leaving
+            // _transitions undisposed and the shutdown reported as a monitor failure.
+            _logger.LogWarning(ex,
+                "A Transitions subscriber threw while the alarm monitor was completing the stream");
+        }
+
         _transitions.Dispose();
     }
 
@@ -202,7 +280,12 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
         {
             // ONLY this exception. An unreachable target is an operational condition that
             // resolves itself; a bad symbol path or a cancelled startup is a fault the
-            // operator has to see, and must still bring the host down.
+            // operator has to see, and must still bring the host down — at STARTUP. On the
+            // deferred retry path there is no startup left to fail, so RetryAsync's broad
+            // catch logs it at Error and re-attempts on the next reconnect instead. A
+            // target that was down at boot therefore never fails the host over a bad symbol
+            // path; it just never registers. Said out loud in README.md, because it is the
+            // one place the "a bad SymbolPath still fails startup" contract is conditional.
             _logger.LogError(ex,
                 "Could not register alarm monitoring on {PlcId} at {SymbolPath}: the target is " +
                 "not reachable. The host continues without it and registration is retried when " +

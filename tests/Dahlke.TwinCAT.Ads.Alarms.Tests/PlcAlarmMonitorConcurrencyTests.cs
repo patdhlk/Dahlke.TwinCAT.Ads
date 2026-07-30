@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -30,10 +31,12 @@ public class PlcAlarmMonitorConcurrencyTests
     private const string PlcId = "plc1";
     private const string Path = "GVL.Errors";
 
-    private static PlcAlarmMonitor MonitorFor(StubPool pool)
+    private static PlcAlarmMonitor MonitorFor(StubPool pool, params string[] plcIds)
     {
         var options = new PlcAlarmsOptions();
-        options.Targets[PlcId] = new PlcAlarmTargetOptions { SymbolPath = Path, CycleTimeMs = 50 };
+
+        foreach (var plcId in plcIds.Length == 0 ? [PlcId] : plcIds)
+            options.Targets[plcId] = new PlcAlarmTargetOptions { SymbolPath = Path, CycleTimeMs = 50 };
 
         return new PlcAlarmMonitor(
             pool,
@@ -74,6 +77,131 @@ public class PlcAlarmMonitorConcurrencyTests
 
         Assert.Equal(1, pool.Connection.SubscribeAttempts);
         Assert.Empty(monitor.GetOutstanding());
+    }
+
+    [Fact]
+    public async Task StartAsync_AttemptsEveryTargetConcurrently()
+    {
+        // Serially, each unreachable target burns its whole TimeoutMs before the next one
+        // is even tried — ten offline PLCs delayed hosted-service startup by ~50 s at the
+        // default 5 s. Every subscribe is parked here, so a serial StartAsync could only
+        // ever have ONE attempt outstanding and this wait would time out.
+        string[] plcIds = ["plc1", "plc2", "plc3"];
+        var pool = new StubPool(failFirstSubscribe: false);
+        using var monitor = MonitorFor(pool, plcIds);
+
+        foreach (var plcId in plcIds)
+            pool.ConnectionFor(plcId).BlockNextSubscribe();
+
+        var starting = monitor.StartAsync(CancellationToken.None);
+
+        await WaitForAsync(() => plcIds.All(id => pool.ConnectionFor(id).SubscribeAttempts == 1));
+
+        foreach (var plcId in plcIds)
+            pool.ConnectionFor(plcId).ReleaseBlockedSubscribe();
+
+        await starting;
+
+        // And all three really registered — a StartAsync that abandoned the parked
+        // attempts would satisfy the wait above and still monitor nothing.
+        Assert.All(plcIds, id => Assert.Equal(1, pool.ConnectionFor(id).RegistrationsCreated));
+        Assert.All(plcIds, id => Assert.Equal(1, pool.ConnectionFor(id).LiveSubscriptions));
+    }
+
+    [Fact]
+    public async Task StartAsync_ConcurrentAttempts_StillArmRetryPerFailedTargetOnly()
+    {
+        // The retry arming was written under a serial loop. Concurrently it must still be
+        // per target: the failed one defers and later registers, the healthy one is left
+        // alone and must NOT register a second time when its connection reports Connected.
+        string[] plcIds = ["plc1", "plc2"];
+        var pool = new StubPool(failFirstSubscribe: true);
+        using var monitor = MonitorFor(pool, plcIds);
+
+        // plc2 succeeds first time; plc1 fails once, exactly like an unreachable target.
+        pool.ConnectionFor("plc2").SucceedEveryAttempt();
+
+        await monitor.StartAsync(CancellationToken.None);
+
+        Assert.Equal(1, pool.ConnectionFor("plc1").SubscribeAttempts);
+        Assert.Equal(0, pool.ConnectionFor("plc1").RegistrationsCreated);
+        Assert.Equal(1, pool.ConnectionFor("plc2").RegistrationsCreated);
+
+        pool.ConnectionFor("plc1").RaiseConnected();
+        pool.ConnectionFor("plc2").RaiseConnected();
+        await WaitForAsync(() => pool.ConnectionFor("plc1").RegistrationsCreated == 1);
+        await Task.Delay(50);
+
+        // plc2's retry handler was detached on its successful first registration; a second
+        // registration there would deliver every notification twice.
+        Assert.Equal(1, pool.ConnectionFor("plc2").SubscribeAttempts);
+
+        pool.ConnectionFor("plc1").Notify(OneAlarm());
+        Assert.Single(monitor.GetOutstanding());
+    }
+
+    [Fact]
+    public async Task StartAsync_AFailureThatIsNotUnreachability_StillBringsTheHostDown()
+    {
+        // A bad SymbolPath is a fault no reconnect will fix — README and CHANGELOG both
+        // promise it still fails startup. Only AdsConnectionUnavailableException is caught.
+        var pool = new StubPool(failFirstSubscribe: false);
+        using var monitor = MonitorFor(pool);
+
+        pool.Connection.FailEveryAttemptWith(() => new InvalidOperationException("no such symbol"));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => monitor.StartAsync(CancellationToken.None));
+
+        // A single fault propagates unwrapped, exactly as it did when startup was serial.
+        Assert.Equal("no such symbol", ex.Message);
+    }
+
+    [Fact]
+    public async Task StartAsync_TwoUnexpectedFailures_ReportBoth()
+    {
+        // Serially the second target was never even attempted, so only one fault could
+        // exist. Concurrently both do, and awaiting Task.WhenAll rethrows only the FIRST —
+        // reporting one and discarding the other would send an operator round the startup
+        // loop once per misconfigured target.
+        string[] plcIds = ["plc1", "plc2"];
+        var pool = new StubPool(failFirstSubscribe: false);
+        using var monitor = MonitorFor(pool, plcIds);
+
+        foreach (var plcId in plcIds)
+        {
+            var id = plcId;
+            pool.ConnectionFor(id).FailEveryAttemptWith(() => new InvalidOperationException($"no such symbol on {id}"));
+        }
+
+        var ex = await Assert.ThrowsAsync<AggregateException>(
+            () => monitor.StartAsync(CancellationToken.None));
+
+        Assert.Equal(2, ex.InnerExceptions.Count);
+        Assert.All(plcIds, id => Assert.Contains(
+            ex.InnerExceptions, inner => inner.Message.Contains(id, StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Dispose_CompletesTheTransitionsStream()
+    {
+        // Disposing the Subject without completing it first makes shutdown look like
+        // silence to every subscriber: anything composing the stream (TakeUntil, ToTask,
+        // an await foreach) waits forever for a terminal message that never arrives.
+        var pool = new StubPool(failFirstSubscribe: false);
+        var monitor = MonitorFor(pool);
+        await monitor.StartAsync(CancellationToken.None);
+
+        var completed = false;
+        using var subscription = monitor.Transitions.Subscribe(_ => { }, () => completed = true);
+
+        monitor.Dispose();
+
+        Assert.True(completed);
+
+        // The second Dispose must NOT reach the now-disposed Subject — OnCompleted on a
+        // disposed Subject throws ObjectDisposedException.
+        monitor.Dispose();
     }
 
     [Fact]
@@ -245,21 +373,30 @@ public class PlcAlarmMonitorConcurrencyTests
         Assert.True(condition(), "Condition was not satisfied within the timeout.");
     }
 
-    /// <summary>A pool serving one <see cref="StubConnection"/>.</summary>
+    /// <summary>
+    /// A pool serving one <see cref="StubConnection"/> per target id, created on first
+    /// request. <see cref="Connection"/> is the single-target tests' one connection.
+    /// </summary>
     private sealed class StubPool(bool failFirstSubscribe) : IAdsConnectionPool
     {
-        public StubConnection Connection { get; } = new(failFirstSubscribe);
+        private readonly ConcurrentDictionary<string, StubConnection> _connections =
+            new(StringComparer.OrdinalIgnoreCase);
 
-        public IAdsConnection GetConnection(string plcId) => Connection;
+        public StubConnection Connection => ConnectionFor(PlcId);
+
+        public StubConnection ConnectionFor(string plcId) =>
+            _connections.GetOrAdd(plcId, id => new StubConnection(id, failFirstSubscribe));
+
+        public IAdsConnection GetConnection(string plcId) => ConnectionFor(plcId);
 
         public bool TryGetConnection(string plcId, [NotNullWhen(true)] out IAdsConnection? connection)
         {
-            connection = Connection;
+            connection = ConnectionFor(plcId);
             return true;
         }
 
         public IReadOnlyDictionary<string, IAdsConnection> GetAllConnections() =>
-            new Dictionary<string, IAdsConnection> { [PlcId] = Connection };
+            _connections.ToDictionary(pair => pair.Key, pair => (IAdsConnection)pair.Value);
 
         public void ForceReconnect(string plcId) => throw new NotSupportedException();
         public IReadOnlyList<PlcTargetStatus> GetTargetStates() => throw new NotSupportedException();
@@ -277,10 +414,12 @@ public class PlcAlarmMonitorConcurrencyTests
     /// unreachable target's facade does, and whose notifications and state transitions can
     /// be driven on demand.
     /// </summary>
-    private sealed class StubConnection(bool failFirstSubscribe) : IAdsConnection
+    private sealed class StubConnection(string plcId, bool failFirstSubscribe) : IAdsConnection
     {
         private readonly List<Action<string, object?>> _callbacks = [];
         private TaskCompletionSource? _block;
+        private Func<Exception>? _failure;
+        private int _forcedSuccess;
         private int _subscribeAttempts;
         private int _registrationsCreated;
         private int _liveSubscriptions;
@@ -296,8 +435,8 @@ public class PlcAlarmMonitorConcurrencyTests
 
         public int LiveSubscriptions => Volatile.Read(ref _liveSubscriptions);
 
-        public string PlcId => PlcAlarmMonitorConcurrencyTests.PlcId;
-        public string DisplayName => PlcId;
+        public string PlcId => plcId;
+        public string DisplayName => plcId;
         public bool IsConnected => true;
         public ConnectionState State => ConnectionState.Connected;
 
@@ -306,7 +445,21 @@ public class PlcAlarmMonitorConcurrencyTests
         public void RaiseConnected() => ConnectionStateChanged?.Invoke(
             this,
             new ConnectionStateChangedEventArgs(
-                PlcId, ConnectionState.Connected, ConnectionState.Disconnected));
+                plcId, ConnectionState.Connected, ConnectionState.Disconnected));
+
+        /// <summary>
+        /// Exempts this one connection from its pool's <c>failFirstSubscribe</c>, so a
+        /// multi-target test can have one target fail while another succeeds.
+        /// </summary>
+        public void SucceedEveryAttempt() => Volatile.Write(ref _forcedSuccess, 1);
+
+        /// <summary>
+        /// Fails every <c>SubscribeAsync</c> with something OTHER than
+        /// <see cref="AdsConnectionUnavailableException"/> — a bad symbol path, say — which
+        /// the monitor must not swallow. A factory, so each call throws a fresh exception
+        /// with its own stack.
+        /// </summary>
+        public void FailEveryAttemptWith(Func<Exception> failure) => Volatile.Write(ref _failure, failure);
 
         /// <summary>Parks <c>SubscribeAsync</c> until <see cref="ReleaseBlockedSubscribe"/>.</summary>
         /// <remarks>
@@ -340,7 +493,10 @@ public class PlcAlarmMonitorConcurrencyTests
             if (block is not null)
                 await block.Task.ConfigureAwait(false);
 
-            if (failFirstSubscribe && attempt == 1)
+            if (Volatile.Read(ref _failure) is { } failure)
+                throw failure();
+
+            if (failFirstSubscribe && attempt == 1 && Volatile.Read(ref _forcedSuccess) == 0)
             {
                 // Exactly what the facade throws once TimeoutMs elapses with no connection.
                 throw new AdsConnectionUnavailableException(PlcId);
