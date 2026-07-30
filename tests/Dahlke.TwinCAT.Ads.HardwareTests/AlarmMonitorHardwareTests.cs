@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using Dahlke.TwinCAT.Ads.Alarms;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Dahlke.TwinCAT.Ads.HardwareTests;
@@ -25,6 +27,30 @@ namespace Dahlke.TwinCAT.Ads.HardwareTests;
 /// <c>TWINCAT_TEST_SYMBOL_ALARMS</c> was actually set on the machine that ran it.
 /// </para>
 /// <para>
+/// <b>Three ways this test can fail, deliberately, so a pass cannot be vacuous.</b> An
+/// empty outstanding-alarm array is a legitimate PLC state, but by itself it is
+/// indistinguishable from "the binder threw and the whole snapshot was silently dropped":
+/// <c>PlcAlarmMonitor</c> catches <c>PlcAlarmShapeException</c>, logs it, and keeps the
+/// store's last good reading — empty, on a fresh host — so
+/// <see cref="IPlcAlarmMonitor.GetOutstanding()"/> alone cannot tell the two apart. This
+/// test therefore also (1) opens its own raw subscription to the same symbol, independent
+/// of the monitor, and asserts at least one notification arrived — proving the pipeline
+/// actually ran, since ADS delivers one notification on registration — and (2) captures
+/// Error-level log entries from <c>PlcAlarmMonitor</c>'s own logger category and asserts
+/// none were recorded, which fails on a shape mismatch or on <c>ErrorType</c> arriving as
+/// <c>TwinCAT.TypeSystem.DynamicEnumValue</c> rather than a plain integral REGARDLESS of
+/// whether any alarm ended up outstanding. Only the third failure mode — a bound alarm
+/// with an out-of-range <see cref="AlarmSeverity"/> — depends on the array being
+/// non-empty; see the assertion inside the loop below.
+/// </para>
+/// <para>
+/// <b>What this test does NOT prove, even when it passes with a symbol configured.</b> It
+/// exercises only the read/bind path of one array notification. It does NOT prove that
+/// <see cref="IPlcAlarmMonitor.AcknowledgeAsync"/> writes back correctly — nothing here
+/// issues an acknowledgement or checks that the PLC observed one — nor does it exercise
+/// transitions, the health check, or the text catalog.
+/// </para>
+/// <para>
 /// Requires a PLC with an <c>ARRAY[..] OF ST_ErrorEntry</c> named by
 /// <c>TWINCAT_TEST_SYMBOL_ALARMS</c>, alongside the variables
 /// <see cref="HardwareTestConfig"/> already requires.
@@ -38,7 +64,14 @@ public class AlarmMonitorHardwareTests
         if (!HardwareTestConfig.HasSymbolAlarms)
             return;
 
+        var symbol = HardwareTestConfig.SymbolAlarms!;
+        var capturedErrors = new ConcurrentQueue<string>();
+
         var builder = Host.CreateApplicationBuilder();
+
+        // Records PlcAlarmMonitor's own Error-level log entries so this test can fail on a
+        // thrown binder even when GetOutstanding() comes back empty — see the class remarks.
+        builder.Logging.AddProvider(new CapturingLoggerProvider(capturedErrors));
 
         builder.Services.AddTwinCatAds(o =>
         {
@@ -53,7 +86,7 @@ public class AlarmMonitorHardwareTests
         builder.Services.Configure<PlcAlarmsOptions>(o =>
             o.Targets["plc1"] = new PlcAlarmTargetOptions
             {
-                SymbolPath = HardwareTestConfig.SymbolAlarms!,
+                SymbolPath = symbol,
                 CycleTimeMs = 200,
             });
 
@@ -65,6 +98,19 @@ public class AlarmMonitorHardwareTests
         try
         {
             var monitor = host.Services.GetRequiredService<IPlcAlarmMonitor>();
+            var pool = host.Services.GetRequiredService<IAdsConnectionPool>();
+
+            // Prove the pipeline actually ran: a raw subscription to the same symbol,
+            // independent of the monitor's own. A test that observes nothing must not be
+            // able to look identical to one that observed a clean array.
+            var notificationCount = 0;
+
+            using var subscribeCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var rawSubscription = await pool.GetConnection("plc1").SubscribeAsync(
+                symbol,
+                cycleTimeMs: 200,
+                callback: (_, _) => Interlocked.Increment(ref notificationCount),
+                ct: subscribeCts.Token);
 
             // The array may legitimately hold no outstanding alarms. What is proven here
             // is that the notification BOUND — a shape mismatch would have raised
@@ -72,6 +118,24 @@ public class AlarmMonitorHardwareTests
             // bind, so a partially-wrong mapping (a blank sKey, a negative slot) fails
             // rather than passing on an empty collection.
             await Task.Delay(TimeSpan.FromSeconds(3));
+
+            Assert.True(
+                notificationCount >= 1,
+                $"No ADS notification arrived on '{symbol}' during the observation window, even " +
+                "though TwinCAT delivers one on registration. Zero notifications means the symbol " +
+                "path is wrong or the subscription never registered, so every assertion below " +
+                "would have proven nothing about binding.");
+
+            Assert.True(
+                capturedErrors.IsEmpty,
+                "PlcAlarmMonitor logged at least one Error-level entry while this test was " +
+                "observing it. This is asserted separately from GetOutstanding() because a " +
+                "thrown binder drops the whole snapshot silently, leaving an empty outstanding " +
+                "set that is otherwise indistinguishable from a genuinely empty array. Likely " +
+                "causes: a shape mismatch (PlcAlarmShapeException, whose own message names the " +
+                "offending member and symbol path), or ErrorType arriving as " +
+                "TwinCAT.TypeSystem.DynamicEnumValue instead of a plain integral. Captured: " +
+                string.Join(" | ", capturedErrors));
 
             foreach (var alarm in monitor.GetOutstanding())
             {
@@ -99,13 +163,52 @@ public class AlarmMonitorHardwareTests
                     "is not IConvertible. Note that if ErrorType arrives as DynamicEnumValue for " +
                     "every entry, PlcAlarmBinder.Read<int> throws PlcAlarmShapeException before " +
                     "this alarm is ever constructed, and the whole snapshot is dropped instead — " +
-                    "check the host log for that exception if GetOutstanding() stayed empty despite " +
-                    "known outstanding alarms on the PLC.");
+                    "the capturedErrors assertion above is what catches THAT case, since " +
+                    "GetOutstanding() would stay empty despite known outstanding alarms on the PLC.");
             }
         }
         finally
         {
             await host.StopAsync();
+        }
+    }
+
+    /// <summary>
+    /// Captures Error-level (or above) log entries from <c>PlcAlarmMonitor</c>'s own
+    /// logger category. <c>PlcAlarmMonitor</c> is internal to
+    /// <c>Dahlke.TwinCAT.Ads.Alarms</c> and this assembly has no
+    /// <c>InternalsVisibleTo</c> grant for it, so the category is matched by name — the
+    /// same full type name <see cref="ILogger{TCategoryName}"/> always uses — rather than
+    /// via <see langword="typeof"/>.
+    /// </summary>
+    private sealed class CapturingLoggerProvider(ConcurrentQueue<string> captured) : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(categoryName, captured);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class CapturingLogger(string categoryName, ConcurrentQueue<string> captured) : ILogger
+        {
+            private const string MonitorCategory = "Dahlke.TwinCAT.Ads.Alarms.PlcAlarmMonitor";
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) =>
+                logLevel >= LogLevel.Error && categoryName == MonitorCategory;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (!IsEnabled(logLevel))
+                    return;
+
+                captured.Enqueue(exception is null
+                    ? formatter(state, exception)
+                    : $"{formatter(state, exception)} ({exception.GetType().Name}: {exception.Message})");
+            }
         }
     }
 }

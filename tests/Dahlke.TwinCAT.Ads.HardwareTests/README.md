@@ -75,6 +75,19 @@ dotnet test tests/Dahlke.TwinCAT.Ads.HardwareTests --framework net8.0
 | `HealthCheck_LivePool_ReturnsHealthy` | Health check against live pool → `Healthy` |
 | `AlarmArray_BindsAgainstRealHardware` | `Dahlke.TwinCAT.Ads.Alarms.PlcAlarmBinder` binds a real alarm-array notification without throwing (needs `TWINCAT_TEST_SYMBOL_ALARMS`) |
 
+> **`AlarmArray_BindsAgainstRealHardware` is deliberately hard to pass vacuously.** An empty
+> outstanding-alarm set is a legitimate PLC state, but by itself it looks identical to "the binder
+> threw and the whole snapshot was silently dropped" — `PlcAlarmMonitor` catches
+> `PlcAlarmShapeException`, logs it, and keeps the store's last good (empty, on a fresh host)
+> reading. So besides asserting on every bound alarm's fields (`Key`, `PlcId`, `SlotIndex`, and
+> `Severity` being one of the four known `AlarmSeverity` values), the test also opens its own raw
+> subscription to the same symbol and fails if zero notifications arrived, and captures
+> `PlcAlarmMonitor`'s Error-level log output and fails if any was recorded — both checks fire
+> regardless of whether the array is empty. It does **not** prove that
+> `IPlcAlarmMonitor.AcknowledgeAsync` writes back correctly, and — like every other symbol-gated
+> test here — it still reports **passed while doing nothing** when `TWINCAT_TEST_SYMBOL_ALARMS` is
+> unset, even with `TWINCAT_HARDWARE_TESTS=1` set.
+
 ## CI
 
 The hardware test project is included in the solution but the tests are gated by environment variables. In CI (`TWINCAT_HARDWARE_TESTS` and `TWINCAT_TEST_AMSNETID` are never set), all tests show as **Skipped** — the build and test steps do not fail.
