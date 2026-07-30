@@ -59,33 +59,21 @@ namespace Dahlke.TwinCAT.Ads;
 /// <para>
 /// <b>Durable subscriptions.</b> Unlike one-shot operations, a subscription made
 /// via any <c>SubscribeAsync</c> overload outlives the connection it was first
-/// registered on. The facade keeps every active subscription as a record — the path,
-/// plus a REGISTRAR delegate that registers that subscription against a connection
-/// handed to it (see <see cref="DurableSubscription"/>) — in a registry. Because the
-/// record holds a registrar rather than a callback, every overload's subscriptions
-/// re-register through ONE path regardless of callback shape. On the first call it registers
-/// immediately against the current connection (waiting per the same wait-then-throw
-/// contract); thereafter, whenever the pool publishes a new connection via
-/// <see cref="SetCurrent"/>, the facade re-registers every active record against
-/// it on a background task. The caller's returned <see cref="IDisposable"/> never
-/// goes stale across reconnects: disposing it removes the record from the registry
-/// (so it is not re-registered again) and disposes the current underlying
-/// registration. Dispose is idempotent and thread-safe.
-/// </para>
-/// <para>
-/// <b>Dispose-or-drop rule for replaced registrations.</b> Each record tracks the
-/// underlying registration <i>together with the connection it was created on</i>.
-/// When a re-registration completes, the facade stores it only if that connection
-/// is STILL the facade's current connection AND the record is still active;
-/// otherwise (a newer reconnect won the race, or the subscriber disposed the
-/// handle mid-flight) the just-created registration is disposed immediately rather
-/// than stored, so no <see cref="IDisposable"/> leaks. The facade never disposes a
-/// registration belonging to a connection that has already been replaced — that
-/// connection's <see cref="AdsClient"/> is torn down by the pool loop, so its
-/// registrations die with it; reaching into a disposed client could throw. The
-/// only registration the facade actively disposes is the record's <i>current</i>
-/// one, and only on handle dispose (a live connection) or on the dispose-or-drop
-/// path above.
+/// registered on. The mechanics — the record registry, publish-before-first-
+/// registration, reserve/commit-or-hand-back, restore-on-swap, and the disposal
+/// guarantee — live in
+/// <see cref="DurableSubscriptionRegistry{TTarget, THandle, TMeta}"/>, of which
+/// this facade is one of two adapters (the raw channel is the other). Each
+/// record stores a REGISTRAR delegate already bound to its overload's callback,
+/// so every callback shape re-registers through one path. On the first call the
+/// subscription registers against the current connection (waiting per the same
+/// wait-then-throw contract); thereafter each <see cref="SetCurrent"/> restores
+/// every active record against the new connection on a background task. The
+/// caller's <see cref="IDisposable"/> never goes stale across reconnects, and
+/// its dispose is idempotent and thread-safe. This facade's one adapter-specific
+/// rule: a registration commits only while its connection is STILL the facade's
+/// current one (the registry's commit guard), so a registration created for an
+/// already-replaced connection is disposed rather than stored.
 /// </para>
 /// </remarks>
 internal sealed class AdsConnectionFacade : IAdsConnection
@@ -117,11 +105,15 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     // value without a lock.
     private volatile ConnectionState _state = ConnectionState.Disconnected;
 
-    // Active durable subscriptions. A concurrent set (value byte is a dummy):
-    // SubscribeAsync adds, handle dispose removes, SetCurrent enumerates to
-    // re-register. Enumeration of a ConcurrentDictionary is safe under concurrent
-    // mutation, which is exactly what re-registration-vs-subscribe/dispose needs.
-    private readonly ConcurrentDictionary<DurableSubscription, byte> _subscriptions = new();
+    // Active durable subscriptions — owned by the shared registry module, which
+    // holds every durable-subscription invariant (publish-before-first-
+    // registration, reserve/commit-or-hand-back, restore-on-swap, the delivery
+    // guarantee). This facade is one of its two adapters; AdsRawChannel is the
+    // other. Adapter-specific policy is injected in the constructor: a
+    // registration is an IDisposable and discarding it is disposing it, and the
+    // commit guard is the facade's current-pointer check — a registration only
+    // commits while its connection is still the one this facade routes to.
+    private readonly DurableSubscriptionRegistry<IManagedConnection, IDisposable, string> _subscriptions;
 
     // The most recent background re-registration task, tracked (not async void) so
     // failures surface and tests can reason about lifecycle. Each SetCurrent
@@ -136,6 +128,14 @@ internal sealed class AdsConnectionFacade : IAdsConnection
         _options = options;
         _timeProvider = timeProvider;
         _logger = logger;
+        _subscriptions = new DurableSubscriptionRegistry<IManagedConnection, IDisposable, string>(
+            discard: (_, registration) => registration.Dispose(),
+            commitGuard: connection => ReferenceEquals(Volatile.Read(ref _current), connection),
+            onRestoreFailure: (symbolPath, ex) => _logger.LogWarning(
+                ex,
+                "Failed to re-register subscription for {Symbol} on {PlcId} after reconnect; will retry on next reconnect.",
+                symbolPath,
+                _plcId));
     }
 
     /// <inheritdoc />
@@ -240,40 +240,11 @@ internal sealed class AdsConnectionFacade : IAdsConnection
         // Re-register every active durable subscription against the freshly
         // published connection. SetCurrent is synchronous and runs on the pool's
         // loop thread; the underlying SubscribeAsync is async, so we fire the
-        // re-registrations as a TRACKED background task (never async void) instead
-        // of blocking the loop. A failed re-registration is logged and the record
-        // retained so the NEXT reconnect retries it.
+        // restore pass as a TRACKED background task (never async void) instead
+        // of blocking the loop. Per-record isolation, retain-on-failure, and the
+        // no-caller-token rule live in the registry's RestoreAllAsync.
         if (!_subscriptions.IsEmpty)
-            _reRegisterTask = ReRegisterAllAsync(connection);
-    }
-
-    /// <summary>
-    /// Re-registers every currently active durable subscription against
-    /// <paramref name="connection"/>. Runs as a background task fired by
-    /// <see cref="SetCurrent"/>; per-record failures are isolated and logged at
-    /// Warning, leaving the record in the registry to retry on the next reconnect.
-    /// </summary>
-    private async Task ReRegisterAllAsync(IManagedConnection connection)
-    {
-        // Snapshot the keys so a concurrent dispose/add does not disturb the loop.
-        // A record removed after the snapshot is handled inside RegisterAsync via
-        // the dispose-or-drop check, so the worst case is a wasted registration
-        // that we immediately dispose.
-        foreach (var subscription in _subscriptions.Keys)
-        {
-            try
-            {
-                await subscription.RegisterAsync(connection, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Failed to re-register subscription for {Symbol} on {PlcId} after reconnect; will retry on next reconnect.",
-                    subscription.SymbolPath,
-                    _plcId);
-            }
-        }
+            _reRegisterTask = _subscriptions.RestoreAllAsync(connection);
     }
 
     /// <summary>
@@ -483,8 +454,7 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     /// <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/>, and
     /// through exactly the same code: the only difference is which underlying overload this
     /// overload's registrar closes over. The record itself stores no callback, so
-    /// <see cref="ReRegisterAllAsync"/> and <see cref="DurableSubscription.RegisterAsync"/> never
-    /// branch on callback shape.
+    /// the registry's restore and register paths never branch on callback shape.
     /// </remarks>
     public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
         => SubscribeCoreAsync(
@@ -499,38 +469,24 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     /// time and the caller's callback (in whatever shape that callback has), so everything
     /// downstream of here, including re-registration after a reconnect, is callback-agnostic.
     /// </summary>
-    private async Task<IDisposable> SubscribeCoreAsync(
+    private Task<IDisposable> SubscribeCoreAsync(
         string symbolPath,
         Func<IManagedConnection, CancellationToken, Task<IDisposable>> register,
         CancellationToken ct)
-    {
-        var subscription = new DurableSubscription(this, symbolPath, register);
-
-        // Add to the registry BEFORE the first registration. If a reconnect fires
-        // between here and the immediate registration below, the background
-        // re-registration sees the record (idempotency is fine: RegisterAsync
-        // replaces the current registration atomically). If we registered first and
-        // added second, a reconnect in that gap would miss the record entirely.
-        _subscriptions[subscription] = 0;
-
-        try
-        {
-            var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-            await subscription.RegisterAsync(conn, ct).ConfigureAwait(false);
-        }
-        catch
-        {
-            // The initial registration failed (outage timed out, cancelled, or the
-            // underlying threw). Roll back so a never-registered subscription does
-            // not linger in the registry; the caller gets the exception and no
-            // handle. Dispose is idempotent, so this is safe even if a racing
-            // reconnect already touched the record.
-            subscription.Dispose();
-            throw;
-        }
-
-        return subscription;
-    }
+        // AddAsync publishes the record BEFORE the initial registration below
+        // runs, and rolls it back if that registration fails — see the registry's
+        // remarks for why the ordering matters and why the rollback cannot race a
+        // concurrent reconnect into a leak. The initial registration itself is
+        // this facade's: acquire the current connection per the wait-then-throw
+        // contract, then register through the shared reserve/commit path.
+        => _subscriptions.AddAsync(
+            symbolPath,
+            (_, conn, token) => register(conn, token),
+            initialRegister: async record =>
+            {
+                var conn = await SnapshotAsync(ct).ConfigureAwait(false);
+                await _subscriptions.RegisterAsync(record, conn, ct).ConfigureAwait(false);
+            });
 
     /// <inheritdoc />
     /// <remarks>
@@ -565,157 +521,4 @@ internal sealed class AdsConnectionFacade : IAdsConnection
         return await conn.SearchSymbolsAsync(pattern, includeChildren, ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// A durable subscription record: a REGISTRAR — "register this subscription against
-    /// the connection you hand me" — plus the current underlying registration (and the
-    /// connection it was created on). Held in the facade's registry and re-registered on
-    /// every reconnect. Disposing the handle removes it from the registry and disposes
-    /// the live registration.
-    /// </summary>
-    /// <remarks>
-    /// <b>Why a registrar and not a callback.</b> <see cref="IAdsConnection"/> offers several
-    /// subscription callback shapes (<c>Action&lt;string, object?&gt;</c>,
-    /// <c>Action&lt;string, T?&gt;</c>, <c>Action&lt;AdsNotification&gt;</c>). Storing a callback
-    /// would force this record to know which shape it holds and force
-    /// <see cref="RegisterAsync"/> — the single path every reconnect funnels through — to branch on
-    /// it, doubling the ways a reconnect can go wrong for each shape added. Storing the
-    /// already-bound registration call instead erases the difference: each public overload closes
-    /// over its own arguments and callback, and this record re-invokes one delegate. The typed
-    /// overload needs nothing at all here — it wraps its callback into the untyped shape before
-    /// subscribing, so it arrives as an untyped registrar.
-    /// </remarks>
-    private sealed class DurableSubscription : IDisposable
-    {
-        private readonly AdsConnectionFacade _facade;
-        private readonly Func<IManagedConnection, CancellationToken, Task<IDisposable>> _register;
-        private readonly object _gate = new();
-
-        // The connection the current registration was created on, and that
-        // registration. Guarded by _gate so RegisterAsync's compare-store and
-        // Dispose's read-clear never interleave. _disposed flips once, under the
-        // same gate, so a registration completing after dispose is dropped.
-        //
-        // _registeredOn doubles as a RESERVATION: it is set to a connection BEFORE
-        // the underlying SubscribeAsync await begins, so a second concurrent
-        // RegisterAsync for the same connection (e.g. a parked initial subscribe
-        // racing the SetCurrent-fired re-registration) observes it and skips,
-        // preventing a duplicate underlying registration. _registration trails it:
-        // it is null between reservation and the await completing.
-        private IManagedConnection? _registeredOn;
-        private IDisposable? _registration;
-        private bool _disposed;
-
-        public DurableSubscription(
-            AdsConnectionFacade facade,
-            string symbolPath,
-            Func<IManagedConnection, CancellationToken, Task<IDisposable>> register)
-        {
-            _facade = facade;
-            SymbolPath = symbolPath;
-            _register = register;
-        }
-
-        /// <summary>The subscribed symbol, kept for re-registration failure logging.</summary>
-        public string SymbolPath { get; }
-
-        /// <summary>
-        /// Registers this subscription against <paramref name="connection"/> and
-        /// stores the resulting registration as the record's current one — but only
-        /// if, after the async registration completes, this record is still active
-        /// AND <paramref name="connection"/> is still the facade's current
-        /// connection. Otherwise the just-created registration is disposed (the
-        /// dispose-or-drop rule): the subscriber disposed mid-flight, or a newer
-        /// reconnect already won. Any previous registration is left untouched — it
-        /// belonged to a now-dead connection and is torn down by the pool loop.
-        /// </summary>
-        public async Task RegisterAsync(IManagedConnection connection, CancellationToken ct)
-        {
-            // Reserve this connection under the gate BEFORE awaiting the underlying
-            // SubscribeAsync. Skip if already disposed, or if we have already
-            // reserved/registered against this very connection — that de-dupes the
-            // case where SetCurrent both releases a parked initial subscribe AND
-            // fires the background re-registration for the same freshly published
-            // connection. The reservation drops the previous registration reference
-            // (a prior dead connection's, torn down by the pool loop — see the
-            // dispose-or-drop rule) without disposing it.
-            lock (_gate)
-            {
-                if (_disposed)
-                    return;
-                if (ReferenceEquals(_registeredOn, connection))
-                    return;
-                _registeredOn = connection;
-                _registration = null;
-            }
-
-            IDisposable fresh;
-            try
-            {
-                fresh = await _register(connection, ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                // The underlying registration failed. Release our reservation so the
-                // next reconnect retries — but only if it is still ours (a newer
-                // reconnect may already have re-reserved a different connection).
-                lock (_gate)
-                {
-                    if (ReferenceEquals(_registeredOn, connection))
-                        _registeredOn = null;
-                }
-                throw;
-            }
-
-            IDisposable? toDispose = null;
-            lock (_gate)
-            {
-                // Store the live registration ONLY if we are still active, still
-                // hold the reservation for this connection, and this connection is
-                // still the one the facade routes to. Otherwise (disposed mid-flight,
-                // or a later SetCurrent re-reserved/won) drop what we just created.
-                if (!_disposed
-                    && ReferenceEquals(_registeredOn, connection)
-                    && ReferenceEquals(Volatile.Read(ref _facade._current), connection))
-                {
-                    _registration = fresh;
-                }
-                else
-                {
-                    toDispose = fresh;
-                }
-            }
-
-            toDispose?.Dispose();
-        }
-
-        /// <summary>
-        /// Removes the record from the facade registry and disposes the current
-        /// underlying registration (if any). Idempotent and thread-safe via the
-        /// gate + first-disposer guard.
-        /// </summary>
-        public void Dispose()
-        {
-            IDisposable? registration;
-            lock (_gate)
-            {
-                if (_disposed)
-                    return;
-                _disposed = true;
-                registration = _registration;
-                _registration = null;
-                _registeredOn = null;
-            }
-
-            // Remove from the registry so no future reconnect re-registers it.
-            _facade._subscriptions.TryRemove(this, out _);
-
-            // Dispose the live registration. It belongs to whatever connection was
-            // current when it was created; the only registration we ever hold here
-            // is the most recent successful one. If that connection has since died,
-            // its registration disposable is a harmless no-op (the underlying
-            // notification is already gone); if it is live, this removes the
-            // notification cleanly.
-            registration?.Dispose();
-        }
-    }
 }
