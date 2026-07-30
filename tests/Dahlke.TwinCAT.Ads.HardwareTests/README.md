@@ -34,6 +34,7 @@ If neither variable is set every test shows as **Skipped** — no failure, no co
 | `TWINCAT_TEST_SYMBOL_INT` | *(optional)* | Fully-qualified path of a **writable INT** symbol (e.g. `MAIN.TestInt`). Tests that require a symbol are skipped inline if this is not set. |
 | `TWINCAT_TEST_SYMBOL_STRUCT` | *(optional)* | Fully-qualified path of a **STRUCT or FUNCTION_BLOCK** symbol (e.g. `MAIN.TestStruct`). Read-only — nothing writes it — but it must be **stable for the run**: the container facts compare a notification's decoded tree against a fresh read, which is meaningless for a symbol the PLC program is continuously mutating. |
 | `TWINCAT_TEST_SYMBOL_ARRAY` | *(optional)* | Fully-qualified path of an **ARRAY** symbol (e.g. `MAIN.TestArray`). Same read-only/stable requirement as the struct. This is the highest-value probe: an array notification is the only container whose raw value comes from the payload decode rather than from per-member reads. |
+| `TWINCAT_TEST_SYMBOL_ALARMS` | *(optional)* | Fully-qualified path of an alarm array symbol (`ARRAY[..] OF ST_ErrorEntry`, e.g. `GVL.Errors`). Unlike the struct/array symbols above it need NOT be stable — the alarm test asserts the array *binds*, not that a notification matches a re-read, so a live alarm list is a fine target. The alarm test returns early (and reports as passed, not skipped) when this is unset. |
 
 ## Running locally
 
@@ -44,14 +45,15 @@ export TWINCAT_TEST_PORT=851
 export TWINCAT_TEST_SYMBOL_INT=MAIN.TestInt
 export TWINCAT_TEST_SYMBOL_STRUCT=MAIN.TestStruct
 export TWINCAT_TEST_SYMBOL_ARRAY=MAIN.TestArray
+export TWINCAT_TEST_SYMBOL_ALARMS=GVL.Errors
 
 dotnet test tests/Dahlke.TwinCAT.Ads.HardwareTests --framework net8.0
 ```
 
 > Facts gated on an unset symbol variable return immediately and report as **passed**, not skipped.
-> A run that leaves `TWINCAT_TEST_SYMBOL_STRUCT` / `TWINCAT_TEST_SYMBOL_ARRAY` unset is therefore
-> green while verifying nothing about containers — set all three before treating a green run as
-> release evidence.
+> A run that leaves `TWINCAT_TEST_SYMBOL_STRUCT` / `TWINCAT_TEST_SYMBOL_ARRAY` /
+> `TWINCAT_TEST_SYMBOL_ALARMS` unset is therefore green while verifying nothing about containers
+> (or alarm binding) — set all four before treating a green run as release evidence.
 
 ## Test coverage
 
@@ -71,6 +73,7 @@ dotnet test tests/Dahlke.TwinCAT.Ads.HardwareTests --framework net8.0
 | `ReadValueWithMetadata_StructSymbol_DecodesToAKeyedTree` | `ReadValueWithMetadataAsync` on a struct → keyed tree + `TypeName`/`Category` |
 | `ReadValueWithMetadata_ArraySymbol_DecodesToAnObjectArray` | `ReadValueWithMetadataAsync` on an array → `object?[]` + `TypeName`/`Category` |
 | `HealthCheck_LivePool_ReturnsHealthy` | Health check against live pool → `Healthy` |
+| `AlarmArray_BindsAgainstRealHardware` | `Dahlke.TwinCAT.Ads.Alarms.PlcAlarmBinder` binds a real alarm-array notification without throwing (needs `TWINCAT_TEST_SYMBOL_ALARMS`) |
 
 ## CI
 

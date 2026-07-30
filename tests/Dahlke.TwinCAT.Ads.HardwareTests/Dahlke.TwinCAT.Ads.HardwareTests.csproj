@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Dahlke.TwinCAT.Ads\Dahlke.TwinCAT.Ads.csproj" />
+    <ProjectReference Include="..\..\src\Dahlke.TwinCAT.Ads.Alarms\Dahlke.TwinCAT.Ads.Alarms.csproj" />
   </ItemGroup>
 
 </Project>

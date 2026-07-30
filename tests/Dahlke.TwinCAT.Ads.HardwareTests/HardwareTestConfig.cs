@@ -51,6 +51,18 @@ internal static class HardwareTestConfig
     public static string? SymbolArray =>
         Environment.GetEnvironmentVariable("TWINCAT_TEST_SYMBOL_ARRAY");
 
+    /// <summary>
+    /// Fully-qualified name of an alarm array symbol (<c>ARRAY[..] OF ST_ErrorEntry</c>).
+    /// Set via TWINCAT_TEST_SYMBOL_ALARMS.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="SymbolStruct"/> and <see cref="SymbolArray"/> this symbol need NOT be
+    /// stable: the alarm test asserts the array BINDS, not that a notification matches a
+    /// re-read, so a live alarm list is a perfectly good — arguably better — target.
+    /// </remarks>
+    public static string? SymbolAlarms =>
+        Environment.GetEnvironmentVariable("TWINCAT_TEST_SYMBOL_ALARMS");
+
     /// <summary>Returns true when at least the INT symbol is configured.</summary>
     public static bool HasSymbolInt => !string.IsNullOrWhiteSpace(SymbolInt);
 
@@ -59,4 +71,7 @@ internal static class HardwareTestConfig
 
     /// <summary>Returns true when an array symbol is configured.</summary>
     public static bool HasSymbolArray => !string.IsNullOrWhiteSpace(SymbolArray);
+
+    /// <summary>Returns true when an alarm array symbol is configured.</summary>
+    public static bool HasSymbolAlarms => !string.IsNullOrWhiteSpace(SymbolAlarms);
 }
