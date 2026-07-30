@@ -64,3 +64,17 @@ static Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.operator !=(Dahlke.TwinCAT.Ads.
 static Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.operator ==(Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? left, Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? right) -> bool
 static Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.operator !=(Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? left, Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? right) -> bool
 static Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.operator ==(Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? left, Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? right) -> bool
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.CycleTimeMs.get -> int
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.CycleTimeMs.set -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.PlcAlarmTargetOptions() -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.PlcClock.get -> Dahlke.TwinCAT.Ads.Alarms.PlcClockKind
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.PlcClock.set -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.SymbolPath.get -> string!
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.SymbolPath.set -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmsOptions
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmsOptions.PlcAlarmsOptions() -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmsOptions.Targets.get -> System.Collections.Generic.Dictionary<string!, Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions!>!
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmsOptions.Targets.set -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmsOptions.TextCatalog.get -> string?
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmsOptions.TextCatalog.set -> void
