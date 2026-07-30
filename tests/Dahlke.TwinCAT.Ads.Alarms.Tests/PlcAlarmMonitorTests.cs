@@ -39,24 +39,32 @@ public class PlcAlarmMonitorTests
         };
 
     /// <summary>
-    /// Builds a host with one simulated target whose alarm array is seeded empty,
+    /// Builds a host with one simulated target per entry, each alarm array seeded empty,
     /// starts it, and returns the running host plus its monitor.
     /// </summary>
-    private static async Task<(IHost Host, IPlcAlarmMonitor Monitor)> StartAsync()
+    private static async Task<(IHost Host, IPlcAlarmMonitor Monitor)> StartTargetsAsync(
+        params (string PlcId, string SymbolPath)[] targets)
     {
         var builder = Host.CreateApplicationBuilder();
 
         builder.Services.AddTwinCatAdsSimulation(o =>
         {
-            o.Targets[PlcId] = new PlcTargetOptions
+            for (var i = 0; i < targets.Length; i++)
             {
-                AmsNetId = "1.2.3.4.5.6",
-                InitialValues = { [Path] = Array.Empty<object?>() },
-            };
+                o.Targets[targets[i].PlcId] = new PlcTargetOptions
+                {
+                    // Distinct per target — two PLCs never share an AMS Net ID.
+                    AmsNetId = $"1.2.3.4.5.{i + 1}",
+                    InitialValues = { [targets[i].SymbolPath] = Array.Empty<object?>() },
+                };
+            }
         });
 
         builder.Services.Configure<PlcAlarmsOptions>(o =>
-            o.Targets[PlcId] = new PlcAlarmTargetOptions { SymbolPath = Path, CycleTimeMs = 50 });
+        {
+            foreach (var (plcId, symbolPath) in targets)
+                o.Targets[plcId] = new PlcAlarmTargetOptions { SymbolPath = symbolPath, CycleTimeMs = 50 };
+        });
 
         builder.Services.AddTwinCatAdsAlarms(builder.Configuration);
 
@@ -65,6 +73,10 @@ public class PlcAlarmMonitorTests
 
         return (host, host.Services.GetRequiredService<IPlcAlarmMonitor>());
     }
+
+    /// <summary>The single-target host every test but the multi-target one runs against.</summary>
+    private static Task<(IHost Host, IPlcAlarmMonitor Monitor)> StartAsync() =>
+        StartTargetsAsync((PlcId, Path));
 
     /// <summary>
     /// Puts <paramref name="entries"/> on the simulated PLC as the whole alarm array.
@@ -85,9 +97,10 @@ public class PlcAlarmMonitorTests
     /// already sees member paths that agree with it.
     /// </para>
     /// </remarks>
-    private static async Task WriteArrayAsync(IHost host, params object?[] entries)
+    private static async Task WriteArrayToAsync(
+        IHost host, string plcId, string path, params object?[] entries)
     {
-        var connection = host.Services.GetRequiredService<IAdsConnectionPool>().GetConnection(PlcId);
+        var connection = host.Services.GetRequiredService<IAdsConnectionPool>().GetConnection(plcId);
 
         for (var slot = 0; slot < entries.Length; slot++)
         {
@@ -96,14 +109,17 @@ public class PlcAlarmMonitorTests
                 // Nested containers (PLCTimeStamp) are skipped: nothing addresses them by
                 // member path, and mirroring them would need recursion for no coverage.
                 if (value is not IDictionary<string, object?>)
-                    await connection.WriteValueAsync($"{Path}[{slot}].{member}", value!, CancellationToken.None);
+                    await connection.WriteValueAsync($"{path}[{slot}].{member}", value!, CancellationToken.None);
             }
         }
 
         // A NEW array instance every time: the simulated store's change comparer falls
         // back to reference equality for object?[], so a mutated array would not fire.
-        await connection.WriteValueAsync(Path, entries, CancellationToken.None);
+        await connection.WriteValueAsync(path, entries, CancellationToken.None);
     }
+
+    private static Task WriteArrayAsync(IHost host, params object?[] entries) =>
+        WriteArrayToAsync(host, PlcId, Path, entries);
 
     /// <summary>Waits for a condition the notification thread will satisfy.</summary>
     private static async Task WaitForAsync(Func<bool> condition)
@@ -160,6 +176,64 @@ public class PlcAlarmMonitorTests
 
         Assert.Single(monitor.GetOutstanding(PlcId));
         Assert.Empty(monitor.GetOutstanding("someOtherPlc"));
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task TwoTargets_AreTrackedIndependently()
+    {
+        const string OtherPlcId = "plc2";
+        const string OtherPath = "GVL.Faults";
+
+        var (host, monitor) = await StartTargetsAsync((PlcId, Path), (OtherPlcId, OtherPath));
+        using var _ = host;
+
+        await WriteArrayToAsync(host, PlcId, Path, Entry("BMK1Err404"));
+        await WriteArrayToAsync(host, OtherPlcId, OtherPath, Entry("BMK2Err500", errorCode: 500));
+
+        await WaitForAsync(() => monitor.GetOutstanding().Count == 2);
+
+        var first = Assert.Single(monitor.GetOutstanding(PlcId));
+        var second = Assert.Single(monitor.GetOutstanding(OtherPlcId));
+
+        Assert.Equal("BMK1Err404", first.Key);
+        Assert.Equal("BMK2Err500", second.Key);
+
+        // Each alarm reports the target it was actually read from — not whichever
+        // subscription fired last. A loop variable captured once for all targets, rather
+        // than per iteration, routes every notification into one store and fails here.
+        Assert.Equal(PlcId, first.PlcId);
+        Assert.Equal(OtherPlcId, second.PlcId);
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task MalformedSnapshot_IsDroppedAndTheSubscriptionRecovers()
+    {
+        var (host, monitor) = await StartAsync();
+        using var _ = host;
+
+        await WriteArrayAsync(host, Entry("BMK1Err404"));
+        await WaitForAsync(() => monitor.GetOutstanding().Count == 1);
+
+        // An entry missing sKey: the binder throws PlcAlarmShapeException, which the
+        // monitor logs at Error and drops. Simulated callbacks run synchronously on the
+        // writing thread, so once the write returns the bad snapshot has been handled —
+        // there is nothing left to wait for.
+        var malformed = Entry("BMK1Err404");
+        malformed.Remove("sKey");
+        await WriteArrayAsync(host, malformed);
+
+        // Dropped whole: the outstanding set still shows the last GOOD reading rather
+        // than a partially-bound one.
+        Assert.Equal("BMK1Err404", Assert.Single(monitor.GetOutstanding()).Key);
+
+        // The half that matters — a subscription that died on the bad notification would
+        // still satisfy every assertion above.
+        await WriteArrayAsync(host, Entry("BMK1Err404"), Entry("BMK2Err500", errorCode: 500));
+        await WaitForAsync(() => monitor.GetOutstanding().Count == 2);
 
         await host.StopAsync();
     }

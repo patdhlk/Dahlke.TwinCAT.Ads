@@ -12,9 +12,21 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 /// </para>
 /// <para>
 /// <b>Threading.</b> <see cref="GetOutstanding()"/> is safe from any thread and never
-/// blocks. <see cref="AlarmChanged"/> and <see cref="Transitions"/> emit on the ADS
-/// notification thread — handlers must be quick and thread-safe, and an exception
-/// thrown by one is caught and logged rather than interrupting delivery to the others.
+/// blocks. <see cref="AlarmChanged"/> and <see cref="Transitions"/> both emit on the ADS
+/// notification thread, so handlers and subscribers must be quick and thread-safe.
+/// </para>
+/// <para>
+/// <b>A throwing consumer is treated differently on the two paths, deliberately.</b>
+/// <see cref="AlarmChanged"/> handlers ARE isolated from one another: each is invoked
+/// separately, and an exception from one is caught and logged without stopping the
+/// others from receiving that transition. <see cref="Transitions"/> subscribers are NOT
+/// isolated — they follow the standard Rx contract, under which throwing from
+/// <c>OnNext</c> is a bug in the observer, so a subscriber that throws can prevent
+/// subscribers after it from seeing that transition. The asymmetry is intentional and
+/// should not be "fixed": an observable that silently swallowed observer exceptions
+/// would behave unlike every other one an Rx consumer composes with. What both paths do
+/// guarantee is that the exception never escapes onto the notification thread — the
+/// subscription survives either way, and the NEXT transition is still delivered.
 /// </para>
 /// </remarks>
 public interface IPlcAlarmMonitor
@@ -31,6 +43,11 @@ public interface IPlcAlarmMonitor
     IReadOnlyCollection<PlcAlarm> GetOutstanding(string plcId);
 
     /// <summary>Raised for every alarm state change.</summary>
+    /// <remarks>
+    /// Handlers are isolated from one another — a handler that throws is logged and does
+    /// not stop delivery to the handlers registered after it. See the type-level
+    /// threading remarks for how this differs from <see cref="Transitions"/>.
+    /// </remarks>
     event EventHandler<AlarmTransition>? AlarmChanged;
 
     /// <summary>
@@ -38,6 +55,11 @@ public interface IPlcAlarmMonitor
     /// subscribers observe the one underlying subscription, and subscribing does not
     /// replay history.
     /// </summary>
+    /// <remarks>
+    /// Standard Rx semantics apply: do not throw from <c>OnNext</c>. Unlike
+    /// <see cref="AlarmChanged"/>, subscribers here are NOT isolated from one another.
+    /// See the type-level threading remarks.
+    /// </remarks>
     IObservable<AlarmTransition> Transitions { get; }
 
     /// <summary>
