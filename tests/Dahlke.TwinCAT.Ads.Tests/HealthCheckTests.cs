@@ -122,6 +122,33 @@ public class HealthCheckTests
     }
 
     // =========================================================================
+    // Seam: the health check depends on IAdsConnectionPool alone, so ANY pool
+    // implementation can drive it — no concrete AdsConnectionPool required.
+    // =========================================================================
+
+    [Fact]
+    public async Task HealthCheck_IsDrivableThroughTheInterface()
+    {
+        var pool = new FakeConnectionPool(
+            new Dictionary<string, IAdsConnection>(StringComparer.OrdinalIgnoreCase),
+            targetStates:
+            [
+                new PlcTargetStatus("plc1", ConnectionMode.Real, ConnectionState.Connected),
+                new PlcTargetStatus("plc2", ConnectionMode.Simulated, ConnectionState.Disconnected),
+            ]);
+
+        var check = new TwinCatAdsHealthCheck(pool);
+        var result = await check.CheckHealthAsync(new HealthCheckContext
+        {
+            Registration = new HealthCheckRegistration("test", _ => check, null, null)
+        });
+
+        Assert.Equal(HealthStatus.Degraded, result.Status);
+        Assert.Equal("Connected", Assert.Contains("plc1", result.Data).ToString());
+        Assert.Equal("Disconnected", Assert.Contains("plc2", result.Data).ToString());
+    }
+
+    // =========================================================================
     // Unit tests: health logic against a pool in known states
     // =========================================================================
 

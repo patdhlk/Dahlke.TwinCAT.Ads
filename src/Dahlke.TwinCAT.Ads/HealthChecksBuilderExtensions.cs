@@ -53,7 +53,7 @@ public static class HealthChecksBuilderExtensions
     /// <b>Operator note:</b> <c>AddTwinCatAds</c>
     /// (or <c>AddTwinCatAdsSimulation</c>) must be registered in DI before calling
     /// this method. The connection pool is resolved lazily via
-    /// <c>sp.GetRequiredService&lt;AdsConnectionPool&gt;()</c> at the first health-check
+    /// <c>sp.GetRequiredService&lt;IAdsConnectionPool&gt;()</c> at the first health-check
     /// evaluation, not at registration time. If the pool is absent the failure surfaces
     /// late — as a runtime <see cref="System.InvalidOperationException"/> thrown from DI
     /// on the first health-check invocation, rather than at application startup.
@@ -67,7 +67,7 @@ public static class HealthChecksBuilderExtensions
     {
         builder.Add(new HealthCheckRegistration(
             name,
-            sp => new TwinCatAdsHealthCheck(sp.GetRequiredService<AdsConnectionPool>()),
+            sp => new TwinCatAdsHealthCheck(sp.GetRequiredService<IAdsConnectionPool>()),
             failureStatus,
             tags));
 

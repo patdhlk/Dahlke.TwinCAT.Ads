@@ -1,1 +1,18 @@
 #nullable enable
+Dahlke.TwinCAT.Ads.IAdsConnectionPool.GetTargetStates() -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.PlcTargetStatus!>!
+Dahlke.TwinCAT.Ads.PlcTargetStatus
+Dahlke.TwinCAT.Ads.PlcTargetStatus.<Clone>$() -> Dahlke.TwinCAT.Ads.PlcTargetStatus!
+Dahlke.TwinCAT.Ads.PlcTargetStatus.Deconstruct(out string! PlcId, out Dahlke.TwinCAT.Ads.ConnectionMode Mode, out Dahlke.TwinCAT.Ads.ConnectionState State) -> void
+Dahlke.TwinCAT.Ads.PlcTargetStatus.Equals(Dahlke.TwinCAT.Ads.PlcTargetStatus? other) -> bool
+Dahlke.TwinCAT.Ads.PlcTargetStatus.Mode.get -> Dahlke.TwinCAT.Ads.ConnectionMode
+Dahlke.TwinCAT.Ads.PlcTargetStatus.Mode.init -> void
+Dahlke.TwinCAT.Ads.PlcTargetStatus.PlcId.get -> string!
+Dahlke.TwinCAT.Ads.PlcTargetStatus.PlcId.init -> void
+Dahlke.TwinCAT.Ads.PlcTargetStatus.PlcTargetStatus(string! PlcId, Dahlke.TwinCAT.Ads.ConnectionMode Mode, Dahlke.TwinCAT.Ads.ConnectionState State) -> void
+Dahlke.TwinCAT.Ads.PlcTargetStatus.State.get -> Dahlke.TwinCAT.Ads.ConnectionState
+Dahlke.TwinCAT.Ads.PlcTargetStatus.State.init -> void
+override Dahlke.TwinCAT.Ads.PlcTargetStatus.Equals(object? obj) -> bool
+override Dahlke.TwinCAT.Ads.PlcTargetStatus.GetHashCode() -> int
+override Dahlke.TwinCAT.Ads.PlcTargetStatus.ToString() -> string!
+static Dahlke.TwinCAT.Ads.PlcTargetStatus.operator !=(Dahlke.TwinCAT.Ads.PlcTargetStatus? left, Dahlke.TwinCAT.Ads.PlcTargetStatus? right) -> bool
+static Dahlke.TwinCAT.Ads.PlcTargetStatus.operator ==(Dahlke.TwinCAT.Ads.PlcTargetStatus? left, Dahlke.TwinCAT.Ads.PlcTargetStatus? right) -> bool

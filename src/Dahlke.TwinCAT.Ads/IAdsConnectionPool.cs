@@ -92,6 +92,25 @@ public interface IAdsConnectionPool
     void ForceReconnect(string plcId);
 
     /// <summary>
+    /// Returns a snapshot of per-target connection status, one entry per
+    /// configured target.
+    /// </summary>
+    /// <remarks>
+    /// The list is ordered by target identifier (ordinal, case-insensitive) for a
+    /// stable, predictable representation in dashboards and health-check
+    /// responses. This is a lightweight read of in-memory state and does not
+    /// block. <see cref="ConnectionState.Connected"/> here means the link has
+    /// been proven by a real ADS round trip and is kept honest by the pool's
+    /// periodic health check — it is never derived from a mere local socket
+    /// association.
+    /// </remarks>
+    /// <returns>
+    /// A read-only list of <see cref="PlcTargetStatus"/> snapshots, ordered by
+    /// target identifier.
+    /// </returns>
+    IReadOnlyList<PlcTargetStatus> GetTargetStates();
+
+    /// <summary>
     /// Test-support API: attempts to retrieve the live
     /// <see cref="SimulatedAdsConnection"/> backing a simulated target so that test
     /// code can seed initial values or inspect simulated state directly, bypassing
