@@ -80,3 +80,11 @@ Dahlke.TwinCAT.Ads.Alarms.PlcAlarmsOptions.Targets.get -> System.Collections.Gen
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmsOptions.Targets.set -> void
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmsOptions.TextCatalog.get -> string?
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmsOptions.TextCatalog.set -> void
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.AcknowledgeAsync(string! plcId, string! alarmKey, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<bool>!
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.AlarmChanged -> System.EventHandler<Dahlke.TwinCAT.Ads.Alarms.AlarmTransition!>?
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.GetOutstanding() -> System.Collections.Generic.IReadOnlyCollection<Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!>!
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.GetOutstanding(string! plcId) -> System.Collections.Generic.IReadOnlyCollection<Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!>!
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.Transitions.get -> System.IObservable<Dahlke.TwinCAT.Ads.Alarms.AlarmTransition!>!
+Dahlke.TwinCAT.Ads.Alarms.AlarmsServiceCollectionExtensions
+static Dahlke.TwinCAT.Ads.Alarms.AlarmsServiceCollectionExtensions.AddTwinCatAdsAlarms(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
