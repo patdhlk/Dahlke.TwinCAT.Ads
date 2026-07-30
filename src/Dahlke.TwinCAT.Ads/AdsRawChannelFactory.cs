@@ -46,7 +46,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     private readonly ILogger<AdsRawChannelFactory> _logger;
     private readonly TimeProvider _timeProvider;
 
-    private CancellationTokenSource? _sweeperCts;
+    private OwnedLoopCancellation? _sweeper;
     private Task? _sweeperTask;
     private bool _stopped;
 
@@ -281,24 +281,24 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
     public Task StartAsync(CancellationToken ct)
     {
-        _sweeperCts = new CancellationTokenSource();
-        _sweeperTask = RunSweeperAsync(_sweeperCts);
+        _sweeper = new OwnedLoopCancellation();
+        _sweeperTask = RunSweeperAsync(_sweeper);
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// The sweeper owns the token source it was handed and is the only thing that
-    /// disposes it, in a <c>finally</c> after it has exited and can no longer hold
-    /// a registration. Every other teardown path cancels only. This is the
-    /// ownership discipline #15 established.
+    /// The sweeper owns the signal it was handed: it alone retires it, in this
+    /// <c>finally</c>, after it has exited. Every other teardown path requests
+    /// stop only. The discipline — including why an abnormal exit here cannot
+    /// break a later teardown path — lives in <see cref="OwnedLoopCancellation"/>.
     /// </summary>
-    private async Task RunSweeperAsync(CancellationTokenSource cts)
+    private async Task RunSweeperAsync(OwnedLoopCancellation signal)
     {
         try
         {
-            while (!cts.Token.IsCancellationRequested)
+            while (!signal.Token.IsCancellationRequested)
             {
-                await Task.Delay(SweepInterval, _timeProvider, cts.Token).ConfigureAwait(false);
+                await Task.Delay(SweepInterval, _timeProvider, signal.Token).ConfigureAwait(false);
                 SweepOnce();
             }
         }
@@ -308,17 +308,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
         }
         finally
         {
-            // Retract the source from the field BEFORE disposing it, so a teardown
-            // path can never find and cancel a disposed source. On the normal exit
-            // RequestSweeperStop has already nulled the field and this is a no-op;
-            // it earns its keep on an ABNORMAL exit — anything escaping SweepOnce
-            // outside its per-channel try, realistically a throwing ILogger in the
-            // warning path — where the field would otherwise still point here and
-            // the next StopAsync/Dispose would throw ObjectDisposedException before
-            // shutting a single channel down. CompareExchange, not Exchange: only
-            // retract OUR source, never one a later StartAsync installed.
-            Interlocked.CompareExchange(ref _sweeperCts, null, cts);
-            cts.Dispose();
+            signal.OwnerRetire();
         }
     }
 
@@ -343,35 +333,23 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
     }
 
     /// <summary>
-    /// Cancels the sweeper without disposing its source, at most once.
+    /// The one teardown entry both <see cref="StopAsync"/> and
+    /// <see cref="Dispose"/> funnel through, encoding stop-before-sweep as code:
+    /// <c>_stopped</c> is raised FIRST (load-bearing — see
+    /// <see cref="CreateTransport"/>: whichever side takes a channel's transport
+    /// gate sees a consistent answer), then the sweeper is asked to stop
+    /// (request-only; the sweeper retires its own signal — see
+    /// <see cref="OwnedLoopCancellation"/>).
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The source is taken out of the field with an <see cref="Interlocked"/>
-    /// exchange so exactly ONE teardown path ever cancels it, no matter how many
-    /// run or in what order. The normal host sequence is
-    /// <see cref="StopAsync"/> then <see cref="Dispose"/>: by the time
-    /// <see cref="Dispose"/> runs, <see cref="StopAsync"/> has awaited the sweeper
-    /// and the sweeper has disposed the source in its <c>finally</c>. A second
-    /// <c>Cancel()</c> on that source throws
-    /// <see cref="ObjectDisposedException"/> — <c>Cancel()</c> is NOT
-    /// safe after disposal — so the second path must find nothing to cancel rather
-    /// than be guarded by a swallowed exception.
-    /// </para>
-    /// <para>
-    /// This still never disposes the source: that remains the sweeper's job alone,
-    /// which is the discipline #15 established.
-    /// </para>
-    /// </remarks>
-    private void RequestSweeperStop() =>
-        Interlocked.Exchange(ref _sweeperCts, null)?.Cancel();
+    private void BeginTeardown()
+    {
+        Volatile.Write(ref _stopped, true);
+        _sweeper?.RequestStop();
+    }
 
     public async Task StopAsync(CancellationToken ct)
     {
-        // Ordered BEFORE the shutdown loop, and load-bearing: see CreateTransport.
-        Volatile.Write(ref _stopped, true);
-
-        RequestSweeperStop();   // cancel only — the sweeper disposes its own source
+        BeginTeardown();
 
         if (_sweeperTask is { } task)
             await task.ConfigureAwait(false);
@@ -382,9 +360,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
 
     public void Dispose()
     {
-        Volatile.Write(ref _stopped, true);   // before the loop: see CreateTransport
-
-        RequestSweeperStop();   // cancel only, never dispose: see RunSweeperAsync
+        BeginTeardown();
 
         foreach (var (_, channel) in _channels)
             channel.Shutdown();

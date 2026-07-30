@@ -46,19 +46,14 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     private readonly DurableSubscriptionRegistry<IManagedRawConnection, uint, RawSubscriptionInfo> _subscriptions;
 
     /// <summary>
-    /// Set once, at <see cref="Shutdown"/>, so work holding the transport gate can
-    /// abandon what is about to be thrown away.
+    /// Raised at most once, at <see cref="Shutdown"/> (which runs from BOTH the
+    /// factory's <c>StopAsync</c> and <c>Dispose</c>), so work holding the
+    /// transport gate can abandon what is about to be thrown away. A signal with
+    /// no owning loop, deliberately never retired — the teardown discipline, and
+    /// why an unretired signal is safe, live in
+    /// <see cref="OwnedLoopCancellation"/>.
     /// </summary>
-    /// <remarks>
-    /// Never disposed, by the same rule <c>AdsRawChannelFactory.RequestSweeperStop</c>
-    /// follows: <see cref="Shutdown"/> runs from BOTH <c>StopAsync</c> and
-    /// <c>Dispose</c>, and <see cref="CancellationTokenSource.Cancel()"/> is not safe
-    /// after disposal. A source nobody disposes cannot be cancelled after disposal.
-    /// It holds no timer and no registration of its own; the linked sources built
-    /// from it are disposed per iteration, which unregisters them here.
-    /// </remarks>
-    private readonly CancellationTokenSource _shutdown = new();
-    private int _shutdownRequested;
+    private readonly OwnedLoopCancellation _shutdown = new();
 
     private IManagedRawConnection? _transport;
     private long _lastUseTicks;
@@ -87,7 +82,7 @@ internal sealed class AdsRawChannel : IAdsRawChannel
                 var linked = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, timeout.Token);
                 return new SubscriptionRestoreBound(linked.Token, linked, timeout);
             },
-            stopRestoring: () => _shutdown.IsCancellationRequested,
+            stopRestoring: () => _shutdown.IsStopRequested,
             onRestoreFailure: (info, ex) => _logger.LogWarning(ex,
                 "Could not restore raw subscription {NetId}:{Port} IG=0x{IG:X} IO={IO} after a transport drop.",
                 AmsNetId, Port, info.IndexGroup, info.IndexOffset));
@@ -507,7 +502,7 @@ internal sealed class AdsRawChannel : IAdsRawChannel
     /// </remarks>
     internal void Shutdown()
     {
-        RequestShutdown();
+        _shutdown.RequestStop();
 
         _transportGate.Wait();
         try
@@ -519,16 +514,6 @@ internal sealed class AdsRawChannel : IAdsRawChannel
         {
             _transportGate.Release();
         }
-    }
-
-    /// <summary>
-    /// Raises the shutdown signal, at most once. Never disposes the source — see
-    /// <see cref="_shutdown"/>.
-    /// </summary>
-    private void RequestShutdown()
-    {
-        if (Interlocked.Exchange(ref _shutdownRequested, 1) == 0)
-            _shutdown.Cancel();
     }
 
     /// <summary>
