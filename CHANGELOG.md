@@ -167,7 +167,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of laundering it.** Both keys were validated with `AmsNetId.TryParse`, which returns
   `true` for `999.1.1.1.1.1` and yields `0.1.1.1.1.1` — the octet is *zeroed*, not reduced modulo
   256, so `256`, `300`, `512` and `999` all collapsed to one address. A host with a typo'd target
-  therefore booted, reported healthy, and talked to a device nobody wrote down; a typo'd
+  therefore booted, could report healthy, and talked to a device nobody wrote down; a typo'd
   `AmsRouter:NetId` started the embedded router under an address every route it served could only
   reach by accident. Both now fail at startup, naming the key and the offending value.
 

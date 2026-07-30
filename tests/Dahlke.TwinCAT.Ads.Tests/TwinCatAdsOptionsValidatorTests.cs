@@ -583,6 +583,8 @@ public class TwinCatAdsOptionsValidatorTests
     [InlineData("999.1.1.1.1.1")]
     [InlineData("256.1.1.1.1.1")]
     [InlineData("1.2.3.4.5.256")]
+    [InlineData("1.2.3.4.5")]
+    [InlineData(" 1.2.3.4.5.6")]
     public void Target_LaunderableAmsNetId_FailsAtStartup(string amsNetId)
     {
         var options = ValidOptions();
@@ -594,6 +596,10 @@ public class TwinCatAdsOptionsValidatorTests
         var failure = Assert.Single(result.Failures!);
         Assert.Contains("PlcTargets:plc1:AmsNetId", failure);
         Assert.Contains(amsNetId, failure);
+
+        // The "remove the key" remedy is AmsRouter:NetId's alone — a target has no
+        // such escape hatch, and wiring the remedy into every site would be wrong.
+        Assert.DoesNotContain("system router", failure);
     }
 
     /// <summary>
@@ -605,6 +611,8 @@ public class TwinCatAdsOptionsValidatorTests
     [InlineData("999.1.1.1.1.1")]
     [InlineData("256.1.1.1.1.1")]
     [InlineData("1.2.3.4.5.256")]
+    [InlineData("1.2.3.4.5")]
+    [InlineData(" 1.2.3.4.5.6")]
     public void Router_LaunderableNetId_FailsAtStartup(string netId)
     {
         var result = Validate(ValidOptions(routerNetId: netId));

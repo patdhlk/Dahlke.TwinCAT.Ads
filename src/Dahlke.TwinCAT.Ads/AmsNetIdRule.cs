@@ -14,7 +14,8 @@ namespace Dahlke.TwinCAT.Ads;
 /// <c>AmsNetId.TryParse("999.1.1.1.1.1")</c> returns <see langword="true"/> and
 /// yields <c>0.1.1.1.1.1</c> — the octet is ZEROED, not reduced modulo 256, so
 /// <c>256</c>, <c>257</c>, <c>300</c>, <c>512</c> and <c>999</c> all collapse to the
-/// same address. Counting six segments has the same hole.
+/// same address. Counting six segments, as this library's own check did before it
+/// range-checked, has the same hole: the range is the part that matters.
 /// </para>
 /// <para>
 /// <b>Measured, not folklore:</b>
@@ -45,6 +46,9 @@ internal static class AmsNetIdRule
     /// Six dot-separated decimal octets, each in 0-255.
     /// </summary>
     /// <remarks>
+    /// The primitive. A new consumer wants <see cref="Require"/> (declarations) or
+    /// <see cref="Normalise(string, out bool)"/> (lookups); this is exposed for the
+    /// grammar tests, and for those two to share.
     /// <see cref="NumberStyles.None"/> per octet: no sign, no whitespace, no hex, so
     /// <c>"+1"</c>, <c>" 1"</c> and <c>"0x1"</c> are all malformed in an AMS Net ID.
     /// A <see langword="null"/> is malformed rather than an exception, because the

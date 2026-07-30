@@ -1,3 +1,5 @@
+using TwinCAT.Ads;
+
 namespace Dahlke.TwinCAT.Ads.Tests;
 
 /// <summary>
@@ -25,7 +27,9 @@ public class AmsNetIdRuleTests
     /// <c>"999.1.1.1.1.1"</c> parses true and silently becomes <c>"0.1.1.1.1.1"</c>,
     /// so <c>256</c>, <c>300</c> and <c>999</c> all collapse to one address.
     /// Delegating would let a declaration naming a device that does not exist pass
-    /// startup validation. Counting six segments has the same hole.
+    /// startup validation. Counting six segments, as this library's own check did
+    /// before it range-checked, has the same hole: the range is the part that
+    /// matters.
     /// </summary>
     [Theory]
     [InlineData("1.2.3.4.5")]                       // five octets
@@ -50,6 +54,26 @@ public class AmsNetIdRuleTests
     [Fact]
     public void IsWellFormed_RejectsNull_RatherThanThrowing() =>
         Assert.False(AmsNetIdRule.IsWellFormed(null));
+
+    /// <summary>
+    /// The segment-count check is ours to own, not a Beckhoff hole to patch.
+    /// </summary>
+    /// <remarks>
+    /// <b>Measured, not folklore:</b> unlike the octet RANGE — which
+    /// <c>AmsNetId.TryParse</c> launders — a wrong segment count is something Beckhoff
+    /// already rejects. Pinned so the class doc's claim about which half of the rule is
+    /// load-bearing stays honest, and so a future Beckhoff version that starts
+    /// ACCEPTING these says so here rather than silently widening what
+    /// <see cref="AmsNetIdRule.Require"/> lets through.
+    /// </remarks>
+    [Theory]
+    [InlineData("1.2.3.4.5")]
+    [InlineData("1.2.3.4.5.6.7")]
+    public void AmsNetIdTryParse_AlreadyRejectsAWrongSegmentCount(string netId)
+    {
+        Assert.False(AmsNetId.TryParse(netId, out _));
+        Assert.False(AmsNetIdRule.IsWellFormed(netId));
+    }
 
     // ------------------------------------------------------------------
     // Require
