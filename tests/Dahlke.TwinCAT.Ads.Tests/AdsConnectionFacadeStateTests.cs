@@ -158,6 +158,7 @@ public class AdsConnectionFacadeStateTests
         rec.Attach(connection);
 
         var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
         first.IsAliveResults.Enqueue(false); // first health check fails -> rebuild
         factory.Enqueue(first);
 
@@ -210,6 +211,7 @@ public class AdsConnectionFacadeStateTests
         IAdsConnection connection = pool.GetConnection("plc1");
 
         var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
         first.IsAliveResults.Enqueue(false); // first health check fails -> rebuild
         factory.Enqueue(first);
 
@@ -264,7 +266,8 @@ public class AdsConnectionFacadeStateTests
 
         // Iteration 1: connect succeeds, first health check fails -> rebuild.
         var first = new FakeManagedConnection("plc1");
-        first.IsAliveResults.Enqueue(false);
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
+        first.IsAliveResults.Enqueue(false); // first health check fails
         factory.Enqueue(first);
 
         // Iteration 2: connect succeeds and stays healthy.
@@ -307,6 +310,7 @@ public class AdsConnectionFacadeStateTests
         rec.Attach(connection);
 
         var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
         first.IsAliveResults.Enqueue(false); // health check fails -> rebuild
         factory.Enqueue(first);
 

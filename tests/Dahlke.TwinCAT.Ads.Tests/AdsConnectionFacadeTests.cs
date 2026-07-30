@@ -376,6 +376,7 @@ public class AdsConnectionFacadeTests
         var (pool, factory, time, signal) = CreatePool("plc1");
 
         var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
         first.IsAliveResults.Enqueue(false); // health check fails -> rebuild
         factory.Enqueue(first);
         var second = new FakeManagedConnection("plc1");
@@ -447,6 +448,7 @@ public class AdsConnectionFacadeTests
 
         // First connection connects, then fails its health check -> teardown.
         var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
         first.IsAliveResults.Enqueue(false); // health check fails -> rebuild
         // Second connection is a RecordingConnection so we can assert the read hit it.
         var second = new RecordingConnection("plc1") { IsConnected = true, ReadResult = 314 };

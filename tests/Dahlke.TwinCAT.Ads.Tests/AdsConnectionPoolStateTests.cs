@@ -17,8 +17,8 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// one reconnect iteration:
 ///   Disconnected (initial)
 ///   -> Connecting   (before ads.Connect())
-///   -> Connected    (after _connections[plcId] = ads)
-///   -> Disconnected (health-check failure / connect exception / teardown)
+///   -> Connected    (after Connect() AND a successful link probe publish the connection)
+///   -> Disconnected (probe failure / health-check failure / connect exception / teardown)
 /// A persistent failure therefore cycles Connecting -> Disconnected each attempt.
 /// </summary>
 public class AdsConnectionPoolStateTests
@@ -160,6 +160,7 @@ public class AdsConnectionPoolStateTests
         rec.Attach(pool);
 
         var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
         first.IsAliveResults.Enqueue(false); // first health check fails -> rebuild
         factory.Enqueue(first);
 
@@ -300,7 +301,8 @@ public class AdsConnectionPoolStateTests
 
         // Iteration 1: connect succeeds, first health check fails -> rebuild.
         var first = new FakeManagedConnection("plc1");
-        first.IsAliveResults.Enqueue(false);
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
+        first.IsAliveResults.Enqueue(false); // first health check fails
         factory.Enqueue(first);
 
         // Iteration 2: connect succeeds and stays healthy.

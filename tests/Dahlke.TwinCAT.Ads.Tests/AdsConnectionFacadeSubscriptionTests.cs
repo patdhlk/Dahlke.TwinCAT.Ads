@@ -385,6 +385,7 @@ public class AdsConnectionFacadeSubscriptionTests
     public async Task PoolIntegration_Subscription_SurvivesHealthCheckReconnect()
     {
         var first = new FakeManagedConnection("plc1");
+        first.IsAliveResults.Enqueue(true);  // connect-time link probe passes
         first.IsAliveResults.Enqueue(false); // health check fails -> rebuild
         var second = new FakeManagedConnection("plc1");
         var factory = new FakeConnectionFactory();
