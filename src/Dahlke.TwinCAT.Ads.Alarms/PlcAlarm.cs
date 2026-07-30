@@ -60,7 +60,7 @@ public sealed record PlcAlarm
     public required string PlcId { get; init; }
 
     /// <summary>
-    /// Human-readable text resolved from <c>IAlarmTextCatalog</c> by
+    /// Human-readable text resolved from <see cref="IAlarmTextCatalog"/> by
     /// <see cref="Key"/>, or <see langword="null"/> when no catalog is configured or
     /// the key is absent from it.
     /// </summary>

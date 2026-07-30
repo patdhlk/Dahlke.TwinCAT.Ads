@@ -1,4 +1,6 @@
 #nullable enable
+Dahlke.TwinCAT.Ads.Alarms.IAlarmTextCatalog
+Dahlke.TwinCAT.Ads.Alarms.IAlarmTextCatalog.Resolve(string! alarmKey) -> string?
 Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmShapeException
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmShapeException.PlcAlarmShapeException(string! message) -> void

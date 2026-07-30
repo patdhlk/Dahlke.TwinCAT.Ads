@@ -53,7 +53,7 @@ public sealed class PlcAlarmsOptions
     /// One catalog serves the fleet: <c>sKey</c> is <c>'&lt;BMK&gt;Err&lt;Code&gt;'</c>
     /// and BMKs identify equipment across the plant, so the key is already globally
     /// meaningful. A deployment needing per-target text registers its own
-    /// <c>IAlarmTextCatalog</c>.
+    /// <see cref="IAlarmTextCatalog"/>.
     /// </remarks>
     public string? TextCatalog { get; set; }
 
