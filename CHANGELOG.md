@@ -78,9 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also retires the slot problem entirely: slots are permanent and reused, so the old path had
   to read a slot's `sKey` back before writing it, and a window remained between that read and
   the write. There is no slot in the call now, so there is no window. A `false` return means
-  the PLC has nothing by that key — never that it refused, which raises
-  `PlcAlarmAcknowledgeException` instead, so a caller can always tell "it is gone" from
-  "try again".
+  there was nothing to acknowledge, in any of three ways: the target is not monitored, the
+  alarm is not in that target's outstanding set, or the PLC itself has nothing by that key.
+  The first two are answered locally and never reach the PLC at all. What `false` never means
+  is that the PLC refused — that raises `PlcAlarmAcknowledgeException`, so a caller can always
+  tell "it is gone" from "try again".
 
   **Which function block, what it is called, and how its answer reads is the vendor's
   business.** `IPlcAlarmDialect` is that seam: one implementation binds the notification and

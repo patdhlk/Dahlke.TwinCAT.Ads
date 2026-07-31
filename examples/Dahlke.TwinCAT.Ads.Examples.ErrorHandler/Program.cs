@@ -85,11 +85,13 @@ internal sealed class SimulatedPlcDriver(
     private const string PlcId = "plc1";
 
     // The array is a member of the function block that owns acknowledgement, so the shipped
-    // dialect derives 'GVL.ErrorHandler' by trimming the last segment. AcknowledgeInstancePath
+    // dialect derives 'MAIN.ErrorHandler' by trimming the last segment. AcknowledgeInstancePath
     // is left unset in appsettings.json precisely to exercise that derivation — a layout where
-    // the array lives elsewhere would have to set it.
-    private const string AlarmArrayPath = "GVL.ErrorHandler.aHmiAlarms";
-    private const string HandlerInstancePath = "GVL.ErrorHandler";
+    // the array lives elsewhere would have to set it. This is the reference rack's layout, and
+    // the one spelling used throughout this repository; --real against any other PLC needs
+    // SymbolPath changed to match that PLC.
+    private const string AlarmArrayPath = "MAIN.ErrorHandler.aHmiAlarms";
+    private const string HandlerInstancePath = "MAIN.ErrorHandler";
 
     // What the seeded AcknowledgeAlarm method remembers. A real FB_ErrorHandler holds this
     // state itself; here it is the only thing connecting the RPC to the arrays written after
@@ -195,7 +197,7 @@ internal sealed class SimulatedPlcDriver(
     /// </summary>
     /// <remarks>
     /// A real PLC exposes the array AND every member path under it: writing
-    /// <c>GVL.ErrorHandler.aHmiAlarms</c> makes <c>GVL.ErrorHandler.aHmiAlarms[0].sKey</c>
+    /// <c>MAIN.ErrorHandler.aHmiAlarms</c> makes <c>MAIN.ErrorHandler.aHmiAlarms[0].sKey</c>
     /// readable in the same breath. The simulated store is FLAT — it holds exactly the paths
     /// written — so each entry's scalar members are mirrored onto their own paths to model
     /// what a PLC would expose, and so anything browsing this target's symbol tree sees the

@@ -26,7 +26,7 @@ public sealed class PlcAlarmTargetOptions
 {
     /// <summary>
     /// The fully-qualified symbol path of the PLC's alarm array, e.g.
-    /// <c>GVL.ErrorHandler.aHmiAlarms</c>. Required.
+    /// <c>MAIN.ErrorHandler.aHmiAlarms</c>. Required.
     /// </summary>
     /// <remarks>
     /// The exemplar has a parent segment on purpose: <see cref="AcknowledgeInstancePath"/> is

@@ -34,7 +34,7 @@ If neither variable is set every test shows as **Skipped** — no failure, no co
 | `TWINCAT_TEST_SYMBOL_INT` | *(optional)* | Fully-qualified path of a **writable INT** symbol (e.g. `MAIN.TestInt`). Tests that require a symbol are skipped inline if this is not set. |
 | `TWINCAT_TEST_SYMBOL_STRUCT` | *(optional)* | Fully-qualified path of a **STRUCT or FUNCTION_BLOCK** symbol (e.g. `MAIN.TestStruct`). Read-only — nothing writes it — but it must be **stable for the run**: the container facts compare a notification's decoded tree against a fresh read, which is meaningless for a symbol the PLC program is continuously mutating. |
 | `TWINCAT_TEST_SYMBOL_ARRAY` | *(optional)* | Fully-qualified path of an **ARRAY** symbol (e.g. `MAIN.TestArray`). Same read-only/stable requirement as the struct. This is the highest-value probe: an array notification is the only container whose raw value comes from the payload decode rather than from per-member reads. |
-| `TWINCAT_TEST_SYMBOL_ALARMS` | *(optional)* | Fully-qualified path of an alarm array symbol (`ARRAY[..] OF ST_ErrorEntry`, e.g. `GVL.Errors`). Unlike the struct/array symbols above it need NOT be stable — the alarm test asserts the array *binds*, not that a notification matches a re-read, so a live alarm list is a fine target. The alarm test returns early (and reports as passed, not skipped) when this is unset. |
+| `TWINCAT_TEST_SYMBOL_ALARMS` | *(optional)* | Fully-qualified path of an alarm array symbol (`ARRAY[..] OF ST_ErrorEntry`, e.g. `MAIN.ErrorHandler.aHmiAlarms`). Unlike the struct/array symbols above it need NOT be stable — the alarm test asserts the array *binds*, not that a notification matches a re-read, so a live alarm list is a fine target. **Give the path a parent segment**: acknowledgement derives the owning function block by trimming this path's last segment, so `GVL.Errors` would derive `GVL`, which owns no function block. Nothing catches that until an acknowledgement is attempted, which the current alarm test never does — but a test that does will. The alarm test returns early (and reports as passed, not skipped) when this is unset. |
 | `TWINCAT_TEST_ROUTER_NETID` | *(optional)* | This host's AMS Net ID for the embedded router (e.g. `192.168.1.220.1.1`). When unset, `Router` is left untouched and the tests connect through the **system router** — which exists on Windows and nowhere else. |
 | `TWINCAT_TEST_ROUTE_ADDRESS` | *(optional)* | The target PLC's IP address or host name (e.g. `192.168.1.223`), used to build the single route from the embedded router to `TWINCAT_TEST_AMSNETID`. |
 
@@ -54,7 +54,7 @@ export TWINCAT_TEST_PORT=851
 export TWINCAT_TEST_SYMBOL_INT=MAIN.TestInt
 export TWINCAT_TEST_SYMBOL_STRUCT=MAIN.TestStruct
 export TWINCAT_TEST_SYMBOL_ARRAY=MAIN.TestArray
-export TWINCAT_TEST_SYMBOL_ALARMS=GVL.Errors
+export TWINCAT_TEST_SYMBOL_ALARMS=MAIN.ErrorHandler.aHmiAlarms
 
 dotnet test tests/Dahlke.TwinCAT.Ads.HardwareTests --framework net8.0
 ```
@@ -114,10 +114,14 @@ dotnet test tests/Dahlke.TwinCAT.Ads.HardwareTests --framework net8.0
 > `Severity` being one of the four known `AlarmSeverity` values), the test also opens its own raw
 > subscription to the same symbol and fails if zero notifications arrived, and captures
 > `PlcAlarmMonitor`'s Error-level log output and fails if any was recorded — both checks fire
-> regardless of whether the array is empty. It does **not** prove that
-> `IPlcAlarmMonitor.AcknowledgeAsync` writes back correctly, and — like every other symbol-gated
-> test here — it still reports **passed while doing nothing** when `TWINCAT_TEST_SYMBOL_ALARMS` is
-> unset, even with `TWINCAT_HARDWARE_TESTS=1` set.
+> regardless of whether the array is empty. It does **not** prove that acknowledgement reaches
+> the PLC — nothing here calls `AcknowledgeAsync`, and covering that needs a different test,
+> since acknowledgement is not a write: it invokes the PLC method named by `AcknowledgeMethod`
+> on the function block derived from `SymbolPath` and resolves the returned `deaReturnType` by
+> name, so the assertions have to be on the call, its result, and the array afterwards no longer
+> carrying the alarm. And — like every other symbol-gated test here — it still reports **passed
+> while doing nothing** when `TWINCAT_TEST_SYMBOL_ALARMS` is unset, even with
+> `TWINCAT_HARDWARE_TESTS=1` set.
 
 ## CI
 

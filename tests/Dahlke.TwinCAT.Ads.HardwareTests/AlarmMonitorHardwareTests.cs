@@ -46,9 +46,16 @@ namespace Dahlke.TwinCAT.Ads.HardwareTests;
 /// <para>
 /// <b>What this test does NOT prove, even when it passes with a symbol configured.</b> It
 /// exercises only the read/bind path of one array notification. It does NOT prove that
-/// <see cref="IPlcAlarmMonitor.AcknowledgeAsync"/> writes back correctly — nothing here
-/// issues an acknowledgement or checks that the PLC observed one — nor does it exercise
-/// transitions, the health check, or the text catalog.
+/// acknowledgement reaches the PLC: nothing here calls
+/// <see cref="IPlcAlarmMonitor.AcknowledgeAsync"/> or checks that the PLC acted on one.
+/// Covering that path needs a different test, because acknowledgement is not a write —
+/// it invokes the PLC method named by <c>AcknowledgeMethod</c> on the function block
+/// derived from <c>SymbolPath</c>, and reads the returned <c>deaReturnType</c> BY NAME
+/// against the members the PLC publishes. So it has to assert on the method call and its
+/// result, and on the array afterwards no longer carrying the alarm — writing
+/// <c>IsAcked</c> and reading it back proves nothing, since that is the mechanism the
+/// hardware disproved. Transitions, the health check and the text catalog are likewise
+/// unexercised here.
 /// </para>
 /// <para>
 /// Requires a PLC with an <c>ARRAY[..] OF ST_ErrorEntry</c> named by
