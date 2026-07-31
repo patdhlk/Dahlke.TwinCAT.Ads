@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Dahlke.TwinCAT.Ads.Alarms.Tests;
 
@@ -303,6 +304,118 @@ public class PlcAlarmMonitorTests
     }
 
     [Fact]
+    public async Task AcknowledgeAsync_DialectDeclines_SurfacesFalse()
+    {
+        // The dialect's "the PLC has no such alarm" has to reach the caller as false. Folding
+        // it into true — or into an exception — would tell an operator to stop asking, or to
+        // retry, when neither is what happened.
+        var dialect = new RecordingDialect { Result = false };
+        var (host, monitor) = await StartAsync(services =>
+            services.AddSingleton<IPlcAlarmDialect>(dialect));
+        using var _ = host;
+
+        await WriteArrayAsync(host, Entry("BMK1Err404"));
+        await WaitForAsync(() => monitor.GetOutstanding().Count == 1);
+
+        var acknowledged = await monitor.AcknowledgeAsync(PlcId, "BMK1Err404", CancellationToken.None);
+
+        Assert.False(acknowledged);
+
+        // It really did reach the dialect — the false is the dialect's answer, not the
+        // monitor's own "not outstanding" early return arriving at the same value.
+        Assert.Equal("BMK1Err404", dialect.LastAcknowledged?.Key);
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task AcknowledgeAsync_DialectRefuses_PropagatesToTheCaller()
+    {
+        // IPlcAlarmMonitor.AcknowledgeAsync documents PlcAlarmAcknowledgeException as something
+        // a caller can catch. Logging it and returning false instead would make that an empty
+        // promise AND collapse "try again" into "it is gone".
+        var dialect = new RecordingDialect
+        {
+            Failure = () => new PlcAlarmAcknowledgeException("PLC 'plc1' is BUSY.", "BUSY", 6),
+        };
+        var (host, monitor) = await StartAsync(services =>
+            services.AddSingleton<IPlcAlarmDialect>(dialect));
+        using var _ = host;
+
+        await WriteArrayAsync(host, Entry("BMK1Err404"));
+        await WaitForAsync(() => monitor.GetOutstanding().Count == 1);
+
+        var ex = await Assert.ThrowsAsync<PlcAlarmAcknowledgeException>(
+            () => monitor.AcknowledgeAsync(PlcId, "BMK1Err404", CancellationToken.None));
+
+        Assert.Equal("BUSY", ex.ReturnCodeName);
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task AcknowledgeAsync_LeavesAnAuditTrail_DistinguishingTheTwoOutcomes()
+    {
+        // On the reference rack a successful acknowledge REMOVES the entry, so the store sees
+        // the alarm vanish and emits Ended, not Acknowledged. Without a log line here, "key Y
+        // was acknowledged on PLC X at time T" is recorded nowhere at all — in an alarms
+        // package, the one event an audit trail most wants.
+        var log = new CapturingLoggerProvider();
+
+        var acknowledging = new RecordingDialect();
+        var (host, monitor) = await StartAsync(services =>
+        {
+            services.AddSingleton<ILoggerProvider>(log);
+            services.AddSingleton<IPlcAlarmDialect>(acknowledging);
+        });
+        using var _ = host;
+
+        await WriteArrayAsync(host, Entry("BMK1Err404"));
+        await WaitForAsync(() => monitor.GetOutstanding().Count == 1);
+
+        await monitor.AcknowledgeAsync(PlcId, "BMK1Err404", CancellationToken.None);
+
+        Assert.Contains(log.Entries, e =>
+            e.StartsWith("Information: ", StringComparison.Ordinal) &&
+            e.Contains("BMK1Err404", StringComparison.Ordinal) &&
+            e.Contains(PlcId, StringComparison.Ordinal));
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task AcknowledgeAsync_Declined_IsLoggedAsSomethingOtherThanAnAcknowledgement()
+    {
+        // Both outcomes are logged, but an operator reading the log has to be able to tell
+        // "the PLC acknowledged it" from "the PLC said it has no such alarm". One line for
+        // both, or the same wording for both, is an audit trail that cannot be audited.
+        var log = new CapturingLoggerProvider();
+
+        var declining = new RecordingDialect { Result = false };
+        var (host, monitor) = await StartAsync(services =>
+        {
+            services.AddSingleton<ILoggerProvider>(log);
+            services.AddSingleton<IPlcAlarmDialect>(declining);
+        });
+        using var _ = host;
+
+        await WriteArrayAsync(host, Entry("BMK1Err404"));
+        await WaitForAsync(() => monitor.GetOutstanding().Count == 1);
+
+        await monitor.AcknowledgeAsync(PlcId, "BMK1Err404", CancellationToken.None);
+
+        var line = Assert.Single(
+            log.Entries, e => e.Contains("BMK1Err404", StringComparison.Ordinal));
+
+        Assert.StartsWith("Information: ", line, StringComparison.Ordinal);
+
+        // The success wording, which the declined path must NOT reuse.
+        Assert.DoesNotContain("Acknowledged BMK1Err404", line, StringComparison.Ordinal);
+
+        await host.StopAsync();
+    }
+
+    [Fact]
     public async Task Notifications_AreBoundByTheRegisteredDialect()
     {
         // The other half of the seam, and the only test in this class that discriminates it.
@@ -339,12 +452,61 @@ public class PlcAlarmMonitorTests
         /// </summary>
         public PlcAlarm? LastAcknowledged { get; private set; }
 
+        /// <summary>What <c>AcknowledgeAsync</c> answers — the PLC acknowledged it, or has no
+        /// such alarm to acknowledge.</summary>
+        public bool Result { get; init; } = true;
+
+        /// <summary>
+        /// When set, <c>AcknowledgeAsync</c> throws this instead of answering — a PLC refusing
+        /// for any reason other than "no such alarm". A factory, so each call throws a fresh
+        /// exception with its own stack.
+        /// </summary>
+        public Func<Exception>? Failure { get; init; }
+
         public IReadOnlyList<PlcAlarm> Bind(AlarmBindContext context) => _binding.Bind(context);
 
         public Task<bool> AcknowledgeAsync(AlarmAcknowledgeContext context, CancellationToken ct)
         {
             LastAcknowledged = context.Alarm;
-            return Task.FromResult(true);
+
+            return Failure is { } failure
+                ? Task.FromException<bool>(failure())
+                : Task.FromResult(Result);
+        }
+    }
+
+    /// <summary>
+    /// Captures every log entry the host emits, so a test can assert on what an operator would
+    /// find in the log afterwards.
+    /// </summary>
+    private sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        private readonly List<string> _entries = [];
+
+        public IReadOnlyList<string> Entries
+        {
+            get { lock (_entries) { return [.. _entries]; } }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new Entry(this);
+
+        public void Dispose() { }
+
+        private void Add(string message)
+        {
+            lock (_entries) { _entries.Add(message); }
+        }
+
+        private sealed class Entry(CapturingLoggerProvider owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter) =>
+                owner.Add($"{logLevel}: {formatter(state, exception)}");
         }
     }
 

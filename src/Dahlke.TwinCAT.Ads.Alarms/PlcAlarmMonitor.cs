@@ -127,9 +127,32 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
         // Everything past the lookup is the vendor's business: which function block owns
         // acknowledgement, what it is called, and how its answer is read. This type knows
         // only that the alarm is outstanding and which connection it belongs to.
-        return await _dialect
+        var acknowledged = await _dialect
             .AcknowledgeAsync(new AlarmAcknowledgeContext(alarm, connection, plcId, target), ct)
             .ConfigureAwait(false);
+
+        // The ONLY trace an acknowledgement leaves. On the reference rack a successful
+        // acknowledge REMOVES the entry from the array, so the next snapshot simply lacks it
+        // and PlcAlarmStore emits Ended — never Acknowledged. Without these lines, "key Y was
+        // acknowledged on PLC X at time T" is recorded nowhere in an alarms package, which is
+        // the one event an audit trail most wants. It belongs here rather than in the dialect
+        // because this is the only layer that knows both the target id and the outcome, and
+        // AlarmAcknowledgeContext deliberately carries no logger for a dialect to use.
+        //
+        // A PlcAlarmAcknowledgeException is deliberately NOT caught: a refusal is the caller's
+        // to handle — burying it in a log line and answering false would collapse "try again"
+        // into "it is gone", the exact distinction that exception type exists to preserve.
+        //
+        // alarm.Key, not alarmKey: the PLC's own spelling, since the lookup is case-insensitive
+        // and the caller's casing need not match what the log should show.
+        if (acknowledged)
+            _logger.LogInformation("Acknowledged {AlarmKey} on {PlcId}", alarm.Key, plcId);
+        else
+            _logger.LogInformation(
+                "{PlcId} has no outstanding {AlarmKey} to acknowledge; it was already gone there",
+                plcId, alarm.Key);
+
+        return acknowledged;
     }
 
     /// <inheritdoc />

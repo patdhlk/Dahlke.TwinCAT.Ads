@@ -44,9 +44,30 @@ public sealed class PlcAlarmTargetOptions
     /// <see cref="SymbolPath"/>, which is right when the alarm array is a member of that block
     /// and wrong otherwise — set it explicitly for any other layout.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This configures the built-in <c>FB_ErrorHandler</c> dialect.</b> A custom
+    /// <see cref="IPlcAlarmDialect"/> receives it on <see cref="AlarmAcknowledgeContext"/> and
+    /// is free to ignore it entirely.
+    /// </para>
+    /// <para>
+    /// <b>The startup rule applies whichever dialect is registered.</b> Validation fails when
+    /// this is blank AND <see cref="SymbolPath"/> has no parent segment to trim, because the
+    /// validator cannot see which dialect the container will resolve. A dialect that needs no
+    /// instance path therefore still has to satisfy it: set this to any non-blank value —
+    /// it is simply passed through unread. Tracked for a follow-up that moves this validation
+    /// behind the dialect.
+    /// </para>
+    /// </remarks>
     public string? AcknowledgeInstancePath { get; set; }
 
     /// <summary>The PLC method that acknowledges one alarm by key.</summary>
+    /// <remarks>
+    /// Configures the built-in <c>FB_ErrorHandler</c> dialect, whose method is
+    /// <c>AcknowledgeAlarm</c> — hence the default. A custom <see cref="IPlcAlarmDialect"/>
+    /// receives it on <see cref="AlarmAcknowledgeContext"/> and may ignore it; it must still
+    /// be non-blank, which the default already satisfies.
+    /// </remarks>
     public string AcknowledgeMethod { get; set; } = "AcknowledgeAlarm";
 }
 

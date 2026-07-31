@@ -24,9 +24,9 @@ public sealed class PlcAlarmAcknowledgeException : InvalidOperationException
     public string? ReturnCodeName { get; }
 
     /// <summary>
-    /// The raw numeric value the method returned, as it came off the wire, or
-    /// <see langword="null"/> when no numeric value did — the PLC returned something
-    /// non-integral, or something integral too large to represent.
+    /// The raw value the method returned, as it came off the wire, or <see langword="null"/>
+    /// when no <see cref="long"/> can carry it — the PLC returned something non-integral, or
+    /// an integral value beyond <see cref="long.MaxValue"/>.
     /// </summary>
     /// <remarks>
     /// Nullable so that "the PLC said something this package cannot read as a number" is
