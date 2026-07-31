@@ -86,6 +86,25 @@ public class ErrorHandlerAlarmDialectOptionsValidatorTests
     }
 
     [Fact]
+    public void BlankAcknowledgeMethod_NamesTheOrderingFix()
+    {
+        // AcknowledgeMethod defaults to 'AcknowledgeAlarm' — vocabulary a consumer with a custom
+        // dialect could plausibly try to satisfy, unlike AcknowledgeInstancePath's null default,
+        // which they would never touch. That makes this the rule most likely to trip a
+        // mis-ordered consumer, so it carries the same ordering guidance as the instance-path
+        // failure, and this asserts that guidance cannot be dropped by a later edit without a
+        // test going red.
+        var options = ValidOptions();
+        options.Targets["plc1"].AcknowledgeMethod = "  ";
+
+        var result = Validator.Validate(null, options);
+
+        var failure = Assert.Single(result.Failures!);
+        Assert.Contains("FB_ErrorHandler", failure, StringComparison.Ordinal);
+        Assert.Contains("BEFORE calling AddTwinCatAdsAlarms", failure, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NullTargets_Succeeds()
     {
         // Same contract as the vendor-neutral validator: a code-first caller may assign null,

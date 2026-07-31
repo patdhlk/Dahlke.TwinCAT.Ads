@@ -38,9 +38,16 @@ internal sealed class ErrorHandlerAlarmDialectOptionsValidator : IValidateOption
         {
             if (string.IsNullOrWhiteSpace(target.AcknowledgeMethod))
             {
+                // AcknowledgeMethod defaults to 'AcknowledgeAlarm' — FB_ErrorHandler vocabulary
+                // that a consumer with a custom dialect could plausibly try to clear, unlike
+                // AcknowledgeInstancePath's null default, which they would never touch. So this
+                // message needs the same attribution and ordering hint, not less of it.
                 failures.Add(
                     $"PlcAlarms:Targets:{plcId}:AcknowledgeMethod must name the PLC method that " +
-                    "acknowledges one alarm by key (default 'AcknowledgeAlarm').");
+                    "acknowledges one alarm by key (default 'AcknowledgeAlarm'). This rule belongs " +
+                    "to the built-in FB_ErrorHandler dialect. If you registered your own " +
+                    "IPlcAlarmDialect, register it BEFORE calling AddTwinCatAdsAlarms so its own " +
+                    "validation replaces this rule.");
             }
 
             if (string.IsNullOrWhiteSpace(target.AcknowledgeInstancePath)
