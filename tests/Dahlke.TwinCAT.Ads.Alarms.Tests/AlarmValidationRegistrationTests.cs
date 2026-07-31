@@ -172,8 +172,8 @@ public class AlarmValidationRegistrationTests
 
         var validators = provider.GetServices<IValidateOptions<PlcAlarmsOptions>>().ToList();
 
-        Assert.Single(validators.Where(v => v is PlcAlarmsOptionsValidator));
-        Assert.Single(validators.Where(v => v is ErrorHandlerAlarmDialectOptionsValidator));
+        Assert.Single(validators, v => v is PlcAlarmsOptionsValidator);
+        Assert.Single(validators, v => v is ErrorHandlerAlarmDialectOptionsValidator);
     }
 
     /// <summary>
