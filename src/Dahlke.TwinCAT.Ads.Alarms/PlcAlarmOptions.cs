@@ -37,6 +37,17 @@ public sealed class PlcAlarmTargetOptions
 
     /// <summary>What clock the PLC's <c>TIMESTRUCT</c> is expressed in.</summary>
     public PlcClockKind PlcClock { get; set; } = PlcClockKind.Unspecified;
+
+    /// <summary>
+    /// The instance path of the function block that owns acknowledgement, e.g.
+    /// <c>MAIN.ErrorHandler</c>. When absent it is derived by trimming the last segment of
+    /// <see cref="SymbolPath"/>, which is right when the alarm array is a member of that block
+    /// and wrong otherwise — set it explicitly for any other layout.
+    /// </summary>
+    public string? AcknowledgeInstancePath { get; set; }
+
+    /// <summary>The PLC method that acknowledges one alarm by key.</summary>
+    public string AcknowledgeMethod { get; set; } = "AcknowledgeAlarm";
 }
 
 /// <summary>

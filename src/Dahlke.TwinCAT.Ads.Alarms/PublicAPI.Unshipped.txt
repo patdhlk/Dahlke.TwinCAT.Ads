@@ -67,6 +67,10 @@ static Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.operator ==(Dahlke.TwinCAT.Ads.
 static Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.operator !=(Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? left, Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? right) -> bool
 static Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.operator ==(Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? left, Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? right) -> bool
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.AcknowledgeInstancePath.get -> string?
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.AcknowledgeInstancePath.set -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.AcknowledgeMethod.get -> string!
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.AcknowledgeMethod.set -> void
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.CycleTimeMs.get -> int
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.CycleTimeMs.set -> void
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions.PlcAlarmTargetOptions() -> void
