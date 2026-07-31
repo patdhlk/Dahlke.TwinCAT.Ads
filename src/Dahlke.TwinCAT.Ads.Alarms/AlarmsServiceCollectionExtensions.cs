@@ -36,7 +36,18 @@ public static class AlarmsServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.TryAddSingleton<IValidateOptions<PlcAlarmsOptions>, PlcAlarmsOptionsValidator>();
+        // Scanned BEFORE anything below registers a dialect, so the built-in dialect and the
+        // validator for ITS configuration go in as one unit or not at all.
+        var dialectAlreadyRegistered =
+            services.Any(d => d.ServiceType == typeof(IPlcAlarmDialect));
+
+        // TryAddEnumerable, not TryAddSingleton: the latter adds only when NO descriptor for
+        // IValidateOptions<PlcAlarmsOptions> exists at all, so a consumer registering any
+        // validator of their own silently suppressed every built-in rule — blank SymbolPath,
+        // unknown plcId, the lot — instead of adding to them. Validators are meant to compose,
+        // and this package now relies on that: two of them share the work.
+        services.TryAddEnumerable(ServiceDescriptor
+            .Singleton<IValidateOptions<PlcAlarmsOptions>, PlcAlarmsOptionsValidator>());
 
         services.AddOptions<PlcAlarmsOptions>()
             .Configure(o =>
@@ -60,10 +71,22 @@ public static class AlarmsServiceCollectionExtensions
                 sp.GetService<ILogger<JsonAlarmTextCatalog>>());
         });
 
-        // TryAdd, so a consumer who registered their own dialect BEFORE this call keeps it —
-        // which is what IPlcAlarmDialect's own documentation promises. The shipped default
-        // speaks FB_ErrorHandler; anything else needs one of these.
-        services.TryAddSingleton<IPlcAlarmDialect, ErrorHandlerAlarmDialect>();
+        // A consumer who registered their own dialect BEFORE this call keeps it — which is what
+        // IPlcAlarmDialect's own documentation promises. The shipped default speaks
+        // FB_ErrorHandler; anything else needs one of these.
+        //
+        // Its validator is registered here and nowhere else, so the rules travel with the
+        // dialect that reads them. A custom dialect brings its own IValidateOptions, or none:
+        // 0.7.0 applied FB_ErrorHandler's acknowledge rules to every dialect, because validation
+        // could not see which one the container would resolve (#25).
+        if (!dialectAlreadyRegistered)
+        {
+            services.AddSingleton<IPlcAlarmDialect, ErrorHandlerAlarmDialect>();
+
+            services.TryAddEnumerable(ServiceDescriptor
+                .Singleton<IValidateOptions<PlcAlarmsOptions>,
+                           ErrorHandlerAlarmDialectOptionsValidator>());
+        }
 
         services.TryAddSingleton<PlcAlarmMonitor>();
         services.TryAddSingleton<IPlcAlarmMonitor>(sp => sp.GetRequiredService<PlcAlarmMonitor>());
