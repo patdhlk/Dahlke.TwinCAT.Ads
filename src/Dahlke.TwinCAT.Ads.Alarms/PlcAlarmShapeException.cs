@@ -20,6 +20,15 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 /// nothing for a consumer to restart or re-register in response; a repeat means the PLC's
 /// <c>ST_ErrorEntry</c> really has changed and someone has to fix it.
 /// </para>
+/// <para>
+/// <b>Logged once per outage, not once per notification.</b> The mismatch is a property of
+/// the PLC's type, so it recurs at cycle rate until someone changes the PLC — at the default
+/// <c>CycleTimeMs</c> that would be five identical stack traces a second per target, for as
+/// long as the fault lasts. The monitor reports the first and then counts the rest silently.
+/// When a notification binds again it says so at <c>Information</c>, naming how many failed
+/// in between, so the extent of the outage is still on the record; the next failure after
+/// that recovery is reported in full again.
+/// </para>
 /// </remarks>
 public sealed class PlcAlarmShapeException : InvalidOperationException
 {

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using Microsoft.Extensions.Options;
@@ -64,6 +65,19 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
     // field rather than wrapped per read, so a consumer reading the property in a loop does not
     // allocate a wrapper each time.
     private readonly IObservable<AlarmTransition> _transitionsView;
+
+    // How many consecutive notifications have failed per (target, kind) since that target last
+    // bound one, and by being present at all, that the first has been logged. Concurrent because
+    // ADS delivers on a router thread and two notifications for one target can overlap — the
+    // same reason ApplySnapshot takes a lock. Same "first writer reports" idiom as
+    // PlcAlarmBinder.ReportedUnknownSeverities and AdsConnection's payload-fallback latch,
+    // except this one re-arms: an entry is removed when a notification binds, so a transient
+    // malformation that later recurs is news again rather than being silenced forever.
+    private readonly ConcurrentDictionary<(string PlcId, string SymbolPath, NotificationFailure Kind), int>
+        _notificationFailures = new();
+
+    private static readonly NotificationFailure[] NotificationFailureKinds =
+        [NotificationFailure.Shape, NotificationFailure.Unexpected];
 
     // Guards _disposed, _subscriptions and _retryDetach as a group. A registration can
     // complete on a pool thread at any moment — including after Dispose has returned — so
@@ -412,6 +426,10 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
                 .ToList();
 
             ApplySnapshot(plcId, resolved);
+
+            // Only after the whole handling succeeded — a snapshot that bound but threw out of
+            // ApplySnapshot has not recovered anything.
+            ReportRecovery(plcId, target);
         }
         catch (PlcAlarmShapeException ex)
         {
@@ -421,12 +439,21 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
             // a transient malformation recovers by itself on the next good notification, and
             // the outstanding set meanwhile keeps its last good reading rather than emptying.
             // Still Error: if the PLC's type really has changed, someone must fix it.
-            _logger.LogError(ex,
-                "Alarm array on {PlcId} at {SymbolPath} does not match the shape this package " +
-                "binds; this snapshot is dropped and the last good reading is kept. The " +
-                "subscription remains active and monitoring resumes on the next notification " +
-                "that binds. If this repeats, the PLC's ST_ErrorEntry no longer matches",
-                plcId, target.SymbolPath);
+            //
+            // Once per outage, not once per notification. The mismatch is a property of the
+            // PLC's TYPE, so it repeats at cycle rate until someone changes the PLC — five
+            // stack traces a second per target at the default CycleTimeMs, all identical after
+            // the first, drowning the log during the incident they document.
+            if (FirstFailureSince(plcId, target, NotificationFailure.Shape))
+            {
+                _logger.LogError(ex,
+                    "Alarm array on {PlcId} at {SymbolPath} does not match the shape this package " +
+                    "binds; this snapshot is dropped and the last good reading is kept. The " +
+                    "subscription remains active and monitoring resumes on the next notification " +
+                    "that binds. If this repeats, the PLC's ST_ErrorEntry no longer matches. " +
+                    "Further failures on this target are counted, not logged, until one binds",
+                    plcId, target.SymbolPath);
+            }
         }
         catch (Exception ex)
         {
@@ -436,11 +463,71 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
             // "a subscription callback threw" — with none of the alarm context an operator
             // needs to act on. Drop this snapshot with a diagnostic naming the target and
             // the symbol instead; the subscription stays live for the next one.
-            _logger.LogError(ex,
-                "Unexpected failure handling an alarm notification from {PlcId} at {SymbolPath}; " +
-                "this snapshot is dropped and monitoring continues",
-                plcId, target.SymbolPath);
+            // Latched like the one above, and for the same reason: a consumer's Resolve that
+            // throws on one alarm's key throws on every notification carrying that alarm.
+            if (FirstFailureSince(plcId, target, NotificationFailure.Unexpected))
+            {
+                _logger.LogError(ex,
+                    "Unexpected failure handling an alarm notification from {PlcId} at {SymbolPath}; " +
+                    "this snapshot is dropped and monitoring continues. Further failures on this " +
+                    "target are counted, not logged, until one binds",
+                    plcId, target.SymbolPath);
+            }
         }
+    }
+
+    /// <summary>
+    /// Records a failed notification and answers whether it is the first of its kind since this
+    /// target last bound one — i.e. whether it is worth logging.
+    /// </summary>
+    /// <remarks>
+    /// Keyed per target AND per kind. Per target, because one PLC whose type has changed must not
+    /// silence the first report for a second PLC that develops the same fault later. Per kind,
+    /// because the two diagnostics have different causes and different fixes: a shape mismatch
+    /// already latched must not swallow the first occurrence of the catch-all below it, which a
+    /// single shared flag would do whenever the failing stage alternates between notifications.
+    /// </remarks>
+    private bool FirstFailureSince(
+        string plcId, PlcAlarmTargetOptions target, NotificationFailure kind) =>
+        _notificationFailures.AddOrUpdate(
+            (plcId, target.SymbolPath, kind), 1, (_, count) => count + 1) == 1;
+
+    /// <summary>
+    /// Clears this target's latches and, if anything was latched, says so — naming how many
+    /// notifications failed, so the extent of the outage survives the ones that were not logged.
+    /// </summary>
+    /// <remarks>
+    /// Silent when nothing was latched, which is the overwhelmingly common case: this runs on
+    /// every good notification, five times a second per target, and an unconditional line here
+    /// would be the very flood the latch exists to remove.
+    /// </remarks>
+    private void ReportRecovery(string plcId, PlcAlarmTargetOptions target)
+    {
+        var failures = 0;
+
+        foreach (var kind in NotificationFailureKinds)
+        {
+            if (_notificationFailures.TryRemove((plcId, target.SymbolPath, kind), out var count))
+                failures += count;
+        }
+
+        if (failures == 0)
+            return;
+
+        _logger.LogInformation(
+            "Alarm monitoring on {PlcId} at {SymbolPath} is binding notifications again after " +
+            "{FailureCount} consecutive failures; all but the first were counted rather than logged",
+            plcId, target.SymbolPath, failures);
+    }
+
+    /// <summary>Which of the two notification diagnostics a latch entry belongs to.</summary>
+    private enum NotificationFailure
+    {
+        /// <summary>The alarm array did not have the shape the dialect binds.</summary>
+        Shape,
+
+        /// <summary>Anything else thrown while handling a notification.</summary>
+        Unexpected,
     }
 
     private void ApplySnapshot(string plcId, IReadOnlyList<PlcAlarm> snapshot)
