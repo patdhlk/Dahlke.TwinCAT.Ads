@@ -74,7 +74,7 @@ public sealed class PlcAlarmTargetOptions
     /// <c>AcknowledgeAlarm</c> — hence the default. A custom <see cref="IPlcAlarmDialect"/>
     /// receives it on <see cref="AlarmAcknowledgeContext"/> and may ignore it; the rule that it
     /// be non-blank is the built-in dialect's own, and is not applied when another dialect is
-    /// registered.
+    /// registered before <c>AddTwinCatAdsAlarms</c>.
     /// </remarks>
     public string AcknowledgeMethod { get; set; } = "AcknowledgeAlarm";
 }
