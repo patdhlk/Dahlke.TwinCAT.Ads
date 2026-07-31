@@ -45,6 +45,7 @@ internal interface IManagedConnection : IDisposable
     Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct);
     Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct);
     Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct);
+    Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct);
     Task<AdsState> GetAdsStateAsync(CancellationToken ct);
     Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct);
     Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct);

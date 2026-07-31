@@ -547,6 +547,8 @@ public class PlcAlarmMonitorConcurrencyTests
         public Task<AdsRpcResult> InvokeRpcMethodAsync(
             string symbolPath, string methodName, object?[] parameters, CancellationToken ct) =>
             throw new NotSupportedException();
+        public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct) =>
+            throw new NotSupportedException();
         public Task<AdsState> GetAdsStateAsync(CancellationToken ct) => throw new NotSupportedException();
         public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct) => throw new NotSupportedException();
         public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct) =>

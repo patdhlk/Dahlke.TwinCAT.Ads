@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Globalization;
 using TwinCAT;
 using TwinCAT.Ads;
 using TwinCAT.Ads.SumCommand;
@@ -38,6 +40,12 @@ internal sealed class AdsConnection : IManagedConnection
     private readonly ILogger<AdsConnection> _logger;
     private readonly object _symbolLoaderLock = new();
     private volatile IDynamicSymbolLoader? _symbolLoader;
+
+    // Type metadata is fixed for a running PLC program, so one read serves the process.
+    // Cleared with the symbol loader on disconnect so a download is picked up on reconnect
+    // rather than serving a stale map forever.
+    private readonly ConcurrentDictionary<string, IReadOnlyList<AdsEnumMember>> _enumCache
+        = new(StringComparer.OrdinalIgnoreCase);
 
     public string PlcId { get; }
     public string DisplayName => _options.DisplayName;
@@ -95,6 +103,7 @@ internal sealed class AdsConnection : IManagedConnection
     public void Disconnect()
     {
         lock (_symbolLoaderLock) { _symbolLoader = null; }
+        _enumCache.Clear();
         if (_client.IsConnected)
         {
             _client.Disconnect();
@@ -105,6 +114,7 @@ internal sealed class AdsConnection : IManagedConnection
     public void ForceDisconnect()
     {
         lock (_symbolLoaderLock) { _symbolLoader = null; }
+        _enumCache.Clear();
         try { _client.Disconnect(); } catch { /* best effort */ }
     }
 
@@ -655,6 +665,57 @@ internal sealed class AdsConnection : IManagedConnection
         return new AdsRpcResult(
             result.ReturnValue,
             result.OutParameters is null ? [] : [.. result.OutParameters]);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Resolution goes through the same <see cref="GetSymbolLoader"/> dynamic tree every other
+    /// symbol operation uses, but reads its <c>DataTypes</c> collection rather than
+    /// <c>Symbols</c> — enum members are TYPE metadata, not an instance path, so
+    /// there is no symbol to resolve. A type that resolves but is not an enum is a caller
+    /// mistake, not an ADS failure, so it throws <see cref="InvalidOperationException"/> rather
+    /// than an <see cref="AdsErrorException"/> — mirroring <see cref="InvokeRpcMethodAsync"/>'s
+    /// non-RPC-callable case.
+    /// </para>
+    /// <para>
+    /// <b>Cached for the connection's lifetime.</b> A running PLC program's type metadata is
+    /// fixed, so the result is cached the first time a given type is resolved and every later
+    /// call returns it with no further ADS round-trip. The cache is cleared alongside the symbol
+    /// loader on <see cref="Disconnect"/>/<see cref="ForceDisconnect"/>, so a reconnect after a
+    /// PLC download picks up the new numbering rather than serving a stale map for the process's
+    /// lifetime.
+    /// </para>
+    /// </remarks>
+    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(typeName);
+        ct.ThrowIfCancellationRequested();
+
+        if (_enumCache.TryGetValue(typeName, out var cached))
+            return Task.FromResult(cached);
+
+        var symbolLoader = GetSymbolLoader();
+
+        var dataType = symbolLoader.DataTypes.FirstOrDefault(
+            d => string.Equals(d.Name, typeName, StringComparison.OrdinalIgnoreCase));
+
+        if (dataType is null)
+            throw new AdsErrorException(
+                $"Data type '{typeName}' was not found on PLC '{PlcId}'.",
+                AdsErrorCode.DeviceSymbolNotFound);
+
+        if (dataType is not IEnumType enumType)
+            throw new InvalidOperationException(
+                $"Data type '{typeName}' on PLC '{PlcId}' is not an enumeration " +
+                $"(category {dataType.Category}), so its members cannot be resolved.");
+
+        var members = enumType.EnumValues
+            .Select(v => new AdsEnumMember(v.Name, Convert.ToInt64(v.Value, CultureInfo.InvariantCulture)))
+            .ToArray();
+
+        _enumCache[typeName] = members;
+        return Task.FromResult<IReadOnlyList<AdsEnumMember>>(members);
     }
 
     /// <inheritdoc />

@@ -412,6 +412,13 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    {
+        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
+        return await conn.GetEnumMembersAsync(typeName, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<AdsState> GetAdsStateAsync(CancellationToken ct)
     {
         var conn = await SnapshotAsync(ct).ConfigureAwait(false);

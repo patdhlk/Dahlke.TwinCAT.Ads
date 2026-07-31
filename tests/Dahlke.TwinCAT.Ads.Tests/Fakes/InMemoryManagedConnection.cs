@@ -213,6 +213,21 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     }
 
     /// <summary>
+    /// Mirrors <see cref="SimulatedAdsConnection.InvokeRpcMethodAsync"/>'s refusal shape above:
+    /// this double has no PLC type system and no seedable enum-metadata table, so it refuses
+    /// rather than returning a plausible-looking empty list.
+    /// </summary>
+    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(typeName);
+        ct.ThrowIfCancellationRequested();
+
+        throw new InvalidOperationException(
+            $"This in-memory double cannot resolve enum type '{typeName}' — it has no type-system " +
+            "surface. Use SimulatedAdsConnection.SetEnumMembers for a seedable simulated type.");
+    }
+
+    /// <summary>
     /// Mirrors <see cref="SimulatedAdsConnection.WriteControlAsync"/>'s observable-state
     /// semantics: records the requested state so <see cref="GetAdsStateAsync"/> reflects it
     /// immediately — genuinely implemented (not a throwing stub) because the shared contract

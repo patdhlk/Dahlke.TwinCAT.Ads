@@ -74,6 +74,12 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     private readonly Dictionary<(string Path, string Method), Func<object?[], AdsRpcResult>> _rpcHandlers
         = new(RpcKeyComparer.Instance);
 
+    // Seeded enum metadata, keyed case-insensitively on the type name — matches real PLC type
+    // name lookup. Guarded by locking on the dictionary itself, like _rpcHandlers: seeding is a
+    // test-setup operation, so the contention a ConcurrentDictionary would relieve does not exist.
+    private readonly Dictionary<string, IReadOnlyList<AdsEnumMember>> _enumMembers
+        = new(StringComparer.OrdinalIgnoreCase);
+
     /// <inheritdoc />
     public string PlcId { get; }
 
@@ -464,6 +470,49 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
                 "invoking it.");
 
         return Task.FromResult(handler(parameters));
+    }
+
+    /// <summary>Seeds a PLC enumeration's members for simulated resolution.</summary>
+    /// <param name="typeName">
+    /// The enum type's name, matched case-insensitively like every other simulated lookup.
+    /// </param>
+    /// <param name="members">
+    /// The members to return for <paramref name="typeName"/>. Seeding the same type name again
+    /// replaces the previous members.
+    /// </param>
+    /// <exception cref="ArgumentNullException">Either argument is <see langword="null"/>.</exception>
+    public void SetEnumMembers(string typeName, IReadOnlyList<AdsEnumMember> members)
+    {
+        ArgumentNullException.ThrowIfNull(typeName);
+        ArgumentNullException.ThrowIfNull(members);
+
+        lock (_enumMembers)
+            _enumMembers[typeName] = members;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A simulated connection has no PLC type system to browse, so the answer comes from
+    /// members seeded by <see cref="SetEnumMembers"/>. There is deliberately NO fallback: an
+    /// unseeded type THROWS rather than returning an empty or null list — a simulated call that
+    /// appeared to succeed while reporting no members is the same class of defect
+    /// <see cref="InvokeRpcMethodAsync"/>'s unseeded-call throw exists to make impossible.
+    /// </remarks>
+    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(typeName);
+        ct.ThrowIfCancellationRequested();
+
+        IReadOnlyList<AdsEnumMember>? members;
+        lock (_enumMembers)
+            _enumMembers.TryGetValue(typeName, out members);
+
+        if (members is null)
+            throw new InvalidOperationException(
+                $"No simulated enum metadata is seeded for type '{typeName}' on PLC '{PlcId}'. " +
+                $"Call SetEnumMembers(\"{typeName}\", ...) before resolving it.");
+
+        return Task.FromResult(members);
     }
 
     /// <inheritdoc />

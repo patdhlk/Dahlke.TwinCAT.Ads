@@ -468,6 +468,9 @@ public class GenericReadWriteTests
         public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
             => throw new NotSupportedException();
 
+        public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+            => throw new NotSupportedException();
+
         // Never exercised: these facade-routing tests only assert typed/untyped read-write
         // delegation, not device info (see the strict stub policy — real only where read).
         public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)

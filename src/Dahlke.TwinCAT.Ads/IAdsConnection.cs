@@ -398,6 +398,48 @@ public interface IAdsConnection
         string symbolPath, string methodName, object?[] parameters, CancellationToken ct);
 
     /// <summary>
+    /// Resolves a PLC enumeration's members — name and numeric value — from the running
+    /// program's own type metadata.
+    /// </summary>
+    /// <param name="typeName">
+    /// The enum type's name, e.g. <c>deaReturnType</c>, matched case-insensitively.
+    /// </param>
+    /// <param name="ct">Cancels the operation; the per-target timeout applies as elsewhere.</param>
+    /// <returns>
+    /// Every member of the enumeration, in the order the PLC declares them. The result is
+    /// cached for the life of the connection: PLC type metadata is fixed for a running
+    /// program, so repeated calls for the same type cost no further ADS round-trip.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="typeName"/> is <see langword="null"/>.</exception>
+    /// <exception cref="AdsErrorException">
+    /// <paramref name="typeName"/> does not resolve to any data type known to the PLC
+    /// (<see cref="AdsErrorCode.DeviceSymbolNotFound"/>).
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="typeName"/> resolved but is not an enumeration. The message names the
+    /// type and its actual category.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">Thrown when the per-target timeout elapses first.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this exists.</b> PLC enum numbering is not stable across a project's life, while
+    /// names are: a value the running program assigns to a member today may not be the value
+    /// the project source assigns to that same member after an edit that has not yet been
+    /// downloaded and activated. Code that maps a returned integer to a member by NUMBER is
+    /// therefore correct only against the numbering it was written for; against a machine
+    /// running a different one it silently reports a different member, with no error anywhere.
+    /// Resolving by name — using this method's result — survives that divergence.
+    /// </para>
+    /// <para>
+    /// <b>Not a live subscription.</b> The returned list reflects the type as it was the FIRST
+    /// time this method was called for this connection; a PLC download that changes the enum's
+    /// members after that is not picked up until the connection is re-established.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct);
+
+    /// <summary>
     /// Reads the current ADS state of the target device (for example
     /// <see cref="AdsState.Run"/>, <see cref="AdsState.Stop"/>, or
     /// <see cref="AdsState.Config"/>).
