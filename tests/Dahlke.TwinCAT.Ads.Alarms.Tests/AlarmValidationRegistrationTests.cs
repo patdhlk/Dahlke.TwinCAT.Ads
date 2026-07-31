@@ -30,10 +30,17 @@ public class AlarmValidationRegistrationTests
     /// it win — the ordering the package documents, and which now also decides whether the
     /// built-in dialect's validator is registered at all.
     /// </param>
+    /// <param name="configureAfter">
+    /// Runs AFTER <c>AddTwinCatAdsAlarms</c>, for a test proving what happens when a consumer
+    /// does NOT follow the documented ordering: the dialect resolved by the container can still
+    /// change (last registration wins), while the built-in validator that was already added
+    /// stays put regardless.
+    /// </param>
     private static ServiceProvider BuildContainer(
         string[] coreTargets,
         Dictionary<string, PlcAlarmTargetOptions> alarmTargets,
-        Action<IServiceCollection>? configure = null)
+        Action<IServiceCollection>? configure = null,
+        Action<IServiceCollection>? configureAfter = null)
     {
         var services = new ServiceCollection();
 
@@ -50,6 +57,8 @@ public class AlarmValidationRegistrationTests
         configure?.Invoke(services);
 
         services.AddTwinCatAdsAlarms(new ConfigurationBuilder().Build());
+
+        configureAfter?.Invoke(services);
 
         // After AddTwinCatAdsAlarms' own binding delegate, so this is what the options carry.
         services.Configure<PlcAlarmsOptions>(o => o.Targets = alarmTargets);
@@ -175,6 +184,28 @@ public class AlarmValidationRegistrationTests
 
         Assert.Contains(failures.Failures, f => f.Contains("SymbolPath", StringComparison.Ordinal));
         Assert.Contains(failures.Failures, f => f.Contains(RejectingValidator.Message, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CustomDialectRegisteredAfterAddTwinCatAdsAlarms_StillFailsOnTheBuiltInDialectsRules()
+    {
+        // The documented sharp edge, not a bug: every "register your dialect BEFORE
+        // AddTwinCatAdsAlarms" warning in this package exists because of exactly this case. The
+        // dialect the container resolves changes — last registration wins, so StubDialect —
+        // but ErrorHandlerAlarmDialectOptionsValidator was already added by the call and has no
+        // way to know it lost the dialect race. A future refactor that made ordering stop
+        // mattering here would break this test, and should.
+        using var provider = BuildContainer(
+            ["plc1"],
+            Target("plc1", "Alarms"),   // no dot — nothing to trim, same shape as issue #25
+            configureAfter: services => services.AddSingleton<IPlcAlarmDialect, StubDialect>());
+
+        Assert.IsType<StubDialect>(provider.GetRequiredService<IPlcAlarmDialect>());
+
+        var failures = Failures(provider);
+
+        Assert.Contains(
+            failures.Failures, f => f.Contains("AcknowledgeInstancePath", StringComparison.Ordinal));
     }
 
     [Fact]
