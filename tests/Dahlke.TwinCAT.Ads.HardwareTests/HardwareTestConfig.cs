@@ -76,6 +76,20 @@ internal static class HardwareTestConfig
     public static bool HasSymbolAlarms => !string.IsNullOrWhiteSpace(SymbolAlarms);
 
     /// <summary>
+    /// The <c>sKey</c> of an alarm the acknowledge test may acknowledge for real. Set via
+    /// TWINCAT_TEST_ALARM_ACK_KEY.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="SymbolAlarms"/> and deliberately opt-in: every other hardware
+    /// test only reads, and acknowledging changes machine state. Point it at a test alarm.
+    /// </remarks>
+    public static string? AlarmAckKey =>
+        Environment.GetEnvironmentVariable("TWINCAT_TEST_ALARM_ACK_KEY");
+
+    /// <summary>Returns true when an acknowledgeable alarm key is configured.</summary>
+    public static bool HasAlarmAckKey => !string.IsNullOrWhiteSpace(AlarmAckKey);
+
+    /// <summary>
     /// This host's AMS Net ID for the embedded router. Set via TWINCAT_TEST_ROUTER_NETID.
     /// When unset, <c>Router</c> is left untouched and the system router is used instead —
     /// see <see cref="HasEmbeddedRouter"/>.
