@@ -35,17 +35,27 @@ internal sealed class ErrorHandlerAlarmDialect : IPlcAlarmDialect
 
         var instancePath = ResolveInstancePath(context);
 
+        // Resolved BEFORE the acknowledgement is issued, and never after it.
+        //
+        // This call fails in several ordinary ways — the type not published, the type not an
+        // enum, cancellation, the per-target timeout. Every one of them, downstream of the RPC,
+        // would surface a failure for an alarm the PLC HAD already acknowledged: the operator
+        // presses the button again on something that already worked. The core caches an enum's
+        // members per connection for the connection's life, so hoisting it costs nothing and
+        // leaves only the unavoidable value-interpretation step after the write.
+        var members = await context.Connection
+            .GetEnumMembersAsync(ResultTypeName, ct).ConfigureAwait(false);
+
         var result = await context.Connection
             .InvokeRpcMethodAsync(instancePath, context.Options.AcknowledgeMethod, [context.Alarm.Key], ct)
             .ConfigureAwait(false);
 
-        var raw = ToInt64(result.ReturnValue, instancePath, context);
+        var raw = ToReturnCode(result.ReturnValue, instancePath, context);
 
-        // Resolved by NAME, never by number: PLC enum numbering moves while names do not, and
-        // the reference rack currently publishes a different numbering than its own source.
-        var members = await context.Connection
-            .GetEnumMembersAsync(ResultTypeName, ct).ConfigureAwait(false);
-
+        // By NAME — never by number, and never by position. Numbering moves while names do not
+        // (the reference rack publishes a numbering its own source no longer agrees with), and
+        // GetEnumMembersAsync promises DECLARATION ORDER, not dense zero-based values:
+        // `SUCCESS := 100` is ordinary ST, so members[raw] would read the wrong member entirely.
         var name = members.FirstOrDefault(m => m.Value == raw)?.Name;
 
         if (string.Equals(name, Success, StringComparison.OrdinalIgnoreCase))
@@ -62,6 +72,18 @@ internal sealed class ErrorHandlerAlarmDialect : IPlcAlarmDialect
             name, raw);
     }
 
+    /// <summary>Works out which function block owns acknowledgement for this target.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// The path cannot be derived and none was configured.
+    /// </exception>
+    /// <remarks>
+    /// Deliberately NOT <see cref="PlcAlarmAcknowledgeException"/>: nothing was sent to the PLC,
+    /// so that type's <see cref="PlcAlarmAcknowledgeException.ReturnCode"/> — documented as "the
+    /// raw numeric value the method returned, as it came off the wire" — would have to be
+    /// fabricated. A fabricated <c>0</c> is indistinguishable from a genuine <c>0</c> that matched
+    /// no member, and <c>0</c> is <c>SUCCESS</c> under some numberings. This is a configuration
+    /// error that never reached the PLC, and it says so by its type.
+    /// </remarks>
     private static string ResolveInstancePath(AlarmAcknowledgeContext context)
     {
         if (!string.IsNullOrWhiteSpace(context.Options.AcknowledgeInstancePath))
@@ -71,22 +93,50 @@ internal sealed class ErrorHandlerAlarmDialect : IPlcAlarmDialect
         var lastDot = path.LastIndexOf('.');
 
         if (lastDot <= 0)
-            throw new PlcAlarmAcknowledgeException(
+            throw new InvalidOperationException(
                 $"Cannot derive the acknowledging function block from SymbolPath '{path}' on PLC " +
                 $"'{context.PlcId}'. Set PlcAlarms:Targets:{context.PlcId}:AcknowledgeInstancePath " +
-                "explicitly.", null, 0);
+                "explicitly.");
 
         return path[..lastDot];
     }
 
-    private static long ToInt64(object? value, string instancePath, AlarmAcknowledgeContext context)
+    /// <summary>Narrows the method's return value to the integral code the enum is keyed by.</summary>
+    /// <remarks>
+    /// Integral types only — deliberately not <see cref="IConvertible"/>, which is not a test for
+    /// "is numeric". A <see cref="string"/> satisfies it and then escapes as a raw
+    /// <see cref="FormatException"/>, and a <see cref="bool"/> converts silently to <c>0</c>/<c>1</c>.
+    /// Since <see cref="PlcAlarmTargetOptions.AcknowledgeMethod"/> is a public knob, a
+    /// <c>BOOL</c>-returning method pointed at by it would then report whichever member happens to
+    /// hold that number — under a zero-based <c>SUCCESS</c>, a failed acknowledgement read as
+    /// success. Every PLC enum base from <c>SINT</c> to <c>ULINT</c> is accepted; nothing else is.
+    /// </remarks>
+    private static long ToReturnCode(
+        object? value, string instancePath, AlarmAcknowledgeContext context) => value switch
     {
-        if (value is IConvertible convertible)
-            return convertible.ToInt64(CultureInfo.InvariantCulture);
+        sbyte v => v,
+        byte v => v,
+        short v => v,
+        ushort v => v,
+        int v => v,
+        uint v => v,
+        long v => v,
+        ulong v when v <= long.MaxValue => (long)v,
 
-        throw new PlcAlarmAcknowledgeException(
+        // Matches AdsEnumMember's own contract: a ULINT value past long.MaxValue throws rather
+        // than wrapping into a negative that would match some other member.
+        ulong v => throw new PlcAlarmAcknowledgeException(
             $"'{instancePath}.{context.Options.AcknowledgeMethod}' on PLC '{context.PlcId}' returned " +
-            $"{value?.GetType().Name ?? "null"}, which is not a numeric {ResultTypeName} value.",
-            null, 0);
-    }
+            $"{v}, which exceeds long.MaxValue; a {ResultTypeName} that large is not supported.",
+            null, 0),
+
+        _ => throw new PlcAlarmAcknowledgeException(
+            $"'{instancePath}.{context.Options.AcknowledgeMethod}' on PLC '{context.PlcId}' returned " +
+            $"{Describe(value)}, which is not an integral {ResultTypeName} value.",
+            null, 0),
+    };
+
+    private static string Describe(object? value) => value is null
+        ? "null"
+        : string.Create(CultureInfo.InvariantCulture, $"{value.GetType().Name} '{value}'");
 }

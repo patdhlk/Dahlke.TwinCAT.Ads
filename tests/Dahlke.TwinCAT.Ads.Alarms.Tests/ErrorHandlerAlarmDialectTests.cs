@@ -21,6 +21,22 @@ public class ErrorHandlerAlarmDialectTests
         new("NOT_FOUND", 4), new("INVALID_DATA", 5), new("BUSY", 6),
     ];
 
+    /// <summary>
+    /// Explicit, non-contiguous values in an order deliberately unrelated to them.
+    /// </summary>
+    /// <remarks>
+    /// Both numberings above run <c>0..6</c> in declaration order, so for them
+    /// <c>members[value]</c> and "the member with that value" happen to agree — an implementation
+    /// indexing by POSITION passes every test that uses only those two. Explicit values
+    /// (<c>SUCCESS := 100</c>) are ordinary ST, and <c>GetEnumMembersAsync</c> promises
+    /// declaration order, never dense zero-based values.
+    /// </remarks>
+    private static readonly AdsEnumMember[] NonContiguousNumbering =
+    [
+        new("NOT_READY", 3), new("SUCCESS", 100), new("BUSY", 12), new("ERROR", 7),
+        new("NOT_FOUND", 42), new("ABORTED", 1), new("INVALID_DATA", 55),
+    ];
+
     private static PlcAlarm Alarm(string key = "Test_Err_60") => new()
     {
         Key = key, EquipmentId = "Test", ErrorCode = 60, Severity = AlarmSeverity.Error,
@@ -83,6 +99,19 @@ public class ErrorHandlerAlarmDialectTests
     }
 
     [Fact]
+    public async Task NonContiguousValues_ResolveByName_NotByPosition()
+    {
+        // The second discriminating test, and the only one covering "no assumption that member
+        // order implies meaning". Both other fixtures are 0..6 in declaration order, so
+        // `members[(int)raw].Name` passes all of them; here SUCCESS := 100 sits at index 1 and
+        // that implementation reads past the end of a seven-member list.
+        Assert.True(await AcknowledgeAsync(NonContiguousNumbering, "SUCCESS"));
+        Assert.False(await AcknowledgeAsync(NonContiguousNumbering, "NOT_FOUND"));
+        await Assert.ThrowsAsync<PlcAlarmAcknowledgeException>(
+            () => AcknowledgeAsync(NonContiguousNumbering, "BUSY"));
+    }
+
+    [Fact]
     public async Task ValueMatchingNoPublishedMember_Throws()
     {
         var conn = new FakeRpcConnection(RackNumbering, (short)99);
@@ -124,6 +153,73 @@ public class ErrorHandlerAlarmDialectTests
 
         Assert.Equal("GVL.Handler", conn.LastPath);
     }
+
+    [Fact]
+    public async Task TheResultTypeIsResolvedByItsPlcName()
+    {
+        var conn = new FakeRpcConnection(RackNumbering, (short)5);
+        var dialect = new ErrorHandlerAlarmDialect();
+
+        await dialect.AcknowledgeAsync(
+            new AlarmAcknowledgeContext(Alarm(), conn, "plc1", Options()), CancellationToken.None);
+
+        // Hardware-verified spelling. Without this the name is asserted nowhere and a typo ships
+        // green, failing only against a real PLC.
+        Assert.Equal("deaReturnType", conn.LastEnumTypeName);
+    }
+
+    [Fact]
+    public async Task TheResultTypeIsResolvedBeforeTheRpc_SoItsFailureCannotStrandAnAcknowledgedAlarm()
+    {
+        var conn = new FakeRpcConnection(RackNumbering, (short)5)
+        {
+            // What the core throws when deaReturnType resolves to something that is not an enum.
+            EnumMembersFailure = () => new InvalidOperationException("not an enumeration"),
+        };
+        var dialect = new ErrorHandlerAlarmDialect();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => dialect.AcknowledgeAsync(
+                new AlarmAcknowledgeContext(Alarm(), conn, "plc1", Options()), CancellationToken.None));
+
+        // The whole point: resolved after the RPC, the alarm would already be acknowledged and the
+        // operator would be told to retry something that had worked.
+        Assert.Null(conn.LastPath);
+    }
+
+    [Theory]
+    [InlineData(true)]       // BOOL: IConvertible would fold it to 1 — a real member under most numberings
+    [InlineData("SUCCESS")]  // STRING: IConvertible accepts it, then escapes as a raw FormatException
+    [InlineData(1.5)]
+    public async Task ANonIntegralReturn_Throws_NamingWhatItGot(object returnValue)
+    {
+        var conn = new FakeRpcConnection(RackNumbering, returnValue);
+        var dialect = new ErrorHandlerAlarmDialect();
+
+        var ex = await Assert.ThrowsAsync<PlcAlarmAcknowledgeException>(
+            () => dialect.AcknowledgeAsync(
+                new AlarmAcknowledgeContext(Alarm(), conn, "plc1", Options()), CancellationToken.None));
+
+        Assert.Contains(returnValue.GetType().Name, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ASymbolPathWithNoOwningBlock_IsAConfigurationError_ThatNeverReachesThePlc()
+    {
+        var conn = new FakeRpcConnection(RackNumbering, (short)5);
+        var options = new PlcAlarmTargetOptions { SymbolPath = "Errors", CycleTimeMs = 200 };
+        var dialect = new ErrorHandlerAlarmDialect();
+
+        // ThrowsAsync matches the type EXACTLY, so this also pins that it is not the derived
+        // PlcAlarmAcknowledgeException — which would have to fabricate a ReturnCode for a call
+        // that was never made, and a fabricated 0 is SUCCESS under some numberings.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => dialect.AcknowledgeAsync(
+                new AlarmAcknowledgeContext(Alarm(), conn, "plc1", options), CancellationToken.None));
+
+        Assert.Contains("AcknowledgeInstancePath", ex.Message, StringComparison.Ordinal);
+        Assert.Null(conn.LastPath);
+    }
 }
 
 /// <summary>
@@ -146,6 +242,15 @@ internal sealed class FakeRpcConnection(IReadOnlyList<AdsEnumMember> members, ob
     /// <summary>The parameters the last RPC call carried.</summary>
     public object?[] LastParameters { get; private set; } = [];
 
+    /// <summary>The type name the last enum resolution asked for.</summary>
+    public string? LastEnumTypeName { get; private set; }
+
+    /// <summary>
+    /// When set, <c>GetEnumMembersAsync</c> throws this instead of answering — the ordinary
+    /// failures the real one has (type not published, type not an enum, timeout, cancellation).
+    /// </summary>
+    public Func<Exception>? EnumMembersFailure { get; set; }
+
     public Task<AdsRpcResult> InvokeRpcMethodAsync(
         string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
     {
@@ -157,7 +262,15 @@ internal sealed class FakeRpcConnection(IReadOnlyList<AdsEnumMember> members, ob
     }
 
     public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(
-        string typeName, CancellationToken ct) => Task.FromResult(members);
+        string typeName, CancellationToken ct)
+    {
+        LastEnumTypeName = typeName;
+
+        if (EnumMembersFailure is { } failure)
+            throw failure();
+
+        return Task.FromResult(members);
+    }
 
     // Nothing below is reachable from the dialect. Explicit event accessors rather than a
     // field-like event so an unused-event warning is never introduced here.
