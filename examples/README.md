@@ -55,7 +55,7 @@ Monitors a PLC alarm array with the optional `Dahlke.TwinCAT.Ads.Alarms` package
 
 Acknowledgement is a method call, so the driver also plays the function block: it seeds `deaReturnType`'s members and an `AcknowledgeAlarm` handler on the simulated connection, and every array it writes afterwards derives each entry's `IsAcked` from what that handler recorded. Nothing in the script hardcodes the acknowledgement, so `[ACKNOWLEDGED]` below is evidence the call went through the monitor and the dialect. Both seedings are mandatory: an unseeded RPC or enum throws on a simulated connection rather than answering something plausible. `SymbolPath` is `MAIN.ErrorHandler.aHmiAlarms`, from which the shipped dialect derives the instance path `MAIN.ErrorHandler` — which is the path the handler is seeded under.
 
-**`--real` needs `appsettings.json` pointed at your own PLC first.** `MAIN.ErrorHandler.aHmiAlarms` is the reference rack's layout, not a path every PLC has, and the acknowledging function block is derived from it by trimming the last segment — so a wrong `SymbolPath` gives both a subscription that never registers and an acknowledgement aimed at a block that does not exist. The `AmsNetId` needs changing too, and the PLC's `AcknowledgeAlarm` method needs `{attribute 'TcRpcEnable'}` or the acknowledgement fails as an unknown method.
+**`--real` needs `appsettings.json` pointed at your own PLC first.** `MAIN.ErrorHandler.aHmiAlarms` is the reference rack's layout, not a path every PLC has, and the acknowledging function block is derived from it by trimming the last segment. A wrong `SymbolPath` is a configuration fault, not a transient one, so — provided the PLC answers at boot — it **faults `StartAsync` and the host never starts**; you get the subscription failure on the console and the process exits, rather than a half-running example. (If the PLC is *unreachable* at boot there is no startup left to fail: the bad path surfaces on the deferred retry instead, logged at `Error` and re-attempted on every reconnect. See [Behaviour worth knowing](../README.md#plc-alarms).) Acknowledgement is aimed at the derived block either way, so fix the path before blaming the method. The `AmsNetId` needs changing too, and the PLC's `AcknowledgeAlarm` method needs `{attribute 'TcRpcEnable'}` or the acknowledgement fails as an unknown method.
 
 ```bash
 # Simulation mode (default)
@@ -65,7 +65,7 @@ dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler
 dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler -- --real
 ```
 
-The full output, verbatim — check your run against it:
+The full **simulation** output, verbatim — check your default-mode run against it:
 
 ```text
 info: Dahlke.TwinCAT.Ads.Alarms.PlcAlarmMonitor[0] Monitoring alarms on plc1 at MAIN.ErrorHandler.aHmiAlarms every 200 ms
@@ -83,4 +83,8 @@ Outstanding after the acknowledgement:
   BMK1Err500 on BMK1 (Warning) active=True acknowledged=False
 ```
 
-`BMK1Err404` stays outstanding after its fault clears because it still awaits acknowledgement — that is the point of the run. The `--real` mode is worth trying with the PLC switched off: the host starts anyway, logs that alarm monitoring could not be registered, and registers it when the target comes up.
+`BMK1Err404` stays outstanding after its fault clears because it still awaits acknowledgement — that is the point of the run.
+
+**Do not use the block above as the `--real` reference.** The scripted driver keeps the acknowledged entry in the array with `IsAcked := TRUE`, which is what produces the `[ACKNOWLEDGED]` line. The reference rack does not behave that way: a successful `AcknowledgeAlarm` **removes** the entry from the array, so the next notification simply lacks it and the store reports the alarm `Ended`. Against hardware you should therefore expect `AcknowledgeAsync(...) -> True`, the `Acknowledged … on plc1` log line, and then `[ENDED]` — with **no** `[ACKNOWLEDGED]` transition at all. Its absence is not a failure; on that layout it is the expected outcome, and the log line is the only trace the acknowledgement leaves.
+
+The `--real` mode is worth trying with the PLC switched off: the host starts anyway, logs that alarm monitoring could not be registered, and registers it when the target comes up. (That is unreachability. A `SymbolPath` the PLC does not have is the other case described above, and fails startup.)

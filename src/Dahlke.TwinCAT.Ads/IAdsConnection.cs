@@ -436,6 +436,15 @@ public interface IAdsConnection
     /// time this method was called for this connection; a PLC download that changes the enum's
     /// members after that is not picked up until the connection is re-established.
     /// </para>
+    /// <para>
+    /// <b>The first call can be slow, and never blocks the caller's thread.</b> Resolving a type
+    /// makes the connection upload the running program's type system, which on a cold connection
+    /// to a slow PLC is a real round-trip; it is performed off the calling thread so that
+    /// <paramref name="ct"/> and the per-target timeout genuinely apply to the wait. What they
+    /// bound is this call, not the upload — an upload already in flight has no cancellation of
+    /// its own and simply finishes unobserved. Later calls for the same type are served from the
+    /// cache and complete without waiting for anything.
+    /// </para>
     /// </remarks>
     Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct);
 

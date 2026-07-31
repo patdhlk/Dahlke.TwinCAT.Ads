@@ -62,7 +62,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   throws can skip the ones after it. Swallowing observer exceptions there would make this
   observable behave unlike every other one an Rx consumer composes with. Both paths guarantee
   the same thing at the boundary — the exception never escapes onto the notification thread, and
-  the next transition is still delivered.
+  the next transition is still delivered. `Transitions` is subscribe-only: what it hands back is
+  an observable and nothing else, so no consumer can cast its way to the underlying sequence and
+  complete, dispose, or push into the alarm stream for the whole process.
+
+  **On `Ended`, the kind is the authority and the payload is not.** `AlarmTransition.Alarm`
+  carries the last reading before the alarm ended, so its `IsActive` / `IsAcknowledged` describe
+  that reading rather than the ended state — an alarm also ends by its slot being reused or
+  blanked, in which case the newest thing ever seen is the alarm alive, and `Previous` is the
+  very same instance so a consumer diffing the two sees no change at all. Re-deriving
+  outstanding-ness from the payload therefore concludes the alarm is still live and never clears
+  it. Trust `Ended`: it means gone, whatever the fields say. The payload is deliberately not
+  normalised, because a synthesised reading would be one the PLC never produced.
 
   **Acknowledgement asks the PLC to acknowledge; it does not write the entry.**
   `AcknowledgeAsync` finds the alarm by `Key`, then calls the method named by
@@ -126,6 +137,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The metadata overload would instead build a neutral tree with one ADS read per member —
   for an array of N entries with M members, N×M round-trips per notification.
 
+  **Timestamps state a clock or state none — they never guess.** The PLC's `TIMESTRUCT`
+  carries no time zone, so nothing in the payload can say whether it is UTC or the machine's
+  local time. `PlcAlarmTargetOptions.PlcClock` (a `PlcClockKind`: `Unspecified`, `Utc` or
+  `Local`) is how a caller declares it per target, and it is what sets the `DateTimeKind` on
+  every `PlcAlarm.PlcTimestamp`. The default is `Unspecified`, which makes no claim: stamping
+  a wrong `Kind` is worse than stamping none, because a consumer calling `ToUniversalTime()`
+  then silently shifts every alarm in the plant by the host's offset, and a shifted timestamp
+  looks exactly like a real one. Alarms are also ordered by this value — `Reoccurred` fires
+  when an already-active alarm's timestamp advances — so it is load-bearing, not decorative.
+
+  **`PlcAlarm.SlotIndex` reports where the alarm sat, and addresses nothing.** The array
+  index an alarm was bound from is surfaced for diagnostics and display, because an operator
+  reading a PLC's array alongside this package's output needs to line the two up. It is
+  explicitly not an identity: slots are permanent and reused, so an index identifies a
+  position rather than an alarm. Nothing in this package addresses an alarm by it —
+  acknowledgement goes by `Key`, which is what removes the read-then-write window a
+  slot-addressed design would need.
+
+  **`IAlarmTextCatalog` is a public extension point, not just the JSON file.** Register your
+  own implementation before `AddTwinCatAdsAlarms` to resolve alarm text from a database, a
+  resource assembly, a translation service or anything else; the built-in JSON catalog is
+  registered only when none is present, so overriding it takes no opt-out flag. Its one
+  method must be safe to call concurrently — text is resolved on the ADS notification thread
+  while binding each snapshot.
+
   Ships with a JSON alarm text catalog (`sKey` → text, with per-key culture fallback) and
   startup validation that reports every misconfiguration at once. A relative `TextCatalog`
   resolves against the host's content root rather than the process working directory — the two
@@ -133,8 +169,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anchoring to the working directory would turn the most natural configuration into a
   `FileNotFoundException` that only appears on deployment. An absolute path is used as written.
   `AddTwinCatAdsAlarmHealthCheck()` reports from the worst outstanding severity — and **only**
-  that. It is not a liveness check: a target still waiting for its first connection has no
-  alarms and so reports healthy, indistinguishable from one that is connected and quiet.
+  that. Healthy has to be earned: it needs a severity that is both a named `AlarmSeverity`
+  member and below both thresholds. `E_ErrorType` is signed and an unrecognised value is
+  preserved rather than dropped, so an alarm can arrive carrying a severity nothing can rank —
+  `(AlarmSeverity)(-1)` sorts below `None` and clears no threshold. That reports Degraded, not
+  Healthy: an outstanding alarm this package cannot interpret is a reason to look, though not
+  by itself proof of a fault. It is not a liveness check either: a target still waiting for its
+  first connection has no alarms and so reports healthy, indistinguishable from one that is
+  connected and quiet.
   Register the core's `AddTwinCatAdsHealthCheck()` alongside it, which is what answers whether
   a target can be seen at all.
 
@@ -147,6 +189,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{attribute 'TcRpcEnable'}` — without it TwinCAT does not expose it over ADS at all and the
   call fails as an unknown method, whatever the path says.
 
+  **`AdsRpcResult` carries Beckhoff's own value shapes, not this library's neutral tree.** A
+  scalar arrives as a boxed primitive, which is what makes the common case look familiar, but a
+  struct or an array arrives as a `DynamicValue`-family object implementing `IStructValue` or
+  `IArrayValue` — not an `IReadOnlyDictionary<string, object?>` and not an `object?[]`. Casting
+  it to either throws. Decoding a returned container would require type metadata for the
+  method's signature, which this library deliberately does not fetch; when the neutral tree is
+  what you want, read the symbol with `ReadValueWithMetadataAsync`, which does decode.
+
 - **PLC enum metadata — `IAdsConnection.GetEnumMembersAsync`.** Resolves an enumeration's
   members — name and numeric value, in declaration order — from the running program's own type
   metadata, so a returned code can be read by the name the PLC gives it. Numbering is not
@@ -156,7 +206,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the machine it was written for and silently reports a different member elsewhere, with no
   error anywhere to catch it. The result is cached for the life of the connection, since PLC
   type metadata is fixed for a running program — which also means a download that changes an
-  enum is not seen until the connection is re-established.
+  enum is not seen until the connection is re-established. Resolving a type for the first time
+  makes the connection upload the running program's whole type system, which is a synchronous,
+  uncancellable Beckhoff operation; it is performed off the calling thread so that the
+  cancellation token and the per-target `TimeoutMs` genuinely bound the wait, as they do for
+  every other operation on the connection. Later calls for the same type are served from the
+  cache and wait for nothing.
 
   Both surfaces exist on simulated connections too, seeded code-first by
   `SimulatedAdsConnection.SetRpcHandler` and `SetEnumMembers`. Neither has a fallback: an

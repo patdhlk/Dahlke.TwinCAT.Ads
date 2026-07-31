@@ -74,8 +74,15 @@ internal sealed class PlcAlarmStore(string plcId)
                 transitions.Add(new AlarmTransition(AlarmTransitionKind.Ended, alarm, previous));
         }
 
-        // A key the snapshot no longer carries at all — its slot was reused, or the
-        // PLC blanked it. Report it ended with its last known state.
+        // A key the snapshot no longer carries at all — its slot was reused, or the PLC blanked
+        // it. There is no "after" reading to report, because the alarm did not transition: it
+        // stopped being described. So BOTH sides carry the last known state, which is typically
+        // still IsActive or still awaiting acknowledgement — i.e. a payload that, run back
+        // through IsOutstanding below, says the alarm is live. Ended is what settles that, and
+        // AlarmTransitionKind.Ended documents it as the authority for exactly this reason.
+        // Normalising the payload (forcing IsActive false, say) is deliberately NOT done: it
+        // would publish a PlcAlarm reading the PLC never produced, and would make this Ended
+        // disagree with the one emitted above, which carries a genuine snapshot.
         foreach (var (key, stale) in _outstanding)
         {
             if (!next.ContainsKey(key) && !transitions.Any(t => KeyMatches(t, key)))

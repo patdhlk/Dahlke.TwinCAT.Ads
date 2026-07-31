@@ -1,3 +1,4 @@
+using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using Microsoft.Extensions.Options;
 
@@ -54,6 +55,16 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
     private readonly Dictionary<string, object> _locks = new(StringComparer.OrdinalIgnoreCase);
     private readonly Subject<AlarmTransition> _transitions = new();
 
+    // What Transitions actually hands out. Returning _transitions itself would publish an
+    // IObserver<AlarmTransition> to every consumer: a cast away from IObservable is all it takes
+    // to call OnCompleted and end the alarm stream for the whole process, OnNext a fabricated
+    // alarm into an alarm system, or Dispose it — after which Publish's OnNext throws
+    // ObjectDisposedException on every notification and the log blames "a Transitions
+    // subscriber". AsObservable wraps it in an observable that is nothing else. Cached in a
+    // field rather than wrapped per read, so a consumer reading the property in a loop does not
+    // allocate a wrapper each time.
+    private readonly IObservable<AlarmTransition> _transitionsView;
+
     // Guards _disposed, _subscriptions and _retryDetach as a group. A registration can
     // complete on a pool thread at any moment — including after Dispose has returned — so
     // "am I still alive" and "record this subscription" have to be one atomic step.
@@ -76,6 +87,7 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
         _catalog = catalog;
         _dialect = dialect;
         _logger = logger;
+        _transitionsView = _transitions.AsObservable();
 
         // A null Targets means "no alarm targets configured" — PlcAlarmsOptionsValidator
         // says so explicitly for code-first callers who assign the property. Agreeing with
@@ -94,7 +106,7 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
     public event EventHandler<AlarmTransition>? AlarmChanged;
 
     /// <inheritdoc />
-    public IObservable<AlarmTransition> Transitions => _transitions;
+    public IObservable<AlarmTransition> Transitions => _transitionsView;
 
     /// <inheritdoc />
     public IReadOnlyCollection<PlcAlarm> GetOutstanding() =>

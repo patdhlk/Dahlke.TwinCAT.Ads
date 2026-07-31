@@ -135,12 +135,96 @@ public class AdsConnectionEnumMetadataTests
     }
 
     /// <summary>
-    /// Reproduces the cache-write race deterministically, on one thread: a Disconnect happening
-    /// WHILE a resolve is in flight must not let that resolve's result land in the cache after the
-    /// clear. <see cref="FakeEnumValueCollection.OnEnumerated"/> fires synchronously from inside
-    /// the resolve (during <c>.Select(...).ToArray()</c>, before the cache write), so calling
+    /// The documented <see cref="TimeoutException"/> has to be reachable. Until this branch it
+    /// was not: resolution ran synchronously on the calling thread before a
+    /// <c>Task.FromResult</c>, with only a <c>ThrowIfCancellationRequested</c> at entry and no
+    /// timeout CTS anywhere — so on a cold connection to a slow PLC, <c>await
+    /// GetEnumMembersAsync(...)</c> blocked the caller for as long as Beckhoff's type-system
+    /// upload took, unbounded, on the acknowledge path. The fake blocks exactly where that
+    /// upload does (the first touch of <c>DataTypes</c>) and never releases on its own, so the
+    /// only way this test can complete is the timeout firing.
+    /// </summary>
+    [Fact]
+    public async Task ResolveThatOutlastsTheTimeout_ThrowsTimeoutException()
+    {
+        var options = new PlcTargetOptions { DisplayName = "PLC 1", TimeoutMs = 200 };
+        using var connection = new AdsConnection("plc1", options, new NullLoggerFactory());
+
+        var loader = new FakeDynamicSymbolLoader(
+            [new FakeEnumType("MyEnum", [new FakeEnumValue("SUCCESS", (short)0)])], []);
+
+        // TaskCompletionSource rather than a ManualResetEventSlim: nothing here has to be
+        // disposed while the blocked thread is still inside its wait.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ((FakeDataTypeCollection)loader.DataTypes).OnEnumerating =
+            () => release.Task.Wait(TimeSpan.FromSeconds(30));
+        connection.SetSymbolLoaderForTesting(loader);
+
+        try
+        {
+            var ex = await Assert.ThrowsAsync<TimeoutException>(
+                () => connection.GetEnumMembersAsync("MyEnum", CancellationToken.None));
+
+            Assert.Contains("MyEnum", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("200 ms", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+    }
+
+    /// <summary>
+    /// The other half of the disambiguation: the caller's own token must still surface as an
+    /// <see cref="OperationCanceledException"/>, not as the timeout. Same blocking fake, so this
+    /// also proves the wait is interruptible mid-resolve rather than only at entry — the entry
+    /// <c>ThrowIfCancellationRequested</c> that used to be the whole story cannot pass this,
+    /// because the token is cancelled only after the resolve is already stuck.
+    /// </summary>
+    [Fact]
+    public async Task CallerCancellation_DuringResolve_ThrowsOperationCanceled()
+    {
+        var options = new PlcTargetOptions { DisplayName = "PLC 1", TimeoutMs = 30_000 };
+        using var connection = new AdsConnection("plc1", options, new NullLoggerFactory());
+
+        var loader = new FakeDynamicSymbolLoader(
+            [new FakeEnumType("MyEnum", [new FakeEnumValue("SUCCESS", (short)0)])], []);
+
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resolving = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ((FakeDataTypeCollection)loader.DataTypes).OnEnumerating = () =>
+        {
+            resolving.TrySetResult();
+            release.Task.Wait(TimeSpan.FromSeconds(30));
+        };
+        connection.SetSymbolLoaderForTesting(loader);
+
+        using var cts = new CancellationTokenSource();
+
+        try
+        {
+            var call = connection.GetEnumMembersAsync("MyEnum", cts.Token);
+            await resolving.Task; // the resolve is genuinely in flight before we cancel
+            await cts.CancelAsync();
+
+            var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => call);
+            Assert.Equal(cts.Token, ex.CancellationToken);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+    }
+
+    /// <summary>
+    /// Reproduces the cache-write race deterministically: a Disconnect happening WHILE a resolve
+    /// is in flight must not let that resolve's result land in the cache after the clear.
+    /// <see cref="FakeEnumValueCollection.OnEnumerated"/> fires synchronously from inside the
+    /// resolve (during <c>.Select(...).ToArray()</c>, before the cache write), so calling
     /// <see cref="AdsConnection.Disconnect"/> from it faithfully simulates "a disconnect landed
-    /// mid-resolve" without any real concurrency or timing dependency.
+    /// mid-resolve" with no timing dependency. The resolve now runs on the thread pool rather
+    /// than the caller's thread, but the ordering this pins is unchanged: the hook still fires
+    /// strictly between the cache-miss check and the guarded write, which is the whole window.
     /// </summary>
     [Fact]
     public async Task ConcurrentDisconnect_DuringResolve_DoesNotCacheStaleMembers()

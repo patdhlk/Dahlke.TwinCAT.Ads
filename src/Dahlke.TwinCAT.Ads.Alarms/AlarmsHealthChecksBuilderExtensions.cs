@@ -37,7 +37,18 @@ public static class AlarmsHealthChecksBuilderExtensions
     /// upwards reports Unhealthy, everything below it reports Healthy, and nothing ever
     /// lands in the band between them. This is not validated: with the arguments swapped
     /// there is no reading of the caller's intent this method could honour instead. If a
-    /// check reports Unhealthy where Degraded was expected, look here first.
+    /// check reports Unhealthy where Degraded was expected, look here first. What the swap
+    /// cannot do is produce a Healthy: see the next paragraph.
+    /// </para>
+    /// <para>
+    /// <b>Healthy has to be earned, so an uninterpretable severity never reports it.</b> The
+    /// PLC's <c>E_ErrorType</c> is signed and a value outside <see cref="AlarmSeverity"/> is
+    /// cast through rather than dropped, so an outstanding alarm can carry a severity this
+    /// package cannot rank — <c>(AlarmSeverity)(-1)</c> sorts below
+    /// <see cref="AlarmSeverity.None"/> and clears neither threshold. Healthy therefore
+    /// requires a severity that is BOTH a named <see cref="AlarmSeverity"/> member and below
+    /// both thresholds; anything else that is not Unhealthy reports Degraded. An alarm nothing
+    /// can rank is worth a look, which is why it degrades rather than failing outright.
     /// </para>
     /// <para>
     /// <b>What this check does and does not tell you.</b> It reports ONLY the severity

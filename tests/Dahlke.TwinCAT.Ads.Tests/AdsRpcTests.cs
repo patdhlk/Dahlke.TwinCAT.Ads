@@ -50,6 +50,41 @@ public class AdsRpcTests
         Assert.Contains("DoIt", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Every other test here seeds and calls the SAME <c>("MAIN.Fb", "DoIt")</c> pair, so an
+    /// implementation keying on the path alone, or on the method alone, passes all of them. This
+    /// one seeds <c>A.Fb/DoIt</c> and then varies exactly one half of the key at a time: a
+    /// path-only lookup would answer <c>A.Fb/Other</c>, a method-only lookup would answer
+    /// <c>B.Fb/DoIt</c>. Both must miss.
+    /// </summary>
+    [Theory]
+    [InlineData("A.Fb", "Other")]  // right path, wrong method — fails a path-only key
+    [InlineData("B.Fb", "DoIt")]   // wrong path, right method — fails a method-only key
+    public async Task Lookup_UsesBothHalvesOfTheKey(string callPath, string callMethod)
+    {
+        var sim = NewSim();
+        sim.SetRpcHandler("A.Fb", "DoIt", _ => new AdsRpcResult(1, []));
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(
+            () => sim.InvokeRpcMethodAsync(callPath, callMethod, [], CancellationToken.None));
+
+        Assert.Contains(callPath, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(callMethod, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SeededPair_IsStillReachable_AfterTheNearMisses()
+    {
+        // Guards the theory above from passing for the wrong reason: a lookup broken outright
+        // would also throw for A.Fb/DoIt, and the theory alone could not tell that apart.
+        var sim = NewSim();
+        sim.SetRpcHandler("A.Fb", "DoIt", _ => new AdsRpcResult(1, []));
+
+        var result = await sim.InvokeRpcMethodAsync("A.Fb", "DoIt", [], CancellationToken.None);
+
+        Assert.Equal(1, result.ReturnValue);
+    }
+
     [Fact]
     public async Task OutParameters_AreCarriedThrough()
     {

@@ -57,6 +57,10 @@ export TWINCAT_TEST_SYMBOL_STRUCT=MAIN.TestStruct
 export TWINCAT_TEST_SYMBOL_ARRAY=MAIN.TestArray
 export TWINCAT_TEST_SYMBOL_ALARMS=MAIN.ErrorHandler.aHmiAlarms
 
+# The only variable here that causes a WRITE to the PLC. Without it the acknowledge test
+# reports passed while doing nothing — see the note below.
+export TWINCAT_TEST_ALARM_ACK_KEY=Test_Err_60
+
 dotnet test tests/Dahlke.TwinCAT.Ads.HardwareTests --framework net8.0
 ```
 
@@ -78,14 +82,20 @@ export TWINCAT_TEST_ROUTE_ADDRESS=192.168.1.223
 export TWINCAT_TEST_AMSNETID=5.138.44.199.1.1
 export TWINCAT_TEST_PORT=851
 export TWINCAT_TEST_SYMBOL_ALARMS=MAIN.ErrorHandler.aHmiAlarms
+export TWINCAT_TEST_ALARM_ACK_KEY=Test_Err_60
 
 dotnet test tests/Dahlke.TwinCAT.Ads.HardwareTests --framework net8.0
 ```
 
 > Facts gated on an unset symbol variable return immediately and report as **passed**, not skipped.
 > A run that leaves `TWINCAT_TEST_SYMBOL_STRUCT` / `TWINCAT_TEST_SYMBOL_ARRAY` /
-> `TWINCAT_TEST_SYMBOL_ALARMS` unset is therefore green while verifying nothing about containers
-> (or alarm binding) — set all four before treating a green run as release evidence.
+> `TWINCAT_TEST_SYMBOL_ALARMS` / `TWINCAT_TEST_ALARM_ACK_KEY` unset is therefore green while
+> verifying nothing about containers, alarm binding, **or acknowledgement** — set all five before
+> treating a green run as release evidence. `TWINCAT_TEST_ALARM_ACK_KEY` is the one that gates
+> `Acknowledge_ReachesThePlc`, the only test that exercises 0.7.0's headline mechanism; a run
+> without it proves nothing about acknowledgement no matter how green it looks. The first block
+> above sets all five for exactly that reason; the second sets only the alarm pair, because what
+> it records is one site's router configuration rather than a full release run.
 
 ## Test coverage
 

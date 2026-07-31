@@ -85,6 +85,40 @@ public class PlcAlarmHealthCheckTests
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
     }
 
+    [Theory]
+    [InlineData(-1)]   // E_ErrorType is SIGNED; the binder preserves what it cannot name
+    [InlineData(99)]   // and an unknown value above the named range is equally uninterpretable
+    public async Task UnrecognisedSeverity_IsNeverHealthy(int raw)
+    {
+        // The ladder used to end in `else Healthy`, so a severity below None cleared neither
+        // threshold and was announced as Healthy — with "worst severity -1" in its own
+        // description. An outstanding alarm nothing can rank is not a healthy PLC.
+        var result = await CheckAsync(Alarm((AlarmSeverity)raw));
+
+        Assert.NotEqual(HealthStatus.Healthy, result.Status);
+    }
+
+    [Fact]
+    public async Task SeverityBelowNone_IsDegraded_NotUnhealthy()
+    {
+        // Degraded rather than Unhealthy is the deliberate choice: an alarm this package cannot
+        // rank is a reason to look, not proof of a fault, and reporting Unhealthy would pull a
+        // serving instance out of rotation over a PLC enum member we have not been taught.
+        var result = await CheckAsync(Alarm((AlarmSeverity)(-1)));
+
+        Assert.Equal(HealthStatus.Degraded, result.Status);
+    }
+
+    [Fact]
+    public async Task SeverityAboveTheNamedRange_IsUnhealthy()
+    {
+        // The unhealthyAt comparison is tested BEFORE the recognised-severity guard, so a value
+        // above Error still reports Unhealthy rather than being softened to Degraded by it.
+        var result = await CheckAsync(Alarm((AlarmSeverity)99));
+
+        Assert.Equal(HealthStatus.Unhealthy, result.Status);
+    }
+
     [Fact]
     public async Task OutstandingAlarms_AreReportedInData()
     {

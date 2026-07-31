@@ -712,17 +712,73 @@ internal sealed class AdsConnection : IManagedConnection
     /// caller but is not cached. No lock is held across the resolve, so this never serialises an
     /// ADS round-trip behind a disconnect.
     /// </para>
+    /// <para>
+    /// <b>Bounded, and off the caller's thread.</b> Resolution is entirely SYNCHRONOUS Beckhoff
+    /// work — the first touch of <c>DataTypes</c> triggers the type-system upload, a network
+    /// round-trip on a cold connection — so running it inline would block the awaiting thread for
+    /// as long as the PLC took, with no token able to interrupt it and the documented
+    /// <see cref="TimeoutException"/> unreachable. It runs on the thread pool instead, awaited
+    /// through one linked <see cref="CancellationTokenSource"/>, with
+    /// <see cref="CancellationDisambiguator"/> deciding caller-cancellation
+    /// (<see cref="OperationCanceledException"/>) from the elapsed per-target timeout
+    /// (<see cref="TimeoutException"/>) — the same shape as every other operation here.
+    /// The honest limit: Beckhoff's upload itself has no cancellation, so what the bound buys is
+    /// that the CALLER stops waiting. The abandoned resolve runs to completion on its own thread
+    /// and discards its result; it never reaches the cache, because only the awaiting path
+    /// writes there.
+    /// </para>
     /// </remarks>
-    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    public async Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(typeName);
         ct.ThrowIfCancellationRequested();
 
         if (_enumCache.TryGetValue(typeName, out var cached))
-            return Task.FromResult(cached);
+            return cached;
 
         var generationAtStart = Volatile.Read(ref _enumCacheGeneration);
 
+        using var cts = CreateTimeoutCts(ct);
+
+        // CancellationToken.None on Task.Run deliberately: its token only decides whether the
+        // work is ever SCHEDULED, and once the upload is under way nothing can abort it. The
+        // bound that matters is the WaitAsync below.
+        var resolve = Task.Run(() => ResolveEnumMembers(typeName), CancellationToken.None);
+
+        AdsEnumMember[] members;
+        try
+        {
+            members = await resolve.WaitAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Nothing awaits `resolve` after this, so observe whatever it faults with rather
+            // than leaving an unobserved task exception to surface elsewhere.
+            _ = resolve.ContinueWith(
+                static abandoned => _ = abandoned.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+
+            throw CancellationDisambiguator.CreateException(ct, typeName, PlcId, _options.TimeoutMs);
+        }
+
+        // Only commit if no Disconnect/ForceDisconnect cleared the cache while this call was
+        // resolving (see the generation-guarded-write remarks above). Either way THIS caller
+        // still gets its freshly-resolved result — only the cache write is skipped.
+        if (Volatile.Read(ref _enumCacheGeneration) == generationAtStart)
+            _enumCache[typeName] = members;
+
+        return members;
+    }
+
+    /// <summary>
+    /// The blocking half of <see cref="GetEnumMembersAsync"/>: find the type among the symbol
+    /// loader's data types and project its members. Every line of it is synchronous Beckhoff
+    /// work, which is precisely why its caller runs it on the thread pool rather than inline.
+    /// </summary>
+    private AdsEnumMember[] ResolveEnumMembers(string typeName)
+    {
         var symbolLoader = GetSymbolLoader();
 
         var dataType = symbolLoader.DataTypes.FirstOrDefault(
@@ -738,17 +794,9 @@ internal sealed class AdsConnection : IManagedConnection
                 $"Data type '{typeName}' on PLC '{PlcId}' is not an enumeration " +
                 $"(category {dataType.Category}), so its members cannot be resolved.");
 
-        var members = enumType.EnumValues
+        return enumType.EnumValues
             .Select(v => new AdsEnumMember(v.Name, Convert.ToInt64(v.Value, CultureInfo.InvariantCulture)))
             .ToArray();
-
-        // Only commit if no Disconnect/ForceDisconnect cleared the cache while this call was
-        // resolving (see the generation-guarded-write remarks above). Either way THIS caller
-        // still gets its freshly-resolved result — only the cache write is skipped.
-        if (Volatile.Read(ref _enumCacheGeneration) == generationAtStart)
-            _enumCache[typeName] = members;
-
-        return Task.FromResult<IReadOnlyList<AdsEnumMember>>(members);
     }
 
     /// <inheritdoc />

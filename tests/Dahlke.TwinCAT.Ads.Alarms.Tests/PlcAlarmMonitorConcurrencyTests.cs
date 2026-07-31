@@ -209,6 +209,29 @@ public class PlcAlarmMonitorConcurrencyTests
     }
 
     [Fact]
+    public void Transitions_IsNotCastableToTheUnderlyingSubject()
+    {
+        // Handing out the Subject itself published an IObserver<AlarmTransition> to every
+        // consumer: one cast and any of them could call OnCompleted and end the alarm stream
+        // for the whole process, push a fabricated alarm into an alarm system, or Dispose it —
+        // after which Publish's OnNext throws ObjectDisposedException on every notification and
+        // the log blames "a Transitions subscriber". AsObservable is what closes that, and only
+        // a cast test can tell the wrapped observable from the raw Subject: both satisfy
+        // IObservable<AlarmTransition>, so every other assertion in this file passes either way.
+        var pool = new StubPool(failFirstSubscribe: false);
+        using var monitor = MonitorFor(pool);
+
+        var transitions = monitor.Transitions;
+
+        Assert.IsNotAssignableFrom<IObserver<AlarmTransition>>(transitions);
+        Assert.IsNotAssignableFrom<IDisposable>(transitions);
+
+        // Cached, not re-wrapped per read: a consumer reading the property in a loop must not
+        // allocate a wrapper each time.
+        Assert.Same(transitions, monitor.Transitions);
+    }
+
+    [Fact]
     public async Task DeferredTarget_RegistersWhenTheConnectionComesUp()
     {
         var pool = new StubPool(failFirstSubscribe: true);

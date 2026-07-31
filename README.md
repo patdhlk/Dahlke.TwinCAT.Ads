@@ -672,7 +672,7 @@ Each `Targets` entry:
 
 | Property | Type | Default | Description |
 |-----|------|---------|-------------|
-| `SymbolPath` | `string` | `""` | Required. Fully-qualified path of the PLC's alarm array (e.g. `MAIN.ErrorHandler.aHmiAlarms`). The last segment is trimmed off to derive `AcknowledgeInstancePath`, so a path with no parent segment fails startup |
+| `SymbolPath` | `string` | `""` | Required. Fully-qualified path of the PLC's alarm array (e.g. `MAIN.ErrorHandler.aHmiAlarms`). The last segment is trimmed off to derive `AcknowledgeInstancePath`, so a path with no parent segment fails startup **unless `AcknowledgeInstancePath` is set explicitly** — setting it satisfies the rule and nothing is derived |
 | `CycleTimeMs` | `int` | `200` | How often the PLC pushes array changes. Must be greater than zero |
 | `PlcClock` | `PlcClockKind` | `Unspecified` | What clock the PLC's `TIMESTRUCT` runs on: `Unspecified`, `Utc` or `Local`. `TIMESTRUCT` carries no time zone, so this cannot be inferred — the default states no claim rather than stamping a wrong `DateTimeKind` on every alarm |
 | `AcknowledgeInstancePath` | `string?` | `null` | Instance path of the function block that owns acknowledgement. Derived from `SymbolPath` when omitted, which is right only when the alarm array is a member of that block — set it for any other layout. Configures the built-in `FB_ErrorHandler` dialect; a custom `IPlcAlarmDialect` receives it and may ignore it, but must still be given some non-blank value if `SymbolPath` has no parent segment |

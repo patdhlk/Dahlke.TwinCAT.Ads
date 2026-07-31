@@ -67,9 +67,17 @@ public interface IPlcAlarmMonitor
     /// replay history.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Standard Rx semantics apply: do not throw from <c>OnNext</c>. Unlike
     /// <see cref="AlarmChanged"/>, subscribers here are NOT isolated from one another.
     /// See the type-level threading remarks.
+    /// </para>
+    /// <para>
+    /// <b>Subscribe-only.</b> What you get back is an observable and nothing else — casting it
+    /// to <see cref="IObserver{T}"/> or <see cref="IDisposable"/> to reach the underlying
+    /// sequence does not succeed. Only the monitor terminates this stream, and it does so once,
+    /// on shutdown.
+    /// </para>
     /// </remarks>
     IObservable<AlarmTransition> Transitions { get; }
 

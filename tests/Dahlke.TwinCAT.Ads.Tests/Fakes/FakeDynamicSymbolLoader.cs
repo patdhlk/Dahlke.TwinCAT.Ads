@@ -93,8 +93,19 @@ internal sealed class FakeDataTypeCollection(IReadOnlyList<IDataType> dataTypes)
     /// </summary>
     public int EnumerationCount { get; private set; }
 
+    /// <summary>
+    /// Invoked at the top of <see cref="GetEnumerator"/>, on whichever thread is resolving.
+    /// Stands in for Beckhoff's lazy type-system upload: the first touch of a real
+    /// <c>DataTypes</c> collection is a synchronous, uncancellable network round-trip, so a hook
+    /// that simply BLOCKS here is a faithful model of a cold connection to a slow PLC — and the
+    /// only way to prove <c>AdsConnection.GetEnumMembersAsync</c> bounds the caller's wait rather
+    /// than blocking it for as long as the PLC takes.
+    /// </summary>
+    public Action? OnEnumerating { get; set; }
+
     public IEnumerator<IDataType> GetEnumerator()
     {
+        OnEnumerating?.Invoke();
         EnumerationCount++;
         return dataTypes.GetEnumerator();
     }

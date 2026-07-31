@@ -38,11 +38,13 @@ internal sealed class ErrorHandlerAlarmDialect : IPlcAlarmDialect
         // Resolved BEFORE the acknowledgement is issued, and never after it.
         //
         // This call fails in several ordinary ways — the type not published, the type not an
-        // enum, cancellation, the per-target timeout. Every one of them, downstream of the RPC,
-        // would surface a failure for an alarm the PLC HAD already acknowledged: the operator
-        // presses the button again on something that already worked. The core caches an enum's
-        // members per connection for the connection's life, so hoisting it costs nothing and
-        // leaves only the unavoidable value-interpretation step after the write.
+        // enum, the caller cancelling, and the per-target timeout elapsing (which the core
+        // enforces around this call by resolving off the calling thread; before 0.7.0 it could
+        // not, and a cold type-system upload was unbounded). Every one of them, downstream of
+        // the RPC, would surface a failure for an alarm the PLC HAD already acknowledged: the
+        // operator presses the button again on something that already worked. The core caches an
+        // enum's members per connection for the connection's life, so hoisting it costs nothing
+        // and leaves only the unavoidable value-interpretation step after the call.
         var members = await context.Connection
             .GetEnumMembersAsync(ResultTypeName, ct).ConfigureAwait(false);
 
