@@ -193,6 +193,26 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     }
 
     /// <summary>
+    /// Mirrors <see cref="SimulatedAdsConnection.InvokeRpcMethodAsync"/>'s argument validation —
+    /// the part of the RPC surface the shared contract suite pins — and then refuses the call.
+    /// This double has no handler table to seed, and a call that appeared to succeed while doing
+    /// nothing is the exact defect the RPC surface exists to prevent, so the refusal is loud and
+    /// names the path and method rather than returning an empty result.
+    /// </summary>
+    public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(symbolPath);
+        ArgumentNullException.ThrowIfNull(methodName);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        ct.ThrowIfCancellationRequested();
+
+        throw new InvalidOperationException(
+            $"This in-memory double cannot invoke '{symbolPath}.{methodName}' — it has no RPC " +
+            "handler surface. Use SimulatedAdsConnection.SetRpcHandler for a seedable simulated call.");
+    }
+
+    /// <summary>
     /// Mirrors <see cref="SimulatedAdsConnection.WriteControlAsync"/>'s observable-state
     /// semantics: records the requested state so <see cref="GetAdsStateAsync"/> reflects it
     /// immediately — genuinely implemented (not a throwing stub) because the shared contract

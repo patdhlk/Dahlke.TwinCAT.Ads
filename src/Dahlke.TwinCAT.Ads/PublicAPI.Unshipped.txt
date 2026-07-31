@@ -1,4 +1,14 @@
 #nullable enable
+Dahlke.TwinCAT.Ads.AdsRpcResult
+Dahlke.TwinCAT.Ads.AdsRpcResult.<Clone>$() -> Dahlke.TwinCAT.Ads.AdsRpcResult!
+Dahlke.TwinCAT.Ads.AdsRpcResult.AdsRpcResult(object? ReturnValue, System.Collections.Generic.IReadOnlyList<object?>! OutParameters) -> void
+Dahlke.TwinCAT.Ads.AdsRpcResult.Deconstruct(out object? ReturnValue, out System.Collections.Generic.IReadOnlyList<object?>! OutParameters) -> void
+Dahlke.TwinCAT.Ads.AdsRpcResult.Equals(Dahlke.TwinCAT.Ads.AdsRpcResult? other) -> bool
+Dahlke.TwinCAT.Ads.AdsRpcResult.OutParameters.get -> System.Collections.Generic.IReadOnlyList<object?>!
+Dahlke.TwinCAT.Ads.AdsRpcResult.OutParameters.init -> void
+Dahlke.TwinCAT.Ads.AdsRpcResult.ReturnValue.get -> object?
+Dahlke.TwinCAT.Ads.AdsRpcResult.ReturnValue.init -> void
+Dahlke.TwinCAT.Ads.IAdsConnection.InvokeRpcMethodAsync(string! symbolPath, string! methodName, object?[]! parameters, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.AdsRpcResult!>!
 Dahlke.TwinCAT.Ads.IAdsConnectionPool.GetTargetStates() -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.PlcTargetStatus!>!
 Dahlke.TwinCAT.Ads.PlcTargetStatus
 Dahlke.TwinCAT.Ads.PlcTargetStatus.<Clone>$() -> Dahlke.TwinCAT.Ads.PlcTargetStatus!
@@ -11,8 +21,15 @@ Dahlke.TwinCAT.Ads.PlcTargetStatus.PlcId.init -> void
 Dahlke.TwinCAT.Ads.PlcTargetStatus.PlcTargetStatus(string! PlcId, Dahlke.TwinCAT.Ads.ConnectionMode Mode, Dahlke.TwinCAT.Ads.ConnectionState State) -> void
 Dahlke.TwinCAT.Ads.PlcTargetStatus.State.get -> Dahlke.TwinCAT.Ads.ConnectionState
 Dahlke.TwinCAT.Ads.PlcTargetStatus.State.init -> void
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.InvokeRpcMethodAsync(string! symbolPath, string! methodName, object?[]! parameters, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.AdsRpcResult!>!
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SetRpcHandler(string! symbolPath, string! methodName, System.Func<object?[]!, Dahlke.TwinCAT.Ads.AdsRpcResult!>! handler) -> void
+override Dahlke.TwinCAT.Ads.AdsRpcResult.Equals(object? obj) -> bool
+override Dahlke.TwinCAT.Ads.AdsRpcResult.GetHashCode() -> int
+override Dahlke.TwinCAT.Ads.AdsRpcResult.ToString() -> string!
 override Dahlke.TwinCAT.Ads.PlcTargetStatus.Equals(object? obj) -> bool
 override Dahlke.TwinCAT.Ads.PlcTargetStatus.GetHashCode() -> int
 override Dahlke.TwinCAT.Ads.PlcTargetStatus.ToString() -> string!
+static Dahlke.TwinCAT.Ads.AdsRpcResult.operator !=(Dahlke.TwinCAT.Ads.AdsRpcResult? left, Dahlke.TwinCAT.Ads.AdsRpcResult? right) -> bool
+static Dahlke.TwinCAT.Ads.AdsRpcResult.operator ==(Dahlke.TwinCAT.Ads.AdsRpcResult? left, Dahlke.TwinCAT.Ads.AdsRpcResult? right) -> bool
 static Dahlke.TwinCAT.Ads.PlcTargetStatus.operator !=(Dahlke.TwinCAT.Ads.PlcTargetStatus? left, Dahlke.TwinCAT.Ads.PlcTargetStatus? right) -> bool
 static Dahlke.TwinCAT.Ads.PlcTargetStatus.operator ==(Dahlke.TwinCAT.Ads.PlcTargetStatus? left, Dahlke.TwinCAT.Ads.PlcTargetStatus? right) -> bool

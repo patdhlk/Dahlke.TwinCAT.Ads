@@ -3,6 +3,7 @@ using TwinCAT.Ads;
 using TwinCAT.Ads.SumCommand;
 using TwinCAT.Ads.TypeSystem;
 using TwinCAT.TypeSystem;
+using TwinCAT.ValueAccess;
 
 namespace Dahlke.TwinCAT.Ads;
 
@@ -588,6 +589,72 @@ internal sealed class AdsConnection : IManagedConnection
             results[kvp.Key] = kvp.Value;
 
         return results;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Resolution goes through the same <see cref="GetSymbolLoader"/> dynamic tree every other
+    /// symbol operation uses; the RPC capability is the resolved symbol's own
+    /// <see cref="IRpcCallableInstance"/> facet, which only a function-block or program instance
+    /// carries. A symbol that resolves but lacks it is a caller mistake, not an ADS failure, so it
+    /// throws <see cref="InvalidOperationException"/> rather than an
+    /// <see cref="AdsErrorException"/>.
+    /// </para>
+    /// <para>
+    /// Timeout/cancellation follow the shape of every other operation here: one linked
+    /// <see cref="CancellationTokenSource"/> bounds the call, and
+    /// <see cref="CancellationDisambiguator"/> decides whether the caller cancelled
+    /// (<see cref="OperationCanceledException"/>) or the per-target timeout elapsed
+    /// (<see cref="TimeoutException"/>).
+    /// </para>
+    /// </remarks>
+    public async Task<AdsRpcResult> InvokeRpcMethodAsync(
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(symbolPath);
+        ArgumentNullException.ThrowIfNull(methodName);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        using var cts = CreateTimeoutCts(ct);
+        var symbolLoader = GetSymbolLoader();
+
+        if (!symbolLoader.Symbols.TryGetInstance(symbolPath, out var symbol))
+            throw new AdsErrorException($"Symbol '{symbolPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+
+        if (symbol is not IRpcCallableInstance rpc)
+            throw new InvalidOperationException(
+                $"Symbol '{symbolPath}' on PLC '{PlcId}' is not RPC-callable, so method " +
+                $"'{methodName}' cannot be invoked on it. RPC requires a function block or " +
+                "program instance whose method carries {attribute 'TcRpcEnable'}.");
+
+        ResultRpcMethodAccess result;
+        try
+        {
+            // Beckhoff annotates inParameters as object[]? — a NON-nullable element type — but a
+            // PLC method may legitimately take an argument this library models as object?, so the
+            // public signature keeps object?[]. The two are the same type at runtime (nullability
+            // is erased), so an explicit cast converts the annotation without suppressing anything.
+            result = await rpc.InvokeRpcMethodAsync(methodName, (object[])parameters, cts.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
+        }
+
+        if (result.Failed)
+            // ResultRpcMethodAccess derives from the protocol-NEUTRAL TwinCAT.ValueAccess.ResultAccess,
+            // whose ErrorCode is a plain int — unlike the Ads-specific results elsewhere in this file,
+            // which already carry an AdsErrorCode. The value is an ADS error code either way; the cast
+            // only restores the type the neutral base erased.
+            throw new AdsErrorException(
+                $"RPC '{methodName}' on symbol '{symbolPath}' on PLC '{PlcId}' failed: {(AdsErrorCode)result.ErrorCode}",
+                (AdsErrorCode)result.ErrorCode);
+
+        return new AdsRpcResult(
+            result.ReturnValue,
+            result.OutParameters is null ? [] : [.. result.OutParameters]);
     }
 
     /// <inheritdoc />

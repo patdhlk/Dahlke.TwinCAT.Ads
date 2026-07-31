@@ -68,6 +68,12 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     // store's so subscription casing never has to match the writer's.
     private readonly SubscriberRegistry<string, object?> _subscribers;
 
+    // Seeded PLC method calls, keyed case-insensitively on (path, method) — see RpcKeyComparer.
+    // Guarded by locking on the dictionary itself rather than a ConcurrentDictionary: seeding is
+    // a test-setup operation, so the contention this would relieve does not exist.
+    private readonly Dictionary<(string Path, string Method), Func<object?[], AdsRpcResult>> _rpcHandlers
+        = new(RpcKeyComparer.Instance);
+
     /// <inheritdoc />
     public string PlcId { get; }
 
@@ -398,6 +404,68 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
         return Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(results);
     }
 
+    /// <summary>
+    /// Seeds the result of a simulated PLC method call. Code-first only — configuration is
+    /// string-typed and cannot express a handler.
+    /// </summary>
+    /// <param name="symbolPath">
+    /// The instance path the handler answers for, matched case-insensitively like every other
+    /// simulated symbol path.
+    /// </param>
+    /// <param name="methodName">The method name, likewise matched case-insensitively.</param>
+    /// <param name="handler">
+    /// Invoked with the caller's arguments; its <see cref="AdsRpcResult"/> is what the call
+    /// returns. Seeding the same path and method again replaces the previous handler.
+    /// </param>
+    /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
+    public void SetRpcHandler(string symbolPath, string methodName, Func<object?[], AdsRpcResult> handler)
+    {
+        ArgumentNullException.ThrowIfNull(symbolPath);
+        ArgumentNullException.ThrowIfNull(methodName);
+        ArgumentNullException.ThrowIfNull(handler);
+
+        lock (_rpcHandlers)
+            _rpcHandlers[(symbolPath, methodName)] = handler;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// A simulated connection has no PLC to call, so the answer comes from a handler seeded by
+    /// <see cref="SetRpcHandler"/>. There is deliberately NO fallback: an unseeded call THROWS.
+    /// A simulated call that appeared to succeed while doing nothing is precisely the failure this
+    /// surface exists to make impossible — an acknowledge that no-ops looks identical to one that
+    /// worked, which is how the shipped path went weeks without anyone noticing.
+    /// </para>
+    /// <para>
+    /// Path and method are matched case-insensitively, matching real PLC symbol paths and method
+    /// names (and the simulated store's own key comparer).
+    /// </para>
+    /// </remarks>
+    public Task<AdsRpcResult> InvokeRpcMethodAsync(
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(symbolPath);
+        ArgumentNullException.ThrowIfNull(methodName);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        ct.ThrowIfCancellationRequested();
+
+        Func<object?[], AdsRpcResult>? handler;
+        lock (_rpcHandlers)
+            _rpcHandlers.TryGetValue((symbolPath, methodName), out handler);
+
+        // Deliberately NOT a null result. A simulated call that appears to succeed while doing
+        // nothing is the precise failure this library exists to make impossible.
+        if (handler is null)
+            throw new InvalidOperationException(
+                $"No simulated RPC handler is seeded for '{symbolPath}.{methodName}' on PLC " +
+                $"'{PlcId}'. Call SetRpcHandler(\"{symbolPath}\", \"{methodName}\", ...) before " +
+                "invoking it.");
+
+        return Task.FromResult(handler(parameters));
+    }
+
     /// <inheritdoc />
     /// <remarks>
     /// Starts at <see cref="AdsState.Run"/> and reflects the most recent
@@ -572,4 +640,19 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// </summary>
     public void Dispose() { }
 
+}
+
+/// <summary>Case-insensitive on both halves — PLC symbol paths and method names are.</summary>
+internal sealed class RpcKeyComparer : IEqualityComparer<(string Path, string Method)>
+{
+    public static readonly RpcKeyComparer Instance = new();
+
+    public bool Equals((string Path, string Method) x, (string Path, string Method) y) =>
+        string.Equals(x.Path, y.Path, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(x.Method, y.Method, StringComparison.OrdinalIgnoreCase);
+
+    public int GetHashCode((string Path, string Method) obj) =>
+        HashCode.Combine(
+            StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Path),
+            StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Method));
 }

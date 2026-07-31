@@ -788,6 +788,30 @@ public abstract class AdsConnectionContractTests
     }
 
     // =====================================================================
+    // RPC.
+    // =====================================================================
+
+    /// <summary>
+    /// What an RPC call DOES necessarily differs per implementation — a real connection reaches a
+    /// function block on the PLC, a simulated one has no PLC to reach — so the shared contract
+    /// pins the part that genuinely is shared: argument validation. A null path, method name or
+    /// parameter array is a programming error on every implementation and must be reported as one
+    /// rather than reaching a symbol lookup, a handler table, or the wire.
+    /// </summary>
+    [Fact]
+    public async Task InvokeRpcMethodAsync_NullArguments_ThrowArgumentNullException()
+    {
+        await using var h = await CreateHarnessAsync();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => h.Connection.InvokeRpcMethodAsync(null!, "DoIt", [], CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => h.Connection.InvokeRpcMethodAsync("MAIN.Fb", null!, [], CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => h.Connection.InvokeRpcMethodAsync("MAIN.Fb", "DoIt", null!, CancellationToken.None));
+    }
+
+    // =====================================================================
     // Shared timing knobs (real-time guards only; never a primary sync mechanism).
     // =====================================================================
 

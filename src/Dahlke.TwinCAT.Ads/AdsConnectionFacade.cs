@@ -404,6 +404,14 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     }
 
     /// <inheritdoc />
+    public async Task<AdsRpcResult> InvokeRpcMethodAsync(
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+    {
+        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
+        return await conn.InvokeRpcMethodAsync(symbolPath, methodName, parameters, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<AdsState> GetAdsStateAsync(CancellationToken ct)
     {
         var conn = await SnapshotAsync(ct).ConfigureAwait(false);
