@@ -59,6 +59,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in one startup failure. If you registered a no-op `IValidateOptions<TwinCatAdsOptions>` to disable
   core validation, it no longer has that effect.
 
+- **A failing alarm notification is reported once per outage, not once per notification.** ([#27](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/27))
+  `PlcAlarmMonitor` logged both of its notification diagnostics — the `PlcAlarmShapeException` path
+  and the broad catch-all below it — with a full stack trace at `Error`, unlatched, on every
+  notification. A shape mismatch is a property of the PLC's *type* rather than of one notification,
+  so once it started it did not stop: at the default `CycleTimeMs = 200` that is five identical
+  stack traces per second per target, indefinitely. The practical effect was log exhaustion during
+  exactly the incident an operator would be trying to diagnose, with all the information in the
+  first occurrence.
+
+  Each diagnostic is now latched per `(plcId, symbolPath)`, following the idiom already used by
+  `PlcAlarmBinder`'s unknown-severity report and `JsonAlarmTextCatalog`'s missing-key report. The
+  first failure is reported in full; the rest are counted. **The latch re-arms when a notification
+  binds** — recovery is announced at `Information` naming how many failed in between, so the extent
+  of the outage stays on the record, and a fault that recurs after recovering is reported in full
+  again rather than being silenced forever. The two diagnostics latch independently, so a known
+  shape mismatch cannot hide the first occurrence of an unrelated failure.
+
+  No behavioural change to the alarm pipeline: the same snapshots are dropped and the same
+  transitions published, at the same times. Only the log volume differs.
+
 ## [0.7.0] - 2026-07-30
 
 ### Added
