@@ -47,6 +47,16 @@ internal sealed class AdsConnection : IManagedConnection
     private readonly ConcurrentDictionary<string, IReadOnlyList<AdsEnumMember>> _enumCache
         = new(StringComparer.OrdinalIgnoreCase);
 
+    // Generation guard for _enumCache: bumped (before the clear, see Disconnect/ForceDisconnect)
+    // every time the cache is cleared. GetEnumMembersAsync captures this before resolving and only
+    // commits its result if the generation is still the one it started with. Without this, a
+    // resolve already past its cache-miss check when Disconnect/ForceDisconnect runs could still
+    // write `_enumCache[typeName] = members` AFTER the clear, resurrecting pre-download numbering
+    // into the very cache the clear exists to invalidate. No lock is held across the resolve —
+    // only this counter is checked — so a network round-trip is never serialised behind a
+    // disconnect.
+    private long _enumCacheGeneration;
+
     public string PlcId { get; }
     public string DisplayName => _options.DisplayName;
     public bool IsConnected => _client.IsConnected;
@@ -103,6 +113,11 @@ internal sealed class AdsConnection : IManagedConnection
     public void Disconnect()
     {
         lock (_symbolLoaderLock) { _symbolLoader = null; }
+        // Increment BEFORE clearing: an in-flight GetEnumMembersAsync rechecks the generation
+        // right before it writes. Clearing first would leave a window where that write's
+        // generation check still passes (not yet bumped) and lands AFTER Clear() with nothing left
+        // to invalidate it — see GetEnumMembersAsync's remarks.
+        Interlocked.Increment(ref _enumCacheGeneration);
         _enumCache.Clear();
         if (_client.IsConnected)
         {
@@ -114,6 +129,7 @@ internal sealed class AdsConnection : IManagedConnection
     public void ForceDisconnect()
     {
         lock (_symbolLoaderLock) { _symbolLoader = null; }
+        Interlocked.Increment(ref _enumCacheGeneration);
         _enumCache.Clear();
         try { _client.Disconnect(); } catch { /* best effort */ }
     }
@@ -686,6 +702,16 @@ internal sealed class AdsConnection : IManagedConnection
     /// PLC download picks up the new numbering rather than serving a stale map for the process's
     /// lifetime.
     /// </para>
+    /// <para>
+    /// <b>Generation-guarded write.</b> A call already past the cache-miss check below when a
+    /// concurrent <see cref="Disconnect"/>/<see cref="ForceDisconnect"/> clears the cache must not
+    /// resurrect its (now potentially stale, pre-download) result into the cache afterwards — that
+    /// would defeat the very clear this method's caching depends on. <c>_enumCacheGeneration</c> is
+    /// captured before resolving and rechecked immediately before the write; a mismatch means a
+    /// clear happened while this call was in flight, so the result is still returned to THIS
+    /// caller but is not cached. No lock is held across the resolve, so this never serialises an
+    /// ADS round-trip behind a disconnect.
+    /// </para>
     /// </remarks>
     public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
     {
@@ -694,6 +720,8 @@ internal sealed class AdsConnection : IManagedConnection
 
         if (_enumCache.TryGetValue(typeName, out var cached))
             return Task.FromResult(cached);
+
+        var generationAtStart = Volatile.Read(ref _enumCacheGeneration);
 
         var symbolLoader = GetSymbolLoader();
 
@@ -714,7 +742,12 @@ internal sealed class AdsConnection : IManagedConnection
             .Select(v => new AdsEnumMember(v.Name, Convert.ToInt64(v.Value, CultureInfo.InvariantCulture)))
             .ToArray();
 
-        _enumCache[typeName] = members;
+        // Only commit if no Disconnect/ForceDisconnect cleared the cache while this call was
+        // resolving (see the generation-guarded-write remarks above). Either way THIS caller
+        // still gets its freshly-resolved result — only the cache write is skipped.
+        if (Volatile.Read(ref _enumCacheGeneration) == generationAtStart)
+            _enumCache[typeName] = members;
+
         return Task.FromResult<IReadOnlyList<AdsEnumMember>>(members);
     }
 
