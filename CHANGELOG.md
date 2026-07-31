@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **A dialect's configuration is validated only where that dialect is registered.**
+- **A dialect's configuration is validated only where that dialect is registered.** ([#25](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/25))
   `PlcAlarmsOptionsValidator` encoded two `FB_ErrorHandler` rules — `AcknowledgeMethod` must be
   non-blank, and `AcknowledgeInstancePath` must be set when `SymbolPath` has no parent segment
   to trim — and applied them whichever `IPlcAlarmDialect` was registered, because validation
@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that needs a way for dialect-specific configuration to bind; this is the half that is not
   breaking. A default installation validates exactly as it did in 0.7.0, down to the number of
   failures reported per boot.
+
+### Fixed
 
 - **The alarm options validator no longer replaces a consumer's own.** Registration moved from
   `TryAddSingleton` to `TryAddEnumerable`. `TryAddSingleton` adds only when no
