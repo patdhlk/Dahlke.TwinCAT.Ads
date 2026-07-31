@@ -299,7 +299,7 @@ await app.WaitForShutdownAsync();
 
 **An alarm is outstanding while its fault is present OR it still awaits acknowledgement.** A PLC alarm array is fixed-size with permanent slots — an alarm ends by `IsActive := FALSE`, never by leaving the array — and when `NeedsAck` is set the entry outlives its fault condition until an operator acknowledges it. So a fault that self-clears before anyone looks still reaches you, `Cleared` marks the fault ending while the alarm stays outstanding, and `Ended` fires only once the alarm is genuinely finished.
 
-**Identity is `sKey`, not `Id`.** `Id` names the equipment (BMK) and is shared by every alarm on that machine; `sKey` is `'<BMK>Err<Code>'`. Group by `EquipmentId`, key by `Key`.
+**Identity is `sKey`, not `Id`.** `Id` names the equipment (BMK) and is shared by every alarm on that machine; `sKey` is the PLC's own composite key combining the equipment identifier and the error code — `Test_Err_60` for equipment `Test`, error code `60`, for example. The exact spelling is the PLC program's business and this package treats it as opaque: never parse it. Group by `EquipmentId`, key by `Key`.
 
 **Every restart re-raises everything outstanding.** The outstanding set lives in memory and starts empty, and ADS delivers one notification on registration — so the first snapshot after a host restart reports every alarm the PLC is currently holding as newly `Raised`. There is no way to tell a two-day-old alarm from one raised while the host was down without persisting the set. Forwarding `Raised` straight to a pager therefore pages the whole outstanding set on every deployment: deduplicate downstream on `Key` plus `PlcTimestamp`, or suppress the first snapshot after start.
 

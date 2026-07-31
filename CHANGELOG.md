@@ -24,8 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **Identity is the PLC's `sKey`, never `Id`.** `Id` is the equipment identifier (BMK) and is
   shared by every alarm on one machine, so keying on it collapses simultaneous alarms into a
-  single entry. `sKey` is `'<BMK>Err<Code>'`. `EquipmentId` is still surfaced, for grouping
-  and filtering, which is what it is actually for.
+  single entry. `sKey` is the PLC's own composite key combining the equipment identifier and
+  the error code — `Test_Err_60` for equipment `Test`, error code `60`, for example — and this
+  package treats it as opaque: the exact spelling is the PLC program's business, and it is
+  never parsed. `EquipmentId` is still surfaced, for grouping and filtering, which is what it
+  is actually for.
 
   **A PLC that is unreachable at boot does not fail the host.** The facade's *first*
   subscription registration is not durable — it waits out `TimeoutMs`, throws, and retains
@@ -76,6 +79,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outstanding set keeps its last good reading rather than a half-bound one — but the
   subscription stays live, so a transient malformation recovers on the next well-formed
   notification instead of requiring a restart.
+
+  **Verified against a live PLC, not just simulation.** A real notification arrives as a CLR
+  array of `TwinCAT.TypeSystem.DynamicValue`, with each element's members read through
+  `IStructValue` rather than a dictionary, and `E_ErrorType` decodes as a plain integral
+  matching the documented `None=0, Info=1, Warning=2, Error=3` numbering — none of which the
+  simulated store, built from seeded primitives, could confirm on its own. The alarms observed
+  on that run were themselves in the returned-to-normal-unacknowledged state, `IsActive=false`
+  with `NeedsAck=true`, the exact case the outstanding rule exists to keep visible rather than
+  dropping the moment a fault clears.
 
   **Notification cost is one payload decode, no round-trips.** The monitor subscribes through
   the untyped `SubscribeAsync`, which serves the whole array from the notification payload.

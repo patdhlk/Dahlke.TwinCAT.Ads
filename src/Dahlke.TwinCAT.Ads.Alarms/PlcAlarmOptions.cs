@@ -50,10 +50,11 @@ public sealed class PlcAlarmsOptions
     /// <see langword="null"/> for no catalog.
     /// </summary>
     /// <remarks>
-    /// One catalog serves the fleet: <c>sKey</c> is <c>'&lt;BMK&gt;Err&lt;Code&gt;'</c>
-    /// and BMKs identify equipment across the plant, so the key is already globally
-    /// meaningful. A deployment needing per-target text registers its own
-    /// <see cref="IAlarmTextCatalog"/>.
+    /// One catalog serves the fleet: <c>sKey</c> is the PLC's own composite key combining
+    /// the equipment identifier and the error code, and BMKs identify equipment across the
+    /// plant, so the key is already globally meaningful — its exact spelling is the PLC
+    /// program's business and this package never parses it. A deployment needing per-target
+    /// text registers its own <see cref="IAlarmTextCatalog"/>.
     /// </remarks>
     public string? TextCatalog { get; set; }
 

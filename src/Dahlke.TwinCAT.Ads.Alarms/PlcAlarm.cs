@@ -6,8 +6,11 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 /// <remarks>
 /// <para>
 /// <b>Identity is <see cref="Key"/>, never <see cref="EquipmentId"/>.</b> The PLC's
-/// <c>sKey</c> is <c>'&lt;BMK&gt;Err&lt;Code&gt;'</c> and is unique per alarm source;
-/// <c>Id</c> names the equipment and is shared by every alarm on that machine.
+/// <c>sKey</c> is its own composite key combining the equipment identifier and the error
+/// code — <c>Test_Err_60</c> for equipment <c>Test</c>, error code <c>60</c>, for example —
+/// and is unique per alarm source; <c>Id</c> names the equipment and is shared by every
+/// alarm on that machine. The exact spelling is the PLC program's business: this package
+/// treats <c>sKey</c> as opaque and never parses it.
 /// </para>
 /// <para>
 /// Immutable: each notification produces new instances rather than mutating the
