@@ -3,13 +3,22 @@ using Microsoft.Extensions.Options;
 namespace Dahlke.TwinCAT.Ads.Alarms;
 
 /// <summary>
-/// Validates <see cref="PlcAlarmsOptions"/> at application startup.
+/// Validates the vendor-neutral parts of <see cref="PlcAlarmsOptions"/> at application startup.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Every failure is collected into one <see cref="ValidateOptionsResult"/> so an
 /// operator sees the whole picture in a single boot failure rather than fixing
 /// problems one restart at a time — the same contract as the core library's
 /// <c>TwinCatAdsOptionsValidator</c>.
+/// </para>
+/// <para>
+/// Only rules that hold for every <see cref="IPlcAlarmDialect"/> belong here. Rules about how a
+/// particular PLC acknowledges live with the dialect that reads them — see
+/// <see cref="ErrorHandlerAlarmDialectOptionsValidator"/> — because this type cannot see which
+/// dialect the container will resolve, and applying one vendor's rules to another's is how a
+/// custom dialect ends up failed at boot over configuration it never reads.
+/// </para>
 /// </remarks>
 internal sealed class PlcAlarmsOptionsValidator(IOptions<TwinCatAdsOptions> adsOptions)
     : IValidateOptions<PlcAlarmsOptions>
@@ -59,10 +68,11 @@ internal sealed class PlcAlarmsOptionsValidator(IOptions<TwinCatAdsOptions> adsO
 
             if (string.IsNullOrWhiteSpace(target.SymbolPath))
             {
-                // The exemplar has to be one whose OWN instance path derives correctly, since
-                // the rule below trims the last segment off it: 'GVL.Errors' would suggest a
-                // layout deriving 'GVL', which owns no acknowledging function block. This is
-                // the reference rack's layout.
+                // The exemplar keeps its parent segment because the built-in dialect derives the
+                // acknowledging function block by trimming this path's last segment — 'GVL.Errors'
+                // would suggest a layout deriving 'GVL', which owns no such block. That rule now
+                // lives in ErrorHandlerAlarmDialectOptionsValidator; the example stays consistent
+                // with it, since this message is what an operator sees first.
                 failures.Add(
                     $"PlcAlarms:Targets:{plcId}:SymbolPath must name the PLC's alarm array " +
                     "(e.g. 'MAIN.ErrorHandler.aHmiAlarms').");
@@ -73,30 +83,6 @@ internal sealed class PlcAlarmsOptionsValidator(IOptions<TwinCatAdsOptions> adsO
                 failures.Add(
                     $"PlcAlarms:Targets:{plcId}:CycleTimeMs must be greater than zero " +
                     $"(was {target.CycleTimeMs}).");
-            }
-
-            if (string.IsNullOrWhiteSpace(target.AcknowledgeMethod))
-            {
-                failures.Add(
-                    $"PlcAlarms:Targets:{plcId}:AcknowledgeMethod must name the PLC method that " +
-                    "acknowledges one alarm by key (default 'AcknowledgeAlarm').");
-            }
-
-            if (string.IsNullOrWhiteSpace(target.AcknowledgeInstancePath)
-                && target.SymbolPath?.LastIndexOf('.') is null or <= 0)
-            {
-                // Names the dialect coupling and the escape hatch in the message itself. The
-                // XML doc says both, but an operator hitting this sees a boot failure, not the
-                // doc — and without the second sentence a dialect that needs no instance path
-                // at all looks like it cannot be configured to start.
-                failures.Add(
-                    $"PlcAlarms:Targets:{plcId}:AcknowledgeInstancePath must be set, because the " +
-                    $"acknowledging function block cannot be derived from SymbolPath " +
-                    $"'{target.SymbolPath}' — it has no parent segment to trim. This rule serves " +
-                    "the built-in FB_ErrorHandler dialect, but applies whichever dialect is " +
-                    "registered, because validation cannot see which one the container will " +
-                    "resolve: a dialect that needs no instance path satisfies it with any " +
-                    "non-blank value, which is then passed through unread.");
             }
         }
 

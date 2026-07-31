@@ -85,66 +85,6 @@ public class PlcAlarmsOptionsValidatorTests
     }
 
     [Fact]
-    public void BlankAcknowledgeMethod_Fails()
-    {
-        var options = ValidOptions();
-        options.Targets["plc1"].AcknowledgeMethod = "  ";
-
-        var result = ValidatorFor("plc1").Validate(null, options);
-
-        Assert.True(result.Failed);
-        Assert.Contains(result.Failures!, f => f.Contains("AcknowledgeMethod", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void UnderivableInstancePath_Fails()
-    {
-        var options = ValidOptions();
-        options.Targets["plc1"].SymbolPath = "Alarms";   // no dot — nothing to trim
-
-        var result = ValidatorFor("plc1").Validate(null, options);
-
-        Assert.True(result.Failed);
-        Assert.Contains(result.Failures!,
-            f => f.Contains("AcknowledgeInstancePath", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void UnderivableInstancePath_WithAnExplicitOverride_Succeeds()
-    {
-        var options = ValidOptions();
-        options.Targets["plc1"].SymbolPath = "Alarms";
-        options.Targets["plc1"].AcknowledgeInstancePath = "GVL.Handler";
-
-        var result = ValidatorFor("plc1").Validate(null, options);
-
-        Assert.True(result.Succeeded);
-    }
-
-    [Fact]
-    public void EveryFailure_IsReportedAtOnce()
-    {
-        var options = new PlcAlarmsOptions
-        {
-            Targets = new Dictionary<string, PlcAlarmTargetOptions>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["plc1"] = new() { SymbolPath = "", CycleTimeMs = 0 },
-                ["ghost"] = new() { SymbolPath = "GVL.Errors", CycleTimeMs = 200 },
-            },
-        };
-
-        var result = ValidatorFor("plc1").Validate(null, options);
-
-        Assert.True(result.Failed);
-
-        // Four, not three: a blank SymbolPath is BOTH "no alarm array named" and "no parent
-        // segment to derive the acknowledging function block from". Both are true, both are
-        // separately fixable — an operator who fills in a bare 'Alarms' has fixed one and not
-        // the other — and reporting only the first would hide the second until the next boot.
-        Assert.Equal(4, result.Failures!.Count());
-    }
-
-    [Fact]
     public void NullTargets_Succeeds()
     {
         // Normal JSON binding always produces at least an empty dictionary, but the

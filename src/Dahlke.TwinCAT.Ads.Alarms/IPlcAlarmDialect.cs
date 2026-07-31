@@ -12,8 +12,15 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 /// </para>
 /// <para>
 /// Register your own before calling <c>AddTwinCatAdsAlarms</c> to replace the built-in
-/// implementation. Implementations must be safe for concurrent use: <see cref="Bind"/> runs on
-/// the ADS notification thread.
+/// implementation. Before, not after: that call registers the built-in dialect only if nothing
+/// has claimed this seam, and it registers the validation for the built-in dialect's own
+/// configuration at the same time. A dialect with configuration rules of its own registers an
+/// <c>IValidateOptions&lt;PlcAlarmsOptions&gt;</c> beside itself; one with no rules registers
+/// nothing and is validated only against what holds for every dialect.
+/// </para>
+/// <para>
+/// Implementations must be safe for concurrent use: <see cref="Bind"/> runs on the ADS
+/// notification thread.
 /// </para>
 /// </remarks>
 public interface IPlcAlarmDialect
