@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - Unreleased
+
+### Changed
+
+- **A dialect's configuration is validated only where that dialect is registered.**
+  `PlcAlarmsOptionsValidator` encoded two `FB_ErrorHandler` rules — `AcknowledgeMethod` must be
+  non-blank, and `AcknowledgeInstancePath` must be set when `SymbolPath` has no parent segment
+  to trim — and applied them whichever `IPlcAlarmDialect` was registered, because validation
+  could not see which one the container would resolve. A consumer whose dialect acknowledges by
+  a pulsed trigger variable, a different RPC shape, or a write to a request array was failed at
+  startup for an instance path it never reads, and the documented way out was to set that path
+  to any non-blank string, which was then passed through unread.
+
+  Those rules now live in a validator registered alongside the built-in dialect:
+  `AddTwinCatAdsAlarms` registers the dialect and its validation together, or neither. **Register
+  a custom dialect before `AddTwinCatAdsAlarms`** — that ordering was already documented, and it
+  now decides validation as well as the dialect itself. A dialect with configuration rules of its
+  own registers an `IValidateOptions<PlcAlarmsOptions>` beside itself; one with no rules registers
+  nothing. Rules that hold for every dialect — the `PlcTargets` cross-reference, a named alarm
+  array, a positive cycle time — are unchanged and still apply to everyone.
+
+  `AcknowledgeInstancePath` and `AcknowledgeMethod` stay on `PlcAlarmTargetOptions`. They are
+  public surface as of 0.7.0, and moving them off the vendor-neutral type is a breaking change
+  that needs a way for dialect-specific configuration to bind; this is the half that is not
+  breaking. A default installation validates exactly as it did in 0.7.0, down to the number of
+  failures reported per boot.
+
+- **The alarm options validator no longer replaces a consumer's own.** Registration moved from
+  `TryAddSingleton` to `TryAddEnumerable`. `TryAddSingleton` adds only when no
+  `IValidateOptions<PlcAlarmsOptions>` descriptor exists at all, so registering any validator of
+  your own before `AddTwinCatAdsAlarms` silently suppressed *every* built-in rule — blank
+  `SymbolPath`, unknown `plcId`, non-positive `CycleTimeMs` — rather than adding to them.
+  Validators now compose, which is both the fix and a prerequisite for the change above. If you
+  registered a no-op validator to disable alarm validation, it no longer has that effect.
+
 ## [0.7.0] - 2026-07-30
 
 ### Added

@@ -20,7 +20,9 @@ public static class AlarmsServiceCollectionExtensions
     /// <para>
     /// Register your own <see cref="IAlarmTextCatalog"/> before calling this to override
     /// the built-in JSON catalog, or your own <see cref="IPlcAlarmDialect"/> to speak a PLC
-    /// alarm implementation other than <c>FB_ErrorHandler</c>.
+    /// alarm implementation other than <c>FB_ErrorHandler</c>. A dialect registered before this
+    /// call also suppresses the built-in dialect's options validation, which exists to check
+    /// configuration only that dialect reads.
     /// </para>
     /// </remarks>
     /// <example>

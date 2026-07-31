@@ -29,10 +29,11 @@ public sealed class PlcAlarmTargetOptions
     /// <c>MAIN.ErrorHandler.aHmiAlarms</c>. Required.
     /// </summary>
     /// <remarks>
-    /// The exemplar has a parent segment on purpose: <see cref="AcknowledgeInstancePath"/> is
-    /// derived by trimming this path's last segment, so <c>GVL.Errors</c> would derive
-    /// <c>GVL</c> — which owns no acknowledging function block, and which nothing catches
-    /// until an acknowledgement is attempted against it.
+    /// The exemplar has a parent segment on purpose: the built-in dialect derives
+    /// <see cref="AcknowledgeInstancePath"/> by trimming this path's last segment, so
+    /// <c>GVL.Errors</c> would derive <c>GVL</c> — which owns no acknowledging function block,
+    /// and which nothing catches until an acknowledgement is attempted against it. A custom
+    /// <see cref="IPlcAlarmDialect"/> derives nothing from this path unless it chooses to.
     /// </remarks>
     public string SymbolPath { get; set; } = string.Empty;
 
@@ -57,12 +58,12 @@ public sealed class PlcAlarmTargetOptions
     /// is free to ignore it entirely.
     /// </para>
     /// <para>
-    /// <b>The startup rule applies whichever dialect is registered.</b> Validation fails when
-    /// this is blank AND <see cref="SymbolPath"/> has no parent segment to trim, because the
-    /// validator cannot see which dialect the container will resolve. A dialect that needs no
-    /// instance path therefore still has to satisfy it: set this to any non-blank value —
-    /// it is simply passed through unread. Tracked for a follow-up that moves this validation
-    /// behind the dialect.
+    /// <b>The startup rule that requires it belongs to that dialect too.</b> Validation fails
+    /// when this is blank AND <see cref="SymbolPath"/> has no parent segment to trim, but only
+    /// when the built-in dialect is the one registered. Register your own
+    /// <see cref="IPlcAlarmDialect"/> before <c>AddTwinCatAdsAlarms</c> and neither the rule nor
+    /// this member applies to you — bring your own <c>IValidateOptions&lt;PlcAlarmsOptions&gt;</c>
+    /// for whatever your dialect does need.
     /// </para>
     /// </remarks>
     public string? AcknowledgeInstancePath { get; set; }
@@ -71,8 +72,9 @@ public sealed class PlcAlarmTargetOptions
     /// <remarks>
     /// Configures the built-in <c>FB_ErrorHandler</c> dialect, whose method is
     /// <c>AcknowledgeAlarm</c> — hence the default. A custom <see cref="IPlcAlarmDialect"/>
-    /// receives it on <see cref="AlarmAcknowledgeContext"/> and may ignore it; it must still
-    /// be non-blank, which the default already satisfies.
+    /// receives it on <see cref="AlarmAcknowledgeContext"/> and may ignore it; the rule that it
+    /// be non-blank is the built-in dialect's own, and is not applied when another dialect is
+    /// registered.
     /// </remarks>
     public string AcknowledgeMethod { get; set; } = "AcknowledgeAlarm";
 }
