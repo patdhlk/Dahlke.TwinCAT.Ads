@@ -29,11 +29,18 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 /// <see cref="ReadMember"/> and <c>Bind</c> for the routing order.
 /// </para>
 /// <para>
-/// <b>It throws.</b> A missing or wrongly-typed member raises
-/// <see cref="PlcAlarmShapeException"/> naming the member and the symbol path. The one
-/// tolerated deviation is an <c>ErrorType</c> outside the known set, which is preserved
-/// and logged once per distinct value — an unrecognised severity is still a real alarm
-/// and must not vanish.
+/// <b>It throws — for a broken TYPE, not a broken VALUE.</b> A missing or wrongly-typed
+/// member raises <see cref="PlcAlarmShapeException"/> naming the member and the symbol
+/// path, because that is a contract break affecting every entry in the array with no
+/// correct reading to fall back to. A member that is present and correctly typed but
+/// carries nonsense is a property of ONE slot, and stays confined to it: two such
+/// deviations are tolerated, each preserved and reported once rather than thrown — an
+/// <c>ErrorType</c> outside the known set (<see cref="BindSeverity"/>) and an out-of-range
+/// <c>PLCTimeStamp</c> (<see cref="BindTimestamp"/>). That line matters more than it
+/// looks. The alarm array is fixed-size with permanent slots, so a bad value is not
+/// transient: throwing on one would make the monitor drop the WHOLE snapshot on every
+/// notification for as long as that slot stayed corrupt, hiding every healthy alarm
+/// beside it indefinitely.
 /// </para>
 /// </remarks>
 internal static class PlcAlarmBinder
@@ -91,6 +98,17 @@ internal static class PlcAlarmBinder
     /// to see, not one.
     /// </summary>
     private static readonly ConcurrentDictionary<(string PlcId, int RawSeverity), byte> ReportedUnknownSeverities = new();
+
+    /// <summary>
+    /// Which (target, entry) pairs have already logged the out-of-range-timestamp warning.
+    /// Keyed by <c>context</c> — <c>symbolPath[slot]</c> — rather than by the bad value:
+    /// a corrupt slot is a fixed position in a fixed-size array, and the nonsense it
+    /// carries may well differ from one notification to the next, so keying by value would
+    /// flood exactly the case this latch exists for. One report per slot, and a second
+    /// corrupt slot still reports on its own, since how MUCH of the array is affected is
+    /// what an operator needs in order to act.
+    /// </summary>
+    private static readonly ConcurrentDictionary<(string PlcId, string Context), byte> ReportedCorruptTimestamps = new();
 
     /// <summary>
     /// Binds <paramref name="notificationValue"/> — one whole alarm array — into alarms,
@@ -165,7 +183,7 @@ internal static class PlcAlarmBinder
             IsActive = Read<bool>(element, MemberIsActive, context, plcId),
             NeedsAcknowledgement = Read<bool>(element, MemberNeedsAck, context, plcId),
             IsAcknowledged = Read<bool>(element, MemberIsAcked, context, plcId),
-            PlcTimestamp = BindTimestamp(element, context, plcId, clock),
+            PlcTimestamp = BindTimestamp(element, context, plcId, clock, logger),
             SlotIndex = slot,
             PlcId = plcId,
         };
@@ -198,8 +216,22 @@ internal static class PlcAlarmBinder
         return (AlarmSeverity)raw;
     }
 
+    /// <summary>
+    /// Binds one entry's <c>PLCTimeStamp</c>, yielding <see langword="default"/> for a
+    /// timestamp that cannot be read as a date at all — whether because the struct is
+    /// zeroed or because its components are out of range.
+    /// </summary>
+    /// <remarks>
+    /// A member that is MISSING or wrongly typed still throws, via <see cref="Read{T}"/>:
+    /// that is the PLC's TIMESTRUCT no longer matching what this package binds, and it is
+    /// true of every entry in the array. An out-of-range value is the opposite — the type
+    /// is intact and one slot's data is not — so it is confined to the entry carrying it.
+    /// Only the <see cref="DateTime"/> construction is guarded below, deliberately: a
+    /// wider catch would swallow the member reads above it and turn a genuine contract
+    /// break into a silently blank timestamp on every alarm.
+    /// </remarks>
     private static DateTime BindTimestamp(
-        object? element, string context, string plcId, PlcClockKind clock)
+        object? element, string context, string plcId, PlcClockKind clock, ILogger? logger)
     {
         var time = ReadMember(element, MemberTimestamp, context, plcId);
 
@@ -227,12 +259,23 @@ internal static class PlcAlarmBinder
         {
             return new DateTime(year, month, day, hour, minute, second, millisecond, kind);
         }
-        catch (ArgumentOutOfRangeException ex)
+        catch (ArgumentOutOfRangeException)
         {
-            throw new PlcAlarmShapeException(
-                $"Alarm entry {context} on target '{plcId}' carries an out-of-range " +
-                $"{MemberTimestamp} ({year:D4}-{month:D2}-{day:D2} {hour:D2}:{minute:D2}:{second:D2}). " +
-                "Check the PLC's clock and the TIMESTRUCT member order.", ex);
+            // Same latch idiom as BindSeverity above, and the same reason: the value is
+            // read again on every notification at PLC cycle rate, so an unlatched report
+            // would flood the log for as long as the slot stayed corrupt.
+            if (ReportedCorruptTimestamps.TryAdd((plcId, context), 0))
+            {
+                logger?.LogWarning(
+                    "Alarm entry {Context} on target {PlcId} carries an out-of-range {Member} " +
+                    "({Year:D4}-{Month:D2}-{Day:D2} {Hour:D2}:{Minute:D2}:{Second:D2}.{Millisecond:D3}). " +
+                    "The alarm is kept and its timestamp reads as unset; every other entry in the " +
+                    "array is unaffected. Check the PLC's clock and the TIMESTRUCT member order. " +
+                    "This is logged once per entry per target.",
+                    context, plcId, MemberTimestamp, year, month, day, hour, minute, second, millisecond);
+            }
+
+            return default;
         }
     }
 
