@@ -181,14 +181,6 @@ public class AlarmMonitorHardwareTests
     }
 
     /// <summary>
-    /// Captures Error-level (or above) log entries from <c>PlcAlarmMonitor</c>'s own
-    /// logger category. <c>PlcAlarmMonitor</c> is internal to
-    /// <c>Dahlke.TwinCAT.Ads.Alarms</c> and this assembly has no
-    /// <c>InternalsVisibleTo</c> grant for it, so the category is matched by name — the
-    /// same full type name <see cref="ILogger{TCategoryName}"/> always uses — rather than
-    /// via <see langword="typeof"/>.
-    /// </summary>
-    /// <summary>
     /// The only test that proves acknowledgement reaches the PLC.
     /// </summary>
     /// <remarks>
@@ -282,6 +274,14 @@ public class AlarmMonitorHardwareTests
         }
     }
 
+    /// <summary>
+    /// Captures Error-level (or above) log entries from <c>PlcAlarmMonitor</c>'s own
+    /// logger category. <c>PlcAlarmMonitor</c> is internal to
+    /// <c>Dahlke.TwinCAT.Ads.Alarms</c> and this assembly has no
+    /// <c>InternalsVisibleTo</c> grant for it, so the category is matched by name — the
+    /// same full type name <see cref="ILogger{TCategoryName}"/> always uses — rather than
+    /// via <see langword="typeof"/>.
+    /// </summary>
     private sealed class CapturingLoggerProvider(ConcurrentQueue<string> captured) : ILoggerProvider
     {
         public ILogger CreateLogger(string categoryName) => new CapturingLogger(categoryName, captured);
