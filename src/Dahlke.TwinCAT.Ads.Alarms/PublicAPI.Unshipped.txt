@@ -90,3 +90,48 @@ Dahlke.TwinCAT.Ads.Alarms.AlarmsServiceCollectionExtensions
 static Dahlke.TwinCAT.Ads.Alarms.AlarmsServiceCollectionExtensions.AddTwinCatAdsAlarms(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 Dahlke.TwinCAT.Ads.Alarms.AlarmsHealthChecksBuilderExtensions
 static Dahlke.TwinCAT.Ads.Alarms.AlarmsHealthChecksBuilderExtensions.AddTwinCatAdsAlarmHealthCheck(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder! builder, string! name = "twincat_ads_alarms", Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity degradedAt = Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Warning, Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity unhealthyAt = Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Error, System.Collections.Generic.IEnumerable<string!>? tags = null) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.<Clone>$() -> Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext!
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.Alarm.get -> Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.Alarm.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.AlarmAcknowledgeContext(Dahlke.TwinCAT.Ads.Alarms.PlcAlarm! Alarm, Dahlke.TwinCAT.Ads.IAdsConnection! Connection, string! PlcId, Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions! Options) -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.Connection.get -> Dahlke.TwinCAT.Ads.IAdsConnection!
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.Connection.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.Deconstruct(out Dahlke.TwinCAT.Ads.Alarms.PlcAlarm! Alarm, out Dahlke.TwinCAT.Ads.IAdsConnection! Connection, out string! PlcId, out Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions! Options) -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.Equals(Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext? other) -> bool
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.Options.get -> Dahlke.TwinCAT.Ads.Alarms.PlcAlarmTargetOptions!
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.Options.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.PlcId.get -> string!
+Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.PlcId.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.<Clone>$() -> Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext!
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.AlarmBindContext(object? NotificationValue, string! PlcId, string! SymbolPath, Dahlke.TwinCAT.Ads.Alarms.PlcClockKind PlcClock, Microsoft.Extensions.Logging.ILogger? Logger) -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.Deconstruct(out object? NotificationValue, out string! PlcId, out string! SymbolPath, out Dahlke.TwinCAT.Ads.Alarms.PlcClockKind PlcClock, out Microsoft.Extensions.Logging.ILogger? Logger) -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.Equals(Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext? other) -> bool
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.Logger.get -> Microsoft.Extensions.Logging.ILogger?
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.Logger.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.NotificationValue.get -> object?
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.NotificationValue.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.PlcClock.get -> Dahlke.TwinCAT.Ads.Alarms.PlcClockKind
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.PlcClock.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.PlcId.get -> string!
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.PlcId.init -> void
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.SymbolPath.get -> string!
+Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.SymbolPath.init -> void
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect.AcknowledgeAsync(Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext! context, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<bool>!
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect.Bind(Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext! context) -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!>!
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmAcknowledgeException
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmAcknowledgeException.PlcAlarmAcknowledgeException(string! message, string? returnCodeName, long returnCode) -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmAcknowledgeException.ReturnCode.get -> long
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmAcknowledgeException.ReturnCodeName.get -> string?
+override Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.Equals(object? obj) -> bool
+override Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.GetHashCode() -> int
+override Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.ToString() -> string!
+override Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.Equals(object? obj) -> bool
+override Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.GetHashCode() -> int
+override Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.ToString() -> string!
+static Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.operator !=(Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext? left, Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext? right) -> bool
+static Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.operator ==(Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext? left, Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext? right) -> bool
+static Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.operator !=(Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext? left, Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext? right) -> bool
+static Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.operator ==(Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext? left, Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext? right) -> bool
