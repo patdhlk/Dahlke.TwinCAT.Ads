@@ -41,6 +41,10 @@ public class PlcAlarmMonitorConcurrencyTests
         return new PlcAlarmMonitor(
             pool,
             NullAlarmTextCatalog.Instance,
+            // The shipped dialect, because these tests exercise the pipeline the monitor
+            // drives — registration, retry, disposal, ordering — and want the real binding at
+            // the end of it. Nothing here acknowledges, so the RPC half is never reached.
+            new ErrorHandlerAlarmDialect(),
             Options.Create(options),
             NullLogger<PlcAlarmMonitor>.Instance);
     }

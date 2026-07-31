@@ -74,33 +74,38 @@ public interface IPlcAlarmMonitor
     IObservable<AlarmTransition> Transitions { get; }
 
     /// <summary>
-    /// Acknowledges an outstanding alarm by writing its <c>IsAcked</c> member on the PLC.
+    /// Acknowledges an outstanding alarm on the PLC, by <see cref="PlcAlarm.Key"/>, through
+    /// the registered <see cref="IPlcAlarmDialect"/>.
     /// </summary>
     /// <returns>
-    /// <see langword="true"/> when the write was issued; <see langword="false"/> when the
-    /// target is not monitored, the alarm is no longer outstanding, or its array slot no
-    /// longer holds it.
+    /// <see langword="true"/> when the PLC acknowledged it; <see langword="false"/> when the
+    /// target is not monitored, the alarm is not outstanding here, or the PLC has nothing by
+    /// that key to acknowledge.
     /// </returns>
     /// <remarks>
-    /// A <see langword="false"/> result means "nothing was written", never "something went
-    /// wrong on the PLC" — the read-back and the write are ordinary ADS operations and
-    /// their failures propagate rather than being folded into the return value.
+    /// A <see langword="false"/> result means "there was nothing to acknowledge", never
+    /// "something went wrong on the PLC": a refusal for any other reason raises
+    /// <see cref="PlcAlarmAcknowledgeException"/>, so a caller is never left unable to tell
+    /// "it is gone" from "try again".
     /// </remarks>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="plcId"/> or <paramref name="alarmKey"/> is <see langword="null"/>.
     /// </exception>
+    /// <exception cref="PlcAlarmAcknowledgeException">
+    /// The PLC refused the acknowledgement for a reason other than "no such alarm".
+    /// </exception>
     /// <exception cref="OperationCanceledException">
-    /// <paramref name="ct"/> was cancelled during the slot read-back or the write.
+    /// <paramref name="ct"/> was cancelled before the dialect finished.
     /// </exception>
     /// <exception cref="global::TwinCAT.Ads.AdsErrorException">
-    /// The PLC rejected the slot read-back or the write — for example the alarm array no
-    /// longer exposes that slot.
+    /// The PLC rejected what the dialect asked of it — for the shipped dialect, most often an
+    /// acknowledging method that is not reachable over ADS.
     /// </exception>
     /// <exception cref="AdsConnectionUnavailableException">
     /// The target's connection was unavailable for longer than its configured timeout.
     /// </exception>
     /// <exception cref="TimeoutException">
-    /// The per-target timeout elapsed before the read-back or the write completed.
+    /// The per-target timeout elapsed before the acknowledgement completed.
     /// </exception>
     Task<bool> AcknowledgeAsync(string plcId, string alarmKey, CancellationToken ct);
 }

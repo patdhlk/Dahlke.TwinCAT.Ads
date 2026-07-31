@@ -59,9 +59,13 @@ internal sealed class PlcAlarmsOptionsValidator(IOptions<TwinCatAdsOptions> adsO
 
             if (string.IsNullOrWhiteSpace(target.SymbolPath))
             {
+                // The exemplar has to be one whose OWN instance path derives correctly, since
+                // the rule below trims the last segment off it: 'GVL.Errors' would suggest a
+                // layout deriving 'GVL', which owns no acknowledging function block. This is
+                // the reference rack's layout.
                 failures.Add(
                     $"PlcAlarms:Targets:{plcId}:SymbolPath must name the PLC's alarm array " +
-                    "(e.g. 'GVL.Errors').");
+                    "(e.g. 'MAIN.ErrorHandler.aHmiAlarms').");
             }
 
             if (target.CycleTimeMs <= 0)
@@ -69,6 +73,22 @@ internal sealed class PlcAlarmsOptionsValidator(IOptions<TwinCatAdsOptions> adsO
                 failures.Add(
                     $"PlcAlarms:Targets:{plcId}:CycleTimeMs must be greater than zero " +
                     $"(was {target.CycleTimeMs}).");
+            }
+
+            if (string.IsNullOrWhiteSpace(target.AcknowledgeMethod))
+            {
+                failures.Add(
+                    $"PlcAlarms:Targets:{plcId}:AcknowledgeMethod must name the PLC method that " +
+                    "acknowledges one alarm by key (default 'AcknowledgeAlarm').");
+            }
+
+            if (string.IsNullOrWhiteSpace(target.AcknowledgeInstancePath)
+                && target.SymbolPath?.LastIndexOf('.') is null or <= 0)
+            {
+                failures.Add(
+                    $"PlcAlarms:Targets:{plcId}:AcknowledgeInstancePath must be set, because the " +
+                    $"acknowledging function block cannot be derived from SymbolPath " +
+                    $"'{target.SymbolPath}' — it has no parent segment to trim.");
             }
         }
 

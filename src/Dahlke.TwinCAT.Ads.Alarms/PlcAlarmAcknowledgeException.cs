@@ -10,7 +10,7 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 public sealed class PlcAlarmAcknowledgeException : InvalidOperationException
 {
     /// <summary>Creates the exception for a named PLC return code.</summary>
-    public PlcAlarmAcknowledgeException(string message, string? returnCodeName, long returnCode)
+    public PlcAlarmAcknowledgeException(string message, string? returnCodeName, long? returnCode)
         : base(message)
     {
         ReturnCodeName = returnCodeName;
@@ -23,6 +23,17 @@ public sealed class PlcAlarmAcknowledgeException : InvalidOperationException
     /// </summary>
     public string? ReturnCodeName { get; }
 
-    /// <summary>The raw numeric value the method returned, as it came off the wire.</summary>
-    public long ReturnCode { get; }
+    /// <summary>
+    /// The raw numeric value the method returned, as it came off the wire, or
+    /// <see langword="null"/> when no numeric value did — the PLC returned something
+    /// non-integral, or something integral too large to represent.
+    /// </summary>
+    /// <remarks>
+    /// Nullable so that "the PLC said something this package cannot read as a number" is
+    /// distinguishable from "the PLC returned <c>0</c> and <c>0</c> names no member it
+    /// publishes". Reported as a fabricated <c>0</c>, those two are the same pair of property
+    /// values, and a caller branching on the properties rather than parsing
+    /// <see cref="Exception.Message"/> cannot tell them apart.
+    /// </remarks>
+    public long? ReturnCode { get; }
 }

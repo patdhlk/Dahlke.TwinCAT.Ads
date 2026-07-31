@@ -77,12 +77,12 @@ internal sealed class ErrorHandlerAlarmDialect : IPlcAlarmDialect
     /// The path cannot be derived and none was configured.
     /// </exception>
     /// <remarks>
-    /// Deliberately NOT <see cref="PlcAlarmAcknowledgeException"/>: nothing was sent to the PLC,
-    /// so that type's <see cref="PlcAlarmAcknowledgeException.ReturnCode"/> — documented as "the
-    /// raw numeric value the method returned, as it came off the wire" — would have to be
-    /// fabricated. A fabricated <c>0</c> is indistinguishable from a genuine <c>0</c> that matched
-    /// no member, and <c>0</c> is <c>SUCCESS</c> under some numberings. This is a configuration
-    /// error that never reached the PLC, and it says so by its type.
+    /// Deliberately NOT <see cref="PlcAlarmAcknowledgeException"/>: that type means the PLC
+    /// refused, and nothing was ever sent for it to refuse. Its
+    /// <see cref="PlcAlarmAcknowledgeException.ReturnCode"/> could carry <see langword="null"/>
+    /// honestly enough, but the type itself would still report a configuration error as a PLC
+    /// outcome — and a caller that retries on refusal would be retrying something only an edit
+    /// to configuration can fix. This never reached the PLC, and it says so by its type.
     /// </remarks>
     private static string ResolveInstancePath(AlarmAcknowledgeContext context)
     {
@@ -124,16 +124,20 @@ internal sealed class ErrorHandlerAlarmDialect : IPlcAlarmDialect
         ulong v when v <= long.MaxValue => (long)v,
 
         // Matches AdsEnumMember's own contract: a ULINT value past long.MaxValue throws rather
-        // than wrapping into a negative that would match some other member.
+        // than wrapping into a negative that would match some other member. The value is in
+        // the message but NOT in ReturnCode: there is no long that carries it, and null is
+        // what that property means by "nothing numeric this package can hand you".
         ulong v => throw new PlcAlarmAcknowledgeException(
             $"'{instancePath}.{context.Options.AcknowledgeMethod}' on PLC '{context.PlcId}' returned " +
             $"{v}, which exceeds long.MaxValue; a {ResultTypeName} that large is not supported.",
-            null, 0),
+            null, null),
 
+        // null, not 0: a fabricated 0 here is indistinguishable from a genuine 0 that matched
+        // no member, and 0 is SUCCESS under some numberings.
         _ => throw new PlcAlarmAcknowledgeException(
             $"'{instancePath}.{context.Options.AcknowledgeMethod}' on PLC '{context.PlcId}' returned " +
             $"{Describe(value)}, which is not an integral {ResultTypeName} value.",
-            null, 0),
+            null, null),
     };
 
     private static string Describe(object? value) => value is null

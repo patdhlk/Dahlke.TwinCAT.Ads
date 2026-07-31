@@ -1,3 +1,4 @@
+using System.Globalization;
 using TwinCAT.Ads;
 
 namespace Dahlke.TwinCAT.Ads.Alarms.Tests;
@@ -122,7 +123,11 @@ public class ErrorHandlerAlarmDialectTests
                 new AlarmAcknowledgeContext(Alarm(), conn, "plc1", Options()), CancellationToken.None));
 
         Assert.Null(ex.ReturnCodeName);
-        Assert.Equal(99, ex.ReturnCode);
+
+        // A number really did come off the wire; it just names nothing. This is the half of
+        // the pair that ReturnCode's nullability exists to separate — see
+        // ANonIntegralReturn_CarriesNoReturnCode for the other.
+        Assert.Equal(99L, ex.ReturnCode);
     }
 
     [Fact]
@@ -203,6 +208,45 @@ public class ErrorHandlerAlarmDialectTests
         Assert.Contains(returnValue.GetType().Name, ex.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData("SUCCESS")]
+    [InlineData(1.5)]
+    public async Task ANonIntegralReturn_CarriesNoReturnCode(object returnValue)
+    {
+        // The distinction ReturnCode's nullability buys. Reported as 0 — as it was — this case
+        // and a genuine 0 that matched no member are the SAME pair of property values
+        // (ReturnCodeName null, ReturnCode 0), so a caller branching on properties rather than
+        // parsing the message cannot tell "the PLC said something I don't understand" from
+        // "the PLC returned a number that names nothing".
+        var conn = new FakeRpcConnection(RackNumbering, returnValue);
+        var dialect = new ErrorHandlerAlarmDialect();
+
+        var ex = await Assert.ThrowsAsync<PlcAlarmAcknowledgeException>(
+            () => dialect.AcknowledgeAsync(
+                new AlarmAcknowledgeContext(Alarm(), conn, "plc1", Options()), CancellationToken.None));
+
+        Assert.Null(ex.ReturnCode);
+    }
+
+    [Fact]
+    public async Task AReturnPastLongMaxValue_CarriesNoReturnCode()
+    {
+        // Integral, and it really did come off the wire — but there is no long that holds it,
+        // and wrapping it into a negative would let it match some other member. Null for the
+        // same reason as a non-integral return: no value this property can honestly carry.
+        var conn = new FakeRpcConnection(RackNumbering, ulong.MaxValue);
+        var dialect = new ErrorHandlerAlarmDialect();
+
+        var ex = await Assert.ThrowsAsync<PlcAlarmAcknowledgeException>(
+            () => dialect.AcknowledgeAsync(
+                new AlarmAcknowledgeContext(Alarm(), conn, "plc1", Options()), CancellationToken.None));
+
+        Assert.Null(ex.ReturnCode);
+        Assert.Contains(
+            ulong.MaxValue.ToString(CultureInfo.InvariantCulture), ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ASymbolPathWithNoOwningBlock_IsAConfigurationError_ThatNeverReachesThePlc()
     {
@@ -211,8 +255,8 @@ public class ErrorHandlerAlarmDialectTests
         var dialect = new ErrorHandlerAlarmDialect();
 
         // ThrowsAsync matches the type EXACTLY, so this also pins that it is not the derived
-        // PlcAlarmAcknowledgeException — which would have to fabricate a ReturnCode for a call
-        // that was never made, and a fabricated 0 is SUCCESS under some numberings.
+        // PlcAlarmAcknowledgeException — which means "the PLC refused", and nothing was ever
+        // sent for it to refuse.
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => dialect.AcknowledgeAsync(
                 new AlarmAcknowledgeContext(Alarm(), conn, "plc1", options), CancellationToken.None));

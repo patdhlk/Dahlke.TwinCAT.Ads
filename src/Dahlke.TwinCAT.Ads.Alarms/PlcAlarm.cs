@@ -53,9 +53,10 @@ public sealed record PlcAlarm
     public required DateTime PlcTimestamp { get; init; }
 
     /// <summary>
-    /// The index of the array slot this alarm occupies. Slots are reused, so this is
-    /// stable only while the alarm is outstanding; it exists so acknowledgement can
-    /// address the entry.
+    /// The index of the array slot this alarm occupied in the notification it was bound
+    /// from. Informational only — reported for diagnostics and display. Slots are reused,
+    /// so it identifies nothing on its own and nothing addresses an alarm by it:
+    /// acknowledgement goes by <see cref="Key"/>.
     /// </summary>
     public required int SlotIndex { get; init; }
 

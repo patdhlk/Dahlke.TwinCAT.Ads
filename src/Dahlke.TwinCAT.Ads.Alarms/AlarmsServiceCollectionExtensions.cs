@@ -19,7 +19,8 @@ public static class AlarmsServiceCollectionExtensions
     /// </para>
     /// <para>
     /// Register your own <see cref="IAlarmTextCatalog"/> before calling this to override
-    /// the built-in JSON catalog.
+    /// the built-in JSON catalog, or your own <see cref="IPlcAlarmDialect"/> to speak a PLC
+    /// alarm implementation other than <c>FB_ErrorHandler</c>.
     /// </para>
     /// </remarks>
     /// <example>
@@ -58,6 +59,11 @@ public static class AlarmsServiceCollectionExtensions
                 ResolveCatalogPath(options.TextCatalog, sp.GetService<IHostEnvironment>()),
                 sp.GetService<ILogger<JsonAlarmTextCatalog>>());
         });
+
+        // TryAdd, so a consumer who registered their own dialect BEFORE this call keeps it —
+        // which is what IPlcAlarmDialect's own documentation promises. The shipped default
+        // speaks FB_ErrorHandler; anything else needs one of these.
+        services.TryAddSingleton<IPlcAlarmDialect, ErrorHandlerAlarmDialect>();
 
         services.TryAddSingleton<PlcAlarmMonitor>();
         services.TryAddSingleton<IPlcAlarmMonitor>(sp => sp.GetRequiredService<PlcAlarmMonitor>());

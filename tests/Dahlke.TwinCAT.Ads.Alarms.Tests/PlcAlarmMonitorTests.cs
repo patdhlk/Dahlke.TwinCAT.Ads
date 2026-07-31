@@ -41,7 +41,14 @@ public class PlcAlarmMonitorTests
     /// Builds a host with one simulated target per entry, each alarm array seeded empty,
     /// starts it, and returns the running host plus its monitor.
     /// </summary>
+    /// <param name="configure">
+    /// Runs BEFORE <c>AddTwinCatAdsAlarms</c>, so a test can register its own
+    /// <see cref="IPlcAlarmDialect"/> and have it win over the shipped default — which is
+    /// exactly the override the interface's own documentation promises.
+    /// </param>
+    /// <param name="targets">One <c>(plcId, symbolPath)</c> pair per simulated target.</param>
     private static async Task<(IHost Host, IPlcAlarmMonitor Monitor)> StartTargetsAsync(
+        Action<IServiceCollection>? configure,
         params (string PlcId, string SymbolPath)[] targets)
     {
         var builder = Host.CreateApplicationBuilder();
@@ -65,6 +72,8 @@ public class PlcAlarmMonitorTests
                 o.Targets[plcId] = new PlcAlarmTargetOptions { SymbolPath = symbolPath, CycleTimeMs = 50 };
         });
 
+        configure?.Invoke(builder.Services);
+
         builder.Services.AddTwinCatAdsAlarms(builder.Configuration);
 
         var host = builder.Build();
@@ -74,26 +83,24 @@ public class PlcAlarmMonitorTests
     }
 
     /// <summary>The single-target host every test but the multi-target one runs against.</summary>
-    private static Task<(IHost Host, IPlcAlarmMonitor Monitor)> StartAsync() =>
-        StartTargetsAsync((PlcId, Path));
+    private static Task<(IHost Host, IPlcAlarmMonitor Monitor)> StartAsync(
+        Action<IServiceCollection>? configure = null) =>
+        StartTargetsAsync(configure, (PlcId, Path));
 
     /// <summary>
     /// Puts <paramref name="entries"/> on the simulated PLC as the whole alarm array.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A real PLC exposes the array AND every member path under it: writing
-    /// <c>GVL.Errors</c> makes <c>GVL.Errors[0].sKey</c> readable in the same breath. The
-    /// simulated connection's store is FLAT — it holds exactly the paths that were
-    /// written and derives nothing from a written container — so this helper mirrors each
-    /// entry's scalar members onto their own paths to model what a PLC would expose.
-    /// Without it, the monitor's acknowledgement (which verifies a slot's occupant by
-    /// reading <c>...[i].sKey</c>) would need a container-walking fallback that no real
-    /// target could ever exercise.
+    /// The array is written whole and nothing else is: the monitor reads alarms out of the
+    /// notification value, and acknowledgement addresses an alarm by key through a PLC method
+    /// call, so no test needs <c>GVL.Errors[0].sKey</c> to be a readable path of its own. This
+    /// helper used to mirror every scalar member onto such a path, purely so the old
+    /// acknowledge could read a slot's occupant back — that mechanism is gone.
     /// </para>
     /// <para>
-    /// Members are written BEFORE the array so the notification the array write fires
-    /// already sees member paths that agree with it.
+    /// A NEW array instance every time: the simulated store's change comparer falls back to
+    /// reference equality for <c>object?[]</c>, so a mutated array would not fire.
     /// </para>
     /// </remarks>
     private static async Task WriteArrayToAsync(
@@ -101,19 +108,6 @@ public class PlcAlarmMonitorTests
     {
         var connection = host.Services.GetRequiredService<IAdsConnectionPool>().GetConnection(plcId);
 
-        for (var slot = 0; slot < entries.Length; slot++)
-        {
-            foreach (var (member, value) in (Dictionary<string, object?>)entries[slot]!)
-            {
-                // Nested containers (PLCTimeStamp) are skipped: nothing addresses them by
-                // member path, and mirroring them would need recursion for no coverage.
-                if (value is not IDictionary<string, object?>)
-                    await connection.WriteValueAsync($"{path}[{slot}].{member}", value!, CancellationToken.None);
-            }
-        }
-
-        // A NEW array instance every time: the simulated store's change comparer falls
-        // back to reference equality for object?[], so a mutated array would not fire.
         await connection.WriteValueAsync(path, entries, CancellationToken.None);
     }
 
@@ -185,7 +179,7 @@ public class PlcAlarmMonitorTests
         const string OtherPlcId = "plc2";
         const string OtherPath = "GVL.Faults";
 
-        var (host, monitor) = await StartTargetsAsync((PlcId, Path), (OtherPlcId, OtherPath));
+        var (host, monitor) = await StartTargetsAsync(null, (PlcId, Path), (OtherPlcId, OtherPath));
         using var _ = host;
 
         await WriteArrayToAsync(host, PlcId, Path, Entry("BMK1Err404"));
@@ -254,9 +248,11 @@ public class PlcAlarmMonitorTests
     }
 
     [Fact]
-    public async Task AcknowledgeAsync_WritesIsAckedOnTheEntry()
+    public async Task AcknowledgeAsync_DelegatesToTheRegisteredDialect()
     {
-        var (host, monitor) = await StartAsync();
+        var dialect = new RecordingDialect();
+        var (host, monitor) = await StartAsync(services =>
+            services.AddSingleton<IPlcAlarmDialect>(dialect));
         using var _ = host;
 
         await WriteArrayAsync(host, Entry("BMK1Err404"));
@@ -265,61 +261,116 @@ public class PlcAlarmMonitorTests
         var acknowledged = await monitor.AcknowledgeAsync(PlcId, "BMK1Err404", CancellationToken.None);
 
         Assert.True(acknowledged);
-
-        var pool = host.Services.GetRequiredService<IAdsConnectionPool>();
-        var written = await pool.GetConnection(PlcId)
-            .ReadValueAsync<bool>($"{Path}[0].IsAcked", CancellationToken.None);
-        Assert.True(written);
+        Assert.Equal("BMK1Err404", dialect.LastAcknowledged?.Key);
 
         await host.StopAsync();
     }
 
     [Fact]
-    public async Task AcknowledgeAsync_UnknownAlarm_ReturnsFalse()
+    public async Task AcknowledgeAsync_UnknownAlarm_DoesNotReachTheDialect()
     {
-        var (host, monitor) = await StartAsync();
+        var dialect = new RecordingDialect();
+        var (host, monitor) = await StartAsync(services =>
+            services.AddSingleton<IPlcAlarmDialect>(dialect));
         using var _ = host;
 
         var acknowledged = await monitor.AcknowledgeAsync(PlcId, "NoSuchAlarm", CancellationToken.None);
 
         Assert.False(acknowledged);
+        Assert.Null(dialect.LastAcknowledged);
 
         await host.StopAsync();
     }
 
     [Fact]
-    public async Task AcknowledgeAsync_UnknownTarget_ReturnsFalse()
+    public async Task AcknowledgeAsync_UnknownTarget_DoesNotReachTheDialect()
     {
-        var (host, monitor) = await StartAsync();
+        // The monitor's other early return. A dialect is handed a connection and a target's
+        // options, and there are neither for a plcId nobody configured — so this has to be
+        // answered here rather than passed on.
+        var dialect = new RecordingDialect();
+        var (host, monitor) = await StartAsync(services =>
+            services.AddSingleton<IPlcAlarmDialect>(dialect));
         using var _ = host;
 
         var acknowledged = await monitor.AcknowledgeAsync(
             "someOtherPlc", "BMK1Err404", CancellationToken.None);
 
         Assert.False(acknowledged);
+        Assert.Null(dialect.LastAcknowledged);
 
         await host.StopAsync();
     }
 
     [Fact]
-    public async Task AcknowledgeAsync_SlotNoLongerHoldsTheAlarm_ReturnsFalse()
+    public async Task Notifications_AreBoundByTheRegisteredDialect()
     {
-        // Slots are reused. Acknowledging by slot index without verifying the
-        // occupant would acknowledge whatever alarm has since landed there.
-        var (host, monitor) = await StartAsync();
+        // The other half of the seam, and the only test in this class that discriminates it.
+        // The shipped dialect's Bind IS PlcAlarmBinder.Bind, so a monitor that still called
+        // the binder directly satisfies every other test here — including the ones using
+        // RecordingDialect, which delegates its own binding to that same default. This one
+        // binds something no binder could produce from the notification that was written.
+        var dialect = new FixedBindingDialect("SomethingOnlyADialectWouldSay");
+        var (host, monitor) = await StartAsync(services =>
+            services.AddSingleton<IPlcAlarmDialect>(dialect));
         using var _ = host;
 
         await WriteArrayAsync(host, Entry("BMK1Err404"));
         await WaitForAsync(() => monitor.GetOutstanding().Count == 1);
 
-        var pool = host.Services.GetRequiredService<IAdsConnectionPool>();
-        await pool.GetConnection(PlcId)
-            .WriteValueAsync($"{Path}[0].sKey", "BMK9Err999", CancellationToken.None);
-
-        var acknowledged = await monitor.AcknowledgeAsync(PlcId, "BMK1Err404", CancellationToken.None);
-
-        Assert.False(acknowledged);
+        Assert.Equal(
+            "SomethingOnlyADialectWouldSay", Assert.Single(monitor.GetOutstanding()).Key);
 
         await host.StopAsync();
+    }
+
+    /// <summary>
+    /// Stands in for a consumer's own dialect: binds exactly as the shipped default does, so
+    /// the whole notification pipeline still runs, and records the alarm it is asked to
+    /// acknowledge instead of talking to a PLC.
+    /// </summary>
+    private sealed class RecordingDialect : IPlcAlarmDialect
+    {
+        private readonly ErrorHandlerAlarmDialect _binding = new();
+
+        /// <summary>
+        /// The alarm of the last acknowledgement, or <see langword="null"/> if this dialect
+        /// was never asked to acknowledge anything.
+        /// </summary>
+        public PlcAlarm? LastAcknowledged { get; private set; }
+
+        public IReadOnlyList<PlcAlarm> Bind(AlarmBindContext context) => _binding.Bind(context);
+
+        public Task<bool> AcknowledgeAsync(AlarmAcknowledgeContext context, CancellationToken ct)
+        {
+            LastAcknowledged = context.Alarm;
+            return Task.FromResult(true);
+        }
+    }
+
+    /// <summary>
+    /// Binds one alarm under a caller-chosen key, whatever the notification actually carried.
+    /// </summary>
+    private sealed class FixedBindingDialect(string key) : IPlcAlarmDialect
+    {
+        public IReadOnlyList<PlcAlarm> Bind(AlarmBindContext context) =>
+        [
+            new PlcAlarm
+            {
+                Key = key,
+                EquipmentId = "BMK1",
+                ErrorCode = 404,
+                Severity = AlarmSeverity.Error,
+                IsActive = true,
+                NeedsAcknowledgement = true,
+                IsAcknowledged = false,
+                PlcTimestamp = new DateTime(2026, 6, 17, 12, 0, 0),
+                SlotIndex = 0,
+                PlcId = context.PlcId,
+            },
+        ];
+
+        public Task<bool> AcknowledgeAsync(AlarmAcknowledgeContext context, CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 }

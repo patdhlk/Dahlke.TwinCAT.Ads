@@ -126,8 +126,8 @@ Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect.AcknowledgeAsync(Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext! context, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<bool>!
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect.Bind(Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext! context) -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!>!
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmAcknowledgeException
-Dahlke.TwinCAT.Ads.Alarms.PlcAlarmAcknowledgeException.PlcAlarmAcknowledgeException(string! message, string? returnCodeName, long returnCode) -> void
-Dahlke.TwinCAT.Ads.Alarms.PlcAlarmAcknowledgeException.ReturnCode.get -> long
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmAcknowledgeException.PlcAlarmAcknowledgeException(string! message, string? returnCodeName, long? returnCode) -> void
+Dahlke.TwinCAT.Ads.Alarms.PlcAlarmAcknowledgeException.ReturnCode.get -> long?
 Dahlke.TwinCAT.Ads.Alarms.PlcAlarmAcknowledgeException.ReturnCodeName.get -> string?
 override Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.Equals(object? obj) -> bool
 override Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext.GetHashCode() -> int

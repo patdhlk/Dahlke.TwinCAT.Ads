@@ -46,6 +46,7 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
 {
     private readonly IAdsConnectionPool _pool;
     private readonly IAlarmTextCatalog _catalog;
+    private readonly IPlcAlarmDialect _dialect;
     private readonly ILogger<PlcAlarmMonitor> _logger;
 
     private readonly Dictionary<string, PlcAlarmTargetOptions> _targets = new(StringComparer.OrdinalIgnoreCase);
@@ -67,11 +68,13 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
     public PlcAlarmMonitor(
         IAdsConnectionPool pool,
         IAlarmTextCatalog catalog,
+        IPlcAlarmDialect dialect,
         IOptions<PlcAlarmsOptions> options,
         ILogger<PlcAlarmMonitor> logger)
     {
         _pool = pool;
         _catalog = catalog;
+        _dialect = dialect;
         _logger = logger;
 
         // A null Targets means "no alarm targets configured" — PlcAlarmsOptionsValidator
@@ -120,39 +123,13 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
             return false;
 
         var connection = _pool.GetConnection(plcId);
-        var slot = $"{target.SymbolPath}[{alarm.SlotIndex}]";
 
-        // NOTE: 'sKey' and 'IsAcked' below are PLC member names, and this is the only
-        // place outside PlcAlarmBinder that spells one. They must stay in step with that
-        // type's MemberKey and MemberIsAcked constants — a PLC rename caught by the binder
-        // (which fails loudly, naming the member) would otherwise leave acknowledgement
-        // failing separately, here, against a symbol path that no longer exists. They are
-        // not shared as constants because these two are a WRITE-path contract: they are
-        // appended to a symbol path for ADS, not looked up on a bound notification value.
-        //
-        // Slots are permanent and reused, so the index alone does not identify the
-        // alarm. Verify the slot still holds it before writing, or an acknowledgement
-        // lands on whatever alarm arrived there in the meantime. A window remains
-        // between this read and the write; closing it would need a PLC-side
-        // compare-and-set this contract does not offer.
-        var occupant = await connection
-            .ReadValueAsync<string>($"{slot}.sKey", ct)
+        // Everything past the lookup is the vendor's business: which function block owns
+        // acknowledgement, what it is called, and how its answer is read. This type knows
+        // only that the alarm is outstanding and which connection it belongs to.
+        return await _dialect
+            .AcknowledgeAsync(new AlarmAcknowledgeContext(alarm, connection, plcId, target), ct)
             .ConfigureAwait(false);
-
-        if (!string.Equals(occupant, alarm.Key, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogInformation(
-                "Not acknowledging {AlarmKey} on {PlcId}: slot {Slot} now holds {Occupant}",
-                alarmKey, plcId, alarm.SlotIndex, occupant);
-            return false;
-        }
-
-        await connection.WriteValueAsync($"{slot}.IsAcked", true, ct).ConfigureAwait(false);
-
-        _logger.LogInformation(
-            "Acknowledged {AlarmKey} on {PlcId} (slot {Slot})", alarmKey, plcId, alarm.SlotIndex);
-
-        return true;
     }
 
     /// <inheritdoc />
@@ -392,7 +369,8 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
     {
         try
         {
-            var snapshot = PlcAlarmBinder.Bind(value, plcId, target.SymbolPath, target.PlcClock, _logger);
+            var snapshot = _dialect.Bind(new AlarmBindContext(
+                value, plcId, target.SymbolPath, target.PlcClock, _logger));
 
             var resolved = snapshot
                 .Select(alarm => alarm with { Text = _catalog.Resolve(alarm.Key) })
