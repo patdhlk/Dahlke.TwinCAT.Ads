@@ -224,7 +224,7 @@ public static class ServiceCollectionExtensions
         IServiceCollection services,
         IConfiguration configuration)
     {
-        services.TryAddSingleton<IValidateOptions<TwinCatAdsOptions>, TwinCatAdsOptionsValidator>();
+        RegisterCoreOptionsValidator(services);
 
         services.AddOptions<TwinCatAdsOptions>()
             .Configure(o =>
@@ -441,12 +441,40 @@ public static class ServiceCollectionExtensions
         IServiceCollection services,
         Action<TwinCatAdsOptions> configure)
     {
-        services.TryAddSingleton<IValidateOptions<TwinCatAdsOptions>, TwinCatAdsOptionsValidator>();
+        RegisterCoreOptionsValidator(services);
 
         services.AddOptions<TwinCatAdsOptions>()
             .Configure(configure)
             .ValidateOnStart();
     }
+
+    /// <summary>
+    /// Adds <see cref="TwinCatAdsOptionsValidator"/> to the set of validators the options
+    /// infrastructure runs, without disturbing any others.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>TryAddEnumerable, not TryAddSingleton.</b> <c>TryAddSingleton</c> adds only when no
+    /// descriptor for the service type exists AT ALL, so a consumer who registered any
+    /// <see cref="IValidateOptions{TOptions}"/> of their own before calling <c>AddTwinCatAds</c>
+    /// did not add a rule beside ours — they silently replaced every one of them. Adding a
+    /// validator is the natural way to add a rule, and it was the exact gesture that removed
+    /// the AmsNetId, duplicate-Net-ID, timeout and router checks. Nothing warned; the first
+    /// sign was a runtime connection failure pointing at the network rather than at the
+    /// configuration that validation existed to reject.
+    /// </para>
+    /// <para>
+    /// <c>TryAddEnumerable</c> dedupes on (ServiceType, ImplementationType), so the two call
+    /// sites cannot double-register when a host composes a config-bound registration with a
+    /// code-first one, and repeat <c>AddTwinCatAds</c> calls stay idempotent. The options
+    /// infrastructure consumes <c>IEnumerable&lt;IValidateOptions&lt;T&gt;&gt;</c> and
+    /// concatenates every validator's failures, so a consumer's rules and ours now both report
+    /// in one startup failure.
+    /// </para>
+    /// </remarks>
+    private static void RegisterCoreOptionsValidator(IServiceCollection services) =>
+        services.TryAddEnumerable(ServiceDescriptor
+            .Singleton<IValidateOptions<TwinCatAdsOptions>, TwinCatAdsOptionsValidator>());
 
     /// <summary>
     /// Registers the core real-hardware services shared by all

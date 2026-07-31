@@ -42,6 +42,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Validators now compose, which is both the fix and a prerequisite for the change above. If you
   registered a no-op validator to disable alarm validation, it no longer has that effect.
 
+- **The core options validator no longer replaces a consumer's own.** ([#29](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/29))
+  The same defect as the entry above, in `Dahlke.TwinCAT.Ads` itself. `AddTwinCatAds` and
+  `AddTwinCatAdsSimulation` registered `TwinCatAdsOptionsValidator` with `TryAddSingleton`, which
+  adds only when no `IValidateOptions<TwinCatAdsOptions>` descriptor exists at all. A consumer who
+  registered any validator of their own before calling `AddTwinCatAds` did not add a rule beside
+  the built-in ones — they silently replaced every one of them: missing or malformed `AmsNetId`,
+  duplicate Net IDs across targets, ports, timeouts, the router settings and the raw-channel seeds.
+  Nothing warned. The application booted, and the first sign was a runtime failure against a target
+  that validation was there to reject — an ADS connection error pointing at the network rather than
+  at the configuration.
+
+  Registration moved to `TryAddEnumerable`, which dedupes on (ServiceType, ImplementationType), so
+  the config-bound and code-first registration paths still cannot double-register and repeat
+  `AddTwinCatAds` calls stay idempotent. A consumer's rules and the built-in rules now both report
+  in one startup failure. If you registered a no-op `IValidateOptions<TwinCatAdsOptions>` to disable
+  core validation, it no longer has that effect.
+
 ## [0.7.0] - 2026-07-30
 
 ### Added
