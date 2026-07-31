@@ -74,4 +74,29 @@ internal static class HardwareTestConfig
 
     /// <summary>Returns true when an alarm array symbol is configured.</summary>
     public static bool HasSymbolAlarms => !string.IsNullOrWhiteSpace(SymbolAlarms);
+
+    /// <summary>
+    /// This host's AMS Net ID for the embedded router. Set via TWINCAT_TEST_ROUTER_NETID.
+    /// When unset, <c>Router</c> is left untouched and the system router is used instead —
+    /// see <see cref="HasEmbeddedRouter"/>.
+    /// </summary>
+    public static string? RouterNetId =>
+        Environment.GetEnvironmentVariable("TWINCAT_TEST_ROUTER_NETID");
+
+    /// <summary>
+    /// The target's IP address or host name, used to build the single route to
+    /// <see cref="AmsNetId"/>. Set via TWINCAT_TEST_ROUTE_ADDRESS.
+    /// </summary>
+    public static string? RouteAddress =>
+        Environment.GetEnvironmentVariable("TWINCAT_TEST_ROUTE_ADDRESS");
+
+    /// <summary>
+    /// Returns true when both <see cref="RouterNetId"/> and <see cref="RouteAddress"/> are
+    /// configured — a router with no route to the target is useless, so the embedded router
+    /// is only wired up when both are present. On a machine without a TwinCAT installation,
+    /// these are required to reach a remote PLC at all: see the remarks on
+    /// <c>AmsRouterOptions.Routes</c>.
+    /// </summary>
+    public static bool HasEmbeddedRouter =>
+        !string.IsNullOrWhiteSpace(RouterNetId) && !string.IsNullOrWhiteSpace(RouteAddress);
 }

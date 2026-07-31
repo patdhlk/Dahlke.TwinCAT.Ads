@@ -75,12 +75,12 @@ public class AlarmMonitorHardwareTests
 
         builder.Services.AddTwinCatAds(o =>
         {
-            o.Targets["plc1"] = new PlcTargetOptions
+            HardwareTestOptionsConfigurator.ConfigureTarget(o, "plc1", new PlcTargetOptions
             {
                 AmsNetId = HardwareTestConfig.AmsNetId,
                 Port = HardwareTestConfig.Port,
                 TimeoutMs = 10000,
-            };
+            });
         });
 
         builder.Services.Configure<PlcAlarmsOptions>(o =>

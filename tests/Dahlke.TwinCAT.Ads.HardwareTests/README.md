@@ -35,6 +35,15 @@ If neither variable is set every test shows as **Skipped** — no failure, no co
 | `TWINCAT_TEST_SYMBOL_STRUCT` | *(optional)* | Fully-qualified path of a **STRUCT or FUNCTION_BLOCK** symbol (e.g. `MAIN.TestStruct`). Read-only — nothing writes it — but it must be **stable for the run**: the container facts compare a notification's decoded tree against a fresh read, which is meaningless for a symbol the PLC program is continuously mutating. |
 | `TWINCAT_TEST_SYMBOL_ARRAY` | *(optional)* | Fully-qualified path of an **ARRAY** symbol (e.g. `MAIN.TestArray`). Same read-only/stable requirement as the struct. This is the highest-value probe: an array notification is the only container whose raw value comes from the payload decode rather than from per-member reads. |
 | `TWINCAT_TEST_SYMBOL_ALARMS` | *(optional)* | Fully-qualified path of an alarm array symbol (`ARRAY[..] OF ST_ErrorEntry`, e.g. `GVL.Errors`). Unlike the struct/array symbols above it need NOT be stable — the alarm test asserts the array *binds*, not that a notification matches a re-read, so a live alarm list is a fine target. The alarm test returns early (and reports as passed, not skipped) when this is unset. |
+| `TWINCAT_TEST_ROUTER_NETID` | *(optional)* | This host's AMS Net ID for the embedded router (e.g. `192.168.1.220.1.1`). When unset, `Router` is left untouched and the tests connect through the **system router** — which exists on Windows and nowhere else. |
+| `TWINCAT_TEST_ROUTE_ADDRESS` | *(optional)* | The target PLC's IP address or host name (e.g. `192.168.1.223`), used to build the single route from the embedded router to `TWINCAT_TEST_AMSNETID`. |
+
+> **Reaching a PLC from a machine without a TwinCAT installation.** The system router — used
+> whenever `TWINCAT_TEST_ROUTER_NETID` / `TWINCAT_TEST_ROUTE_ADDRESS` are unset — only exists on
+> Windows with TwinCAT installed. On any other machine (Linux, macOS, a plain Windows box, a CI
+> runner), set **both** router variables so the tests configure the embedded router with a route
+> to the target instead; see `HardwareTestConfig.HasEmbeddedRouter`. Setting only one of the two
+> is equivalent to setting neither — a router with no route to the target is useless.
 
 ## Running locally
 
@@ -46,6 +55,28 @@ export TWINCAT_TEST_SYMBOL_INT=MAIN.TestInt
 export TWINCAT_TEST_SYMBOL_STRUCT=MAIN.TestStruct
 export TWINCAT_TEST_SYMBOL_ARRAY=MAIN.TestArray
 export TWINCAT_TEST_SYMBOL_ALARMS=GVL.Errors
+
+dotnet test tests/Dahlke.TwinCAT.Ads.HardwareTests --framework net8.0
+```
+
+### Example: a non-Windows host (no system router)
+
+This is the configuration verified against a live rack from a host with no TwinCAT installation.
+The router variables are what make it work at all — without them the tests can only reach a PLC
+through a system router, i.e. **Windows only**. Values below are this one site's example; do not
+hardcode them, set them in the environment that runs the tests.
+
+```bash
+export TWINCAT_HARDWARE_TESTS=1
+
+# This host's own AMS Net ID and the route to the target — the embedded router.
+export TWINCAT_TEST_ROUTER_NETID=192.168.1.220.1.1
+export TWINCAT_TEST_ROUTE_ADDRESS=192.168.1.223
+
+# The target PLC.
+export TWINCAT_TEST_AMSNETID=5.138.44.199.1.1
+export TWINCAT_TEST_PORT=851
+export TWINCAT_TEST_SYMBOL_ALARMS=MAIN.ErrorHandler.aHmiAlarms
 
 dotnet test tests/Dahlke.TwinCAT.Ads.HardwareTests --framework net8.0
 ```
