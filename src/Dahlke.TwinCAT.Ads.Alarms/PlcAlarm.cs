@@ -50,6 +50,17 @@ public sealed record PlcAlarm
     /// the <see cref="DateTime.Kind"/> is whatever <c>PlcClock</c> declared in
     /// configuration — <see cref="DateTimeKind.Unspecified"/> unless stated.
     /// </summary>
+    /// <remarks>
+    /// <b><see langword="default"/> means "no readable time", not midnight.</b> Two
+    /// entries read that way: an uninitialised (zeroed) <c>TIMESTRUCT</c>, and one whose
+    /// components do not describe a real date at all — a stopped or garbled PLC clock
+    /// reporting, say, month 13. Neither drops the alarm, and neither affects any other
+    /// entry in the array; the second is logged once per slot per target. Treat this
+    /// property as unset when it equals <see langword="default"/> rather than ordering or
+    /// ageing on it, and note that the <see cref="DateTime.Kind"/> is
+    /// <see cref="DateTimeKind.Unspecified"/> in that case whatever <c>PlcClock</c> says,
+    /// since there is no instant for the declared clock to apply to.
+    /// </remarks>
     public required DateTime PlcTimestamp { get; init; }
 
     /// <summary>

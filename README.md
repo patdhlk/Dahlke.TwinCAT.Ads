@@ -316,6 +316,8 @@ await app.WaitForShutdownAsync();
 
 **A shape mismatch is loud, but not fatal.** If the PLC's `ST_ErrorEntry` stops matching what the package binds, it throws `PlcAlarmShapeException` naming the member and the symbol path rather than degrading to defaults — a silently wrong alarm list is worse than an absent one. That snapshot is dropped whole and logged at `Error`, the outstanding set keeps its last good reading, and the subscription survives to recover on the next well-formed notification.
 
+**A bad *value* is not a shape mismatch, and stays in its own slot.** That distinction is the difference between dropping one field and going blind: the alarm array is fixed-size with permanent slots, so an entry carrying nonsense arrives again on every notification, and treating it as a broken type would drop every snapshot for as long as it sat there. Two values are therefore kept rather than thrown on — an `ErrorType` outside `E_ErrorType`, which binds with its raw number, and a `PLCTimeStamp` that is not a real date, which reads as `default(DateTime)` exactly as a zeroed `TIMESTRUCT` already does. Each is logged once at `Warning` (per distinct value, and per slot, respectively) instead of on every cycle, and every other entry in the array binds normally. A *missing* or *retyped* member is still a shape mismatch and still behaves as above.
+
 ```csharp
 builder.Services
     .AddHealthChecks()

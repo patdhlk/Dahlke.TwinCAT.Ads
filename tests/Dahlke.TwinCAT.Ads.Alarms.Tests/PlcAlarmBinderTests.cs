@@ -297,6 +297,79 @@ public class PlcAlarmBinderTests
     }
 
     [Fact]
+    public void Bind_OutOfRangeTimestamp_KeepsTheEntryWithADefaultTimestamp()
+    {
+        // A nonsense date is a property of one VALUE, not of the PLC's type. The entry is
+        // still a real alarm and must bind; only its unreadable timestamp is dropped,
+        // exactly as a zeroed TIMESTRUCT already is.
+        object?[] array = [AsDictionary(month: 13)];
+
+        var alarms = PlcAlarmBinder.Bind(array, "plc-oor-keeps", Path, PlcClockKind.Unspecified, null);
+
+        var alarm = Assert.Single(alarms);
+        Assert.Equal(default, alarm.PlcTimestamp);
+        Assert.Equal("BMK1Err404", alarm.Key);
+        Assert.Equal(AlarmSeverity.Error, alarm.Severity);
+        Assert.True(alarm.IsActive);
+    }
+
+    [Fact]
+    public void Bind_OutOfRangeTimestamp_DoesNotDropTheOtherEntriesInTheArray()
+    {
+        // The failure this guards. The alarm array is fixed-size with permanent slots, so
+        // a corrupt entry is not transient — it arrives again on the next notification and
+        // the one after that. Throwing made PlcAlarmMonitor drop the WHOLE snapshot every
+        // time, freezing the outstanding set indefinitely: one bad slot blinding every
+        // healthy alarm beside it, with AcknowledgeAsync returning false for all of them.
+        object?[] array =
+        [
+            AsDictionary(sKey: "A"),
+            AsDictionary(sKey: "B", day: 32),
+            AsDictionary(sKey: "C"),
+        ];
+
+        var alarms = PlcAlarmBinder.Bind(array, "plc-oor-siblings", Path, PlcClockKind.Unspecified, null);
+
+        Assert.Equal(["A", "B", "C"], alarms.Select(a => a.Key));
+        Assert.Equal(new DateTime(2026, 6, 17, 12, 0, 0), alarms[0].PlcTimestamp);
+        Assert.Equal(default, alarms[1].PlcTimestamp);
+        Assert.Equal(new DateTime(2026, 6, 17, 12, 0, 0), alarms[2].PlcTimestamp);
+    }
+
+    [Fact]
+    public void Bind_OutOfRangeTimestamp_LogsOnlyOncePerSlotAcrossNotifications()
+    {
+        // Same reasoning as the unknown-severity latch below: a corrupt slot is read on
+        // every notification at PLC cycle rate, so an unlatched report floods the log
+        // forever. Uses a target id no other test uses, since the latch is process-wide
+        // static state shared across tests.
+        var logger = new CapturingLogger();
+        object?[] array = [AsDictionary(sKey: "A"), AsDictionary(sKey: "B", month: 13)];
+
+        PlcAlarmBinder.Bind(array, "plc-oor-latch", Path, PlcClockKind.Unspecified, logger);
+        PlcAlarmBinder.Bind(array, "plc-oor-latch", Path, PlcClockKind.Unspecified, logger);
+
+        var warning = Assert.Single(logger.Messages);
+        Assert.Contains($"{Path}[1]", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Bind_OutOfRangeTimestamp_ReportsEachCorruptSlotSeparately()
+    {
+        // Latched per slot, not per target: two corrupt slots are two facts an operator
+        // has to act on, and reporting only the first would understate how much of the
+        // array is affected.
+        var logger = new CapturingLogger();
+        object?[] array = [AsDictionary(sKey: "A", month: 13), AsDictionary(sKey: "B", day: 32)];
+
+        PlcAlarmBinder.Bind(array, "plc-oor-per-slot", Path, PlcClockKind.Unspecified, logger);
+
+        Assert.Equal(2, logger.Messages.Count);
+        Assert.Contains(logger.Messages, m => m.Contains($"{Path}[0]", StringComparison.Ordinal));
+        Assert.Contains(logger.Messages, m => m.Contains($"{Path}[1]", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Bind_UnknownSeverity_IsPreservedNotDropped()
     {
         object?[] array = [AsDictionary(errorType: 99)];
@@ -453,6 +526,39 @@ public class PlcAlarmBinderTests
             () => PlcAlarmBinder.Bind(array, PlcId, Path, PlcClockKind.Unspecified, null));
 
         Assert.Contains("ErrorCode", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Bind_WrongTimestampMemberType_StillThrows()
+    {
+        // The line an out-of-range VALUE must not blur. A retyped or missing TIMESTRUCT
+        // MEMBER is a contract break between this package and the PLC's type — it affects
+        // every entry in the array, not one slot, and there is no correct reading to fall
+        // back to — so it stays fail-loud.
+        var entry = AsDictionary();
+        ((Dictionary<string, object?>)entry["PLCTimeStamp"]!)["wMonth"] = "June";
+        object?[] array = [entry];
+
+        var ex = Assert.Throws<PlcAlarmShapeException>(
+            () => PlcAlarmBinder.Bind(array, PlcId, Path, PlcClockKind.Unspecified, null));
+
+        Assert.Contains("wMonth", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Bind_MissingTimestampMember_StillThrows()
+    {
+        // Same line, the other way a TIMESTRUCT can break: a member read AFTER the
+        // zeroed-date guard has passed, which is the read most likely to be swallowed by
+        // a catch drawn too widely around the DateTime construction.
+        var entry = AsDictionary();
+        ((Dictionary<string, object?>)entry["PLCTimeStamp"]!).Remove("wMinute");
+        object?[] array = [entry];
+
+        var ex = Assert.Throws<PlcAlarmShapeException>(
+            () => PlcAlarmBinder.Bind(array, PlcId, Path, PlcClockKind.Unspecified, null));
+
+        Assert.Contains("wMinute", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -34,6 +34,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One corrupt `PLCTimeStamp` no longer blinds the whole alarm array.** ([#26](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/26))
+  `PlcAlarmBinder` treated a `TIMESTRUCT` whose components do not describe a real date — a
+  stopped or garbled PLC clock reporting month 13, say — as a `PlcAlarmShapeException`, the
+  same class of failure as the PLC's `ST_ErrorEntry` being renamed. `PlcAlarmMonitor` responds
+  to that by dropping the entire snapshot, which is correct for a broken type and wrong for one
+  broken value.
+
+  It did not recover. The alarm array is fixed-size with permanent slots, so the corrupt entry
+  arrived again on the next notification and the one after that: `GetOutstanding()` froze at the
+  last good reading indefinitely, every alarm raised afterwards was invisible, `AcknowledgeAsync`
+  returned `false` for all of them because they were not in the outstanding set, and the health
+  check reported on stale data with no sign it was stale. One bad slot hid 99 healthy alarms, in
+  an alarms package, with nothing on the API surface to say so.
+
+  An unreadable timestamp now binds as `default(DateTime)` — exactly as a zeroed, uninitialised
+  `TIMESTRUCT` already did — and the entry is kept with the rest of its members intact. It is
+  logged once per slot per target at `Warning` rather than on every cycle. **A missing or
+  wrongly-typed member is unchanged**: that is the PLC's type no longer matching what this
+  package binds, it affects every entry rather than one, and it still throws.
+
+  If you read `PlcTimestamp` without checking it, note that `default` now means "no readable
+  time" for a second reason. Treat it as unset rather than as midnight on 0001-01-01.
+
 - **The alarm options validator no longer replaces a consumer's own.** Registration moved from
   `TryAddSingleton` to `TryAddEnumerable`. `TryAddSingleton` adds only when no
   `IValidateOptions<PlcAlarmsOptions>` descriptor exists at all, so registering any validator of
