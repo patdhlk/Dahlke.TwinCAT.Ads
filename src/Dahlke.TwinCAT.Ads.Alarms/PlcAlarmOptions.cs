@@ -25,9 +25,15 @@ public enum PlcClockKind
 public sealed class PlcAlarmTargetOptions
 {
     /// <summary>
-    /// The fully-qualified symbol path of the PLC's alarm array, e.g. <c>GVL.Errors</c>.
-    /// Required.
+    /// The fully-qualified symbol path of the PLC's alarm array, e.g.
+    /// <c>GVL.ErrorHandler.aHmiAlarms</c>. Required.
     /// </summary>
+    /// <remarks>
+    /// The exemplar has a parent segment on purpose: <see cref="AcknowledgeInstancePath"/> is
+    /// derived by trimming this path's last segment, so <c>GVL.Errors</c> would derive
+    /// <c>GVL</c> — which owns no acknowledging function block, and which nothing catches
+    /// until an acknowledgement is attempted against it.
+    /// </remarks>
     public string SymbolPath { get; set; } = string.Empty;
 
     /// <summary>

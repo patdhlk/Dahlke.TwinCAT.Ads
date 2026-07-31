@@ -13,7 +13,8 @@ A .NET library for TwinCAT ADS with durable connections, typed symbol access, si
 - **Wait-then-throw semantics** — operations wait up to the configured `TimeoutMs` for a connection, then throw `AdsConnectionUnavailableException`; `TimeoutException` for hardware/network stalls; `OperationCanceledException` only for caller cancellation
 - **Durable subscriptions** — survive reconnects automatically; the returned `IDisposable` stays valid through outages; simulated subscriptions fire on changed writes
 - **Reactive (Rx) companion** — optional `Dahlke.TwinCAT.Ads.Reactive` package surfaces value-change and connection-state notifications as `IObservable<T>` streams
-- **PLC alarm tracking** — the optional `Dahlke.TwinCAT.Ads.Alarms` package keeps a live set of outstanding alarms from a TwinCAT alarm array and streams `Raised` / `Acknowledged` / `Cleared` / `Reoccurred` / `Ended` transitions; acknowledgement writes back to the PLC, with a health check and a JSON text catalog
+- **PLC alarm tracking** — the optional `Dahlke.TwinCAT.Ads.Alarms` package keeps a live set of outstanding alarms from a TwinCAT alarm array and streams `Raised` / `Acknowledged` / `Cleared` / `Reoccurred` / `Ended` transitions; acknowledgement calls the PLC's own acknowledging method over ADS, with a health check and a JSON text catalog
+- **PLC method calls and enum metadata** — `InvokeRpcMethodAsync` calls a method on a function-block instance (in and out parameters, and the return value); `GetEnumMembersAsync` reads a PLC enumeration's members from the running program, so a returned code can be read by name instead of by number
 - **ADS sum commands** — batch writes, and batch reads of scalars, execute as a single round-trip on real connections; per-symbol `AdsValueResult` for granular success/failure
 - **Connection state observability** — `State` property (tri-state), `IsConnected` snapshot, `ConnectionStateChanged` event
 - **Raw ADS channels** — `IAdsRawChannelFactory` addresses any `(amsNetId, port)` by index group and index offset for targets the symbol API cannot reach (EtherCAT, the TwinCAT system service); cached, never disposed by the caller, with durable device notifications and a seedable simulation store
@@ -264,7 +265,7 @@ dotnet add package Dahlke.TwinCAT.Ads.Alarms
   "PlcAlarms": {
     "TextCatalog": "alarms.json",
     "Targets": {
-      "plc1": { "SymbolPath": "GVL.Errors", "CycleTimeMs": 200, "PlcClock": "Local" }
+      "plc1": { "SymbolPath": "GVL.ErrorHandler.aHmiAlarms", "CycleTimeMs": 200, "PlcClock": "Local" }
     }
   }
 }
@@ -288,7 +289,7 @@ monitor.AlarmChanged += (_, t) => Console.WriteLine($"{t.Kind}: {t.Alarm.Key}");
 await app.StartAsync();
 
 // Only meaningful once the host is running. Before StartAsync nothing is subscribed, so
-// GetOutstanding() is empty and AcknowledgeAsync has nothing to write and returns false.
+// GetOutstanding() is empty and AcknowledgeAsync finds no such alarm and returns false.
 foreach (var alarm in monitor.GetOutstanding())
     Console.WriteLine($"{alarm.Key} ({alarm.Severity}): {alarm.Text}");
 
@@ -300,6 +301,10 @@ await app.WaitForShutdownAsync();
 **An alarm is outstanding while its fault is present OR it still awaits acknowledgement.** A PLC alarm array is fixed-size with permanent slots — an alarm ends by `IsActive := FALSE`, never by leaving the array — and when `NeedsAck` is set the entry outlives its fault condition until an operator acknowledges it. So a fault that self-clears before anyone looks still reaches you, `Cleared` marks the fault ending while the alarm stays outstanding, and `Ended` fires only once the alarm is genuinely finished.
 
 **Identity is `sKey`, not `Id`.** `Id` names the equipment (BMK) and is shared by every alarm on that machine; `sKey` is the PLC's own composite key combining the equipment identifier and the error code — `Test_Err_60` for equipment `Test`, error code `60`, for example. The exact spelling is the PLC program's business and this package treats it as opaque: never parse it. Group by `EquipmentId`, key by `Key`.
+
+**Acknowledgement is a method call on the PLC, not a write to the entry.** `AcknowledgeAsync` finds the alarm by `Key` among the outstanding set, then calls the PLC method named by `AcknowledgeMethod` (default `AcknowledgeAlarm`) on the function block that owns acknowledgement, passing that key. The block's instance path is derived by trimming the last segment off `SymbolPath` — `GVL.ErrorHandler.aHmiAlarms` derives `GVL.ErrorHandler` — which is right when the alarm array is a member of that block and wrong for every other layout; set `AcknowledgeInstancePath` for those. The returned `deaReturnType` is resolved **by name**, not by number: `SUCCESS` returns `true`, `NOT_FOUND` returns `false`, and any other member raises `PlcAlarmAcknowledgeException` naming it. Nothing is written to the array entry — on hardware the array is a read-only projection that accepts an `IsAcked` write and discards it, which is exactly why acknowledgement goes through the block instead. Naming the alarm by key also means no slot is addressed, so there is no window in which the acknowledgement could land on whatever alarm has since taken that slot. A vendor whose PLC acknowledges differently registers its own `IPlcAlarmDialect`; the shipped one is simply the default.
+
+**The PLC method needs `{attribute 'TcRpcEnable'}`.** A method without it is not reachable over ADS at all, and the call fails as an unknown method however correct the instance path and the name are. When acknowledgement raises `AdsErrorException` on a target whose alarms otherwise arrive normally, check the attribute on the method declaration first — it is the likeliest cause and the cheapest to rule out.
 
 **Every restart re-raises everything outstanding.** The outstanding set lives in memory and starts empty, and ADS delivers one notification on registration — so the first snapshot after a host restart reports every alarm the PLC is currently holding as newly `Raised`. There is no way to tell a two-day-old alarm from one raised while the host was down without persisting the set. Forwarding `Raised` straight to a pager therefore pages the whole outstanding set on every deployment: deduplicate downstream on `Key` plus `PlcTimestamp`, or suppress the first snapshot after start.
 
@@ -667,9 +672,11 @@ Each `Targets` entry:
 
 | Property | Type | Default | Description |
 |-----|------|---------|-------------|
-| `SymbolPath` | `string` | `""` | Required. Fully-qualified path of the PLC's alarm array (e.g. `GVL.Errors`) |
+| `SymbolPath` | `string` | `""` | Required. Fully-qualified path of the PLC's alarm array (e.g. `GVL.ErrorHandler.aHmiAlarms`). The last segment is trimmed off to derive `AcknowledgeInstancePath`, so a path with no parent segment fails startup |
 | `CycleTimeMs` | `int` | `200` | How often the PLC pushes array changes. Must be greater than zero |
 | `PlcClock` | `PlcClockKind` | `Unspecified` | What clock the PLC's `TIMESTRUCT` runs on: `Unspecified`, `Utc` or `Local`. `TIMESTRUCT` carries no time zone, so this cannot be inferred — the default states no claim rather than stamping a wrong `DateTimeKind` on every alarm |
+| `AcknowledgeInstancePath` | `string?` | `null` | Instance path of the function block that owns acknowledgement. Derived from `SymbolPath` when omitted, which is right only when the alarm array is a member of that block — set it for any other layout. Configures the built-in `FB_ErrorHandler` dialect; a custom `IPlcAlarmDialect` receives it and may ignore it, but must still be given some non-blank value if `SymbolPath` has no parent segment |
+| `AcknowledgeMethod` | `string` | `"AcknowledgeAlarm"` | The PLC method that acknowledges one alarm by key. Must be non-blank, and must carry `{attribute 'TcRpcEnable'}` on the PLC to be reachable over ADS |
 
 ## IEC 61131-3 Type Mapping
 
@@ -703,7 +710,7 @@ Runnable projects live in [`examples/`](examples/) — all work out of the box i
 - [`Dahlke.TwinCAT.Ads.Examples.Cli`](examples/Dahlke.TwinCAT.Ads.Examples.Cli/) — console app demonstrating typed reads, writes, batch operations, ADS state, and subscriptions
 - [`Dahlke.TwinCAT.Ads.Examples.MinimalApi`](examples/Dahlke.TwinCAT.Ads.Examples.MinimalApi/) — ASP.NET Core minimal API exposing PLC symbols over HTTP with a health endpoint
 - [`Dahlke.TwinCAT.Ads.Examples.Reactive`](examples/Dahlke.TwinCAT.Ads.Examples.Reactive/) — console app demonstrating Rx `IObservable` streams: typed/untyped value changes with operator composition, and merged connection-state across targets
-- [`Dahlke.TwinCAT.Ads.Examples.ErrorHandler`](examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler/) — console app walking a whole PLC alarm lifecycle: two alarms on one machine, one clearing before it is acknowledged, and an acknowledgement written back to the PLC
+- [`Dahlke.TwinCAT.Ads.Examples.ErrorHandler`](examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler/) — console app walking a whole PLC alarm lifecycle: two alarms on one machine, one clearing before it is acknowledged, and an acknowledgement that reaches the PLC through a simulated `AcknowledgeAlarm` method
 
 ## License
 

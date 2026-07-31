@@ -64,6 +64,14 @@ await host.RunAsync();
 /// fire the subscription.
 /// </para>
 /// <para>
+/// Acknowledgement is a PLC method call, not a write, so this driver also plays the part
+/// of the function block: it seeds <c>deaReturnType</c>'s members and an
+/// <c>AcknowledgeAlarm</c> handler on the simulated connection. The handler records the
+/// acknowledged key, and every array written afterwards derives each entry's
+/// <c>IsAcked</c> from that record — so <c>[ACKNOWLEDGED]</c> below is caused by the
+/// acknowledgement actually reaching the dialect, not by a literal in the script.
+/// </para>
+/// <para>
 /// The lifecycle is scripted rather than random so the console output is the same on
 /// every run: raised, joined by a second alarm on the same machine, cleared while still
 /// unacknowledged, then acknowledged — which is what finally ends it.
@@ -75,11 +83,24 @@ internal sealed class SimulatedPlcDriver(
     IHostApplicationLifetime lifetime) : BackgroundService
 {
     private const string PlcId = "plc1";
-    private const string AlarmArrayPath = "GVL.Errors";
+
+    // The array is a member of the function block that owns acknowledgement, so the shipped
+    // dialect derives 'GVL.ErrorHandler' by trimming the last segment. AcknowledgeInstancePath
+    // is left unset in appsettings.json precisely to exercise that derivation — a layout where
+    // the array lives elsewhere would have to set it.
+    private const string AlarmArrayPath = "GVL.ErrorHandler.aHmiAlarms";
+    private const string HandlerInstancePath = "GVL.ErrorHandler";
+
+    // What the seeded AcknowledgeAlarm method remembers. A real FB_ErrorHandler holds this
+    // state itself; here it is the only thing connecting the RPC to the arrays written after
+    // it. Case-insensitive, matching how the monitor looks an alarm up by key.
+    private readonly HashSet<string> _acknowledgedKeys = new(StringComparer.OrdinalIgnoreCase);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var connection = pool.GetConnection(PlcId);
+
+        SeedAcknowledgeMethod();
 
         // An empty array first, so the monitor has a shape to bind before anything
         // interesting happens.
@@ -101,21 +122,60 @@ internal sealed class SimulatedPlcDriver(
 
         Report("after the fault cleared");
 
-        // Acknowledge it through the monitor: that writes IsAcked on the PLC entry,
-        // after verifying the slot still holds this alarm.
+        // Acknowledge it through the monitor: that calls AcknowledgeAlarm on the function
+        // block over ADS, passing the alarm's key, and reads the returned deaReturnType by
+        // name. Here the call lands on the handler seeded above.
         var acknowledged = await monitor.AcknowledgeAsync(PlcId, "BMK1Err404", stoppingToken);
         Console.WriteLine($"AcknowledgeAsync(\"BMK1Err404\") -> {acknowledged}");
 
-        // A real PLC would push the changed array itself; the simulated store holds only
-        // the paths that were written and derives nothing from a member write, so the
-        // array reading that reflects the acknowledgement is echoed here.
+        // A real PLC would push the changed array itself; the simulated store holds only the
+        // paths that were written and derives nothing from a method call, so the array reading
+        // that reflects the acknowledgement is echoed here. Nothing below says "acknowledged" —
+        // Jam reads that off what the seeded method recorded.
         await WriteArrayAsync(
-            connection, stoppingToken, Jam(isActive: false, isAcked: true), Overtemperature());
+            connection, stoppingToken, Jam(isActive: false), Overtemperature());
         await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
 
         Report("after the acknowledgement");
 
         lifetime.StopApplication();
+    }
+
+    /// <summary>
+    /// Teaches the simulated PLC the one method and the one enum the shipped dialect needs.
+    /// </summary>
+    /// <remarks>
+    /// Both seeding calls are mandatory, and deliberately so: an unseeded RPC or an unseeded
+    /// enum THROWS on the simulated connection rather than answering something plausible. An
+    /// acknowledgement that quietly does nothing looks exactly like one that worked, which is
+    /// the failure this whole path was rebuilt to make impossible — so simulation refuses to
+    /// stage it.
+    /// </remarks>
+    private void SeedAcknowledgeMethod()
+    {
+        if (!pool.TryGetSimulatedConnection(PlcId, out var sim))
+            throw new InvalidOperationException(
+                $"'{PlcId}' is not a simulated target; this driver only runs in simulation mode.");
+
+        // The numbering the reference rack publishes. It is seeded here only so the handler
+        // below has something to return — the dialect matches on the NAME 'SUCCESS', so a PLC
+        // that numbers these differently still reads correctly.
+        sim.SetEnumMembers("deaReturnType",
+        [
+            new AdsEnumMember("SUCCESS", 0), new AdsEnumMember("ERROR", 1),
+            new AdsEnumMember("ABORTED", 2), new AdsEnumMember("NOT_READY", 3),
+            new AdsEnumMember("NOT_FOUND", 4), new AdsEnumMember("INVALID_DATA", 5),
+            new AdsEnumMember("BUSY", 6),
+        ]);
+
+        sim.SetRpcHandler(HandlerInstancePath, "AcknowledgeAlarm", args =>
+        {
+            // Mirror what the real function block does: remember the acknowledgement so the
+            // next array this driver writes carries IsAcked = true for that key. Returns 0,
+            // which is SUCCESS under the numbering seeded above.
+            _acknowledgedKeys.Add((string)args[0]!);
+            return new AdsRpcResult((short)0, []);
+        });
     }
 
     private void Report(string when)
@@ -135,12 +195,12 @@ internal sealed class SimulatedPlcDriver(
     /// </summary>
     /// <remarks>
     /// A real PLC exposes the array AND every member path under it: writing
-    /// <c>GVL.Errors</c> makes <c>GVL.Errors[0].sKey</c> readable in the same breath. The
-    /// simulated store is FLAT — it holds exactly the paths written — so each entry's
-    /// scalar members are mirrored onto their own paths to model what a PLC would expose.
-    /// Without that, <see cref="IPlcAlarmMonitor.AcknowledgeAsync"/> could not read the
-    /// slot's occupant back before writing, and would fail with
-    /// <c>DeviceSymbolNotFound</c>.
+    /// <c>GVL.ErrorHandler.aHmiAlarms</c> makes <c>GVL.ErrorHandler.aHmiAlarms[0].sKey</c>
+    /// readable in the same breath. The simulated store is FLAT — it holds exactly the paths
+    /// written — so each entry's scalar members are mirrored onto their own paths to model
+    /// what a PLC would expose, and so anything browsing this target's symbol tree sees the
+    /// shape it would on hardware. Acknowledgement no longer depends on it: it names the
+    /// alarm by key and never addresses a slot.
     /// </remarks>
     private static async Task WriteArrayAsync(
         IAdsConnection connection, CancellationToken ct, params object?[] entries)
@@ -160,14 +220,20 @@ internal sealed class SimulatedPlcDriver(
         await connection.WriteValueAsync(AlarmArrayPath, entries, ct);
     }
 
-    private static Dictionary<string, object?> Jam(bool isActive, bool isAcked = false) =>
-        Entry("BMK1Err404", 404, severity: 3, isActive, isAcked);
+    private Dictionary<string, object?> Jam(bool isActive) =>
+        Entry("BMK1Err404", 404, severity: 3, isActive);
 
-    private static Dictionary<string, object?> Overtemperature() =>
-        Entry("BMK1Err500", 500, severity: 2, isActive: true, isAcked: false);
+    private Dictionary<string, object?> Overtemperature() =>
+        Entry("BMK1Err500", 500, severity: 2, isActive: true);
 
-    private static Dictionary<string, object?> Entry(
-        string sKey, uint errorCode, int severity, bool isActive, bool isAcked) =>
+    /// <remarks>
+    /// <c>IsAcked</c> is NOT a parameter. It is read off what the seeded
+    /// <c>AcknowledgeAlarm</c> handler recorded, so no line of this script can claim an
+    /// alarm was acknowledged unless an acknowledgement really went through the monitor and
+    /// the dialect.
+    /// </remarks>
+    private Dictionary<string, object?> Entry(
+        string sKey, uint errorCode, int severity, bool isActive) =>
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["sKey"] = sKey,
@@ -176,7 +242,7 @@ internal sealed class SimulatedPlcDriver(
             ["ErrorType"] = severity,
             ["IsActive"] = isActive,
             ["NeedsAck"] = true,
-            ["IsAcked"] = isAcked,
+            ["IsAcked"] = _acknowledgedKeys.Contains(sKey),
             // Held constant per alarm: a timestamp that advanced while the fault stayed
             // active would (correctly) report Reoccurred on every snapshot.
             ["PLCTimeStamp"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)

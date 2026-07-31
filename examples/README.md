@@ -51,7 +51,9 @@ dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.Reactive
 
 ## Dahlke.TwinCAT.Ads.Examples.ErrorHandler
 
-Monitors a PLC alarm array with the optional `Dahlke.TwinCAT.Ads.Alarms` package and prints every transition — raised, acknowledged, cleared, reoccurred and ended — with text resolved from `alarms.json`. In simulation mode a background driver walks a scripted alarm lifecycle: two alarms on the same equipment, one of which clears before it is acknowledged and is then ended by an `AcknowledgeAsync` write back to the PLC. The driver stops the host when the script finishes; against a real PLC the example runs until Ctrl+C.
+Monitors a PLC alarm array with the optional `Dahlke.TwinCAT.Ads.Alarms` package and prints every transition — raised, acknowledged, cleared, reoccurred and ended — with text resolved from `alarms.json`. In simulation mode a background driver walks a scripted alarm lifecycle: two alarms on the same equipment, one of which clears before it is acknowledged and is then ended by an `AcknowledgeAsync` that reaches the PLC. The driver stops the host when the script finishes; against a real PLC the example runs until Ctrl+C.
+
+Acknowledgement is a method call, so the driver also plays the function block: it seeds `deaReturnType`'s members and an `AcknowledgeAlarm` handler on the simulated connection, and every array it writes afterwards derives each entry's `IsAcked` from what that handler recorded. Nothing in the script hardcodes the acknowledgement, so `[ACKNOWLEDGED]` below is evidence the call went through the monitor and the dialect. Both seedings are mandatory: an unseeded RPC or enum throws on a simulated connection rather than answering something plausible. `SymbolPath` is `GVL.ErrorHandler.aHmiAlarms`, from which the shipped dialect derives the instance path `GVL.ErrorHandler` — which is the path the handler is seeded under.
 
 ```bash
 # Simulation mode (default)
@@ -64,7 +66,7 @@ dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler -- --real
 The full output, verbatim — check your run against it:
 
 ```text
-info: Dahlke.TwinCAT.Ads.Alarms.PlcAlarmMonitor[0] Monitoring alarms on plc1 at GVL.Errors every 200 ms
+info: Dahlke.TwinCAT.Ads.Alarms.PlcAlarmMonitor[0] Monitoring alarms on plc1 at GVL.ErrorHandler.aHmiAlarms every 200 ms
 [RAISED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
 [RAISED] BMK1Err500 (Warning) — Conveyor 1: drive overtemperature
 [CLEARED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
@@ -72,7 +74,7 @@ Outstanding after the fault cleared:
   BMK1Err404 on BMK1 (Error) active=False acknowledged=False
   BMK1Err500 on BMK1 (Warning) active=True acknowledged=False
 AcknowledgeAsync("BMK1Err404") -> True
-info: Dahlke.TwinCAT.Ads.Alarms.PlcAlarmMonitor[0] Acknowledged BMK1Err404 on plc1 (slot 0)
+info: Dahlke.TwinCAT.Ads.Alarms.PlcAlarmMonitor[0] Acknowledged BMK1Err404 on plc1
 [ACKNOWLEDGED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
 [ENDED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
 Outstanding after the acknowledgement:

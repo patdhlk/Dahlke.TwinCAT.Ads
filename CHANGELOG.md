@@ -64,12 +64,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same thing at the boundary — the exception never escapes onto the notification thread, and
   the next transition is still delivered.
 
-  **Acknowledgement verifies the slot before writing.** `AcknowledgeAsync` writes `IsAcked`
-  on the array entry, but slots are permanent and reused, so an index alone does not identify
-  an alarm — it first reads the slot's `sKey` back and writes only if the alarm is still there.
-  A window remains between that read and the write; closing it would need a PLC-side
-  compare-and-set the contract does not offer. A `false` return means "nothing was written",
-  never "the PLC rejected it": ADS failures propagate rather than being folded into the result.
+  **Acknowledgement asks the PLC to acknowledge; it does not write the entry.**
+  `AcknowledgeAsync` finds the alarm by `Key`, then calls the method named by
+  `AcknowledgeMethod` (default `AcknowledgeAlarm`) on the function block that owns
+  acknowledgement, passing that key. Writing `IsAcked` on the array entry — the obvious
+  reading, and what this package did while it was being built — is what hardware disproved:
+  the array is a projection, not state, rebuilt from the handler's own dictionary every scan,
+  so the write succeeds, ADS reports success, and the PLC overwrites those bytes within one
+  cycle. On the reference rack the write returned `true` and `IsAcked` was still `false` one
+  through six seconds later. A mechanism that reports success while doing nothing is worse
+  for an alarm system than one that fails outright, because an operator has no way to learn
+  the difference — it was only found by reading the PLC source. Naming the alarm by key
+  also retires the slot problem entirely: slots are permanent and reused, so the old path had
+  to read a slot's `sKey` back before writing it, and a window remained between that read and
+  the write. There is no slot in the call now, so there is no window. A `false` return means
+  the PLC has nothing by that key — never that it refused, which raises
+  `PlcAlarmAcknowledgeException` instead, so a caller can always tell "it is gone" from
+  "try again".
+
+  **Which function block, what it is called, and how its answer reads is the vendor's
+  business.** `IPlcAlarmDialect` is that seam: one implementation binds the notification and
+  performs the acknowledgement, and the shipped `FB_ErrorHandler` dialect is registered by
+  default so nothing has to be configured for the layout this package was written against.
+  `AcknowledgeInstancePath` and `AcknowledgeMethod` configure that default; a dialect for
+  another vendor receives them and may ignore them.
+
+  **The shipped dialect resolves `deaReturnType` by name, never by number.** Enum numbering
+  in a PLC program moves — a member inserted in the middle renumbers everything after it —
+  while names survive; the reference rack this was verified against publishes a numbering its
+  own source no longer agrees with, so a number-based mapping is correct only against the one
+  machine it was written for, and silently wrong everywhere else. `SUCCESS` and `NOT_FOUND`
+  are therefore matched as strings against the members the PLC itself publishes. The same
+  reasoning rules out reading the member by position: `GetEnumMembersAsync` promises
+  declaration order, not dense zero-based values, and `SUCCESS := 100` is ordinary ST.
+  The members are resolved *before* the call is issued, not after — every ordinary way that
+  resolution can fail would otherwise surface as a failure for an alarm the PLC had already
+  acknowledged.
 
   **A shape mismatch throws rather than degrading — and then recovers.** If the PLC's
   `ST_ErrorEntry` stops matching what the package binds, the binder raises
@@ -106,9 +136,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Register the core's `AddTwinCatAdsHealthCheck()` alongside it, which is what answers whether
   a target can be seen at all.
 
+- **PLC method calls — `IAdsConnection.InvokeRpcMethodAsync`.** Calls a method on a function
+  block or program instance by path and name, with input arguments in declaration order, and
+  returns the method's return value alongside its output parameters as an `AdsRpcResult`.
+  Until now the library could read and write symbols but could not ask the PLC to *do*
+  anything, which for the alarm package meant the only acknowledgement it could express was a
+  write to a projection that ignores writes. The PLC method must carry
+  `{attribute 'TcRpcEnable'}` — without it TwinCAT does not expose it over ADS at all and the
+  call fails as an unknown method, whatever the path says.
+
+- **PLC enum metadata — `IAdsConnection.GetEnumMembersAsync`.** Resolves an enumeration's
+  members — name and numeric value, in declaration order — from the running program's own type
+  metadata, so a returned code can be read by the name the PLC gives it. Numbering is not
+  stable across a project's life and names are: a member inserted in the middle renumbers
+  everything after it, and a machine can be running a numbering its own source no longer
+  agrees with. Code that maps a returned integer by number is therefore correct only against
+  the machine it was written for and silently reports a different member elsewhere, with no
+  error anywhere to catch it. The result is cached for the life of the connection, since PLC
+  type metadata is fixed for a running program — which also means a download that changes an
+  enum is not seen until the connection is re-established.
+
+  Both surfaces exist on simulated connections too, seeded code-first by
+  `SimulatedAdsConnection.SetRpcHandler` and `SetEnumMembers`. Neither has a fallback: an
+  unseeded call **throws** rather than returning something plausible. A simulated
+  acknowledgement that appears to succeed while doing nothing is indistinguishable from one
+  that worked, and that is precisely the defect this release removes — simulation is not
+  allowed to stage it.
+
 - **`Dahlke.TwinCAT.Ads.Examples.ErrorHandler`** — a console example that walks a scripted
   alarm lifecycle in simulation: two alarms on one machine, one that clears before it is
-  acknowledged, and an `AcknowledgeAsync` write-back that is what finally ends it.
+  acknowledged, and an acknowledgement that ends it by calling a seeded `AcknowledgeAlarm`
+  method on the simulated PLC. The driver derives each entry's `IsAcked` from what that
+  method recorded rather than from a literal, so `[ACKNOWLEDGED]` in the output is evidence
+  the call reached the dialect and not a staged write.
 
 ## [0.6.0] - 2026-07-30
 

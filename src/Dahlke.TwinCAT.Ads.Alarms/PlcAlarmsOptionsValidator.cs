@@ -85,10 +85,18 @@ internal sealed class PlcAlarmsOptionsValidator(IOptions<TwinCatAdsOptions> adsO
             if (string.IsNullOrWhiteSpace(target.AcknowledgeInstancePath)
                 && target.SymbolPath?.LastIndexOf('.') is null or <= 0)
             {
+                // Names the dialect coupling and the escape hatch in the message itself. The
+                // XML doc says both, but an operator hitting this sees a boot failure, not the
+                // doc — and without the second sentence a dialect that needs no instance path
+                // at all looks like it cannot be configured to start.
                 failures.Add(
                     $"PlcAlarms:Targets:{plcId}:AcknowledgeInstancePath must be set, because the " +
                     $"acknowledging function block cannot be derived from SymbolPath " +
-                    $"'{target.SymbolPath}' — it has no parent segment to trim.");
+                    $"'{target.SymbolPath}' — it has no parent segment to trim. This rule serves " +
+                    "the built-in FB_ErrorHandler dialect, but applies whichever dialect is " +
+                    "registered, because validation cannot see which one the container will " +
+                    "resolve: a dialect that needs no instance path satisfies it with any " +
+                    "non-blank value, which is then passed through unread.");
             }
         }
 
