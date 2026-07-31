@@ -9,7 +9,7 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>Dahlke.TwinCAT.Ads</PackageId>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <Authors>Patrick Dahlke</Authors>
     <Description>Reusable TwinCAT ADS connection pool with health checks, reconnection, simulation mode, and ASP.NET Core integration.</Description>
     <PackageTags>TwinCAT;ADS;Beckhoff;PLC;Automation;IPC</PackageTags>

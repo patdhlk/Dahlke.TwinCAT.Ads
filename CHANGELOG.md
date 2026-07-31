@@ -5,6 +5,228 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-30
+
+### Added
+
+- **PLC alarm tracking — the new `Dahlke.TwinCAT.Ads.Alarms` companion package.** Point it at
+  a TwinCAT alarm array and inject `IPlcAlarmMonitor` for a live set of the alarms outstanding
+  right now, plus a stream of `Raised` / `Acknowledged` / `Cleared` / `Reoccurred` / `Ended`
+  transitions as events or an `IObservable<AlarmTransition>`.
+
+  **An alarm is outstanding while its fault is present OR it still awaits acknowledgement.**
+  This is the ISA-18.2 "returned to normal, unacknowledged" state, and it is the whole reason
+  the rule is computed rather than read off `IsActive`. A PLC alarm array is fixed-size with
+  permanent slots: an alarm ends by `IsActive := FALSE`, never by leaving the array. Treating
+  absence from the array as resolution — the obvious reading — detects nothing at all, and
+  dropping an alarm the moment its fault clears loses every fault that self-clears before an
+  operator sees it.
+
+  **Identity is the PLC's `sKey`, never `Id`.** `Id` is the equipment identifier (BMK) and is
+  shared by every alarm on one machine, so keying on it collapses simultaneous alarms into a
+  single entry. `sKey` is the PLC's own composite key combining the equipment identifier and
+  the error code — `Test_Err_60` for equipment `Test`, error code `60`, for example — and this
+  package treats it as opaque: the exact spelling is the PLC program's business, and it is
+  never parsed. `EquipmentId` is still surfaced, for grouping and filtering, which is what it
+  is actually for.
+
+  **A PLC that is unreachable at boot does not fail the host.** The facade's *first*
+  subscription registration is not durable — it waits out `TimeoutMs`, throws, and retains
+  nothing for a later reconnect — so letting that escape startup would take down alarm
+  monitoring for every PLC that *is* up because one is down. Each target is registered
+  independently instead: a failure is logged at `Error` and the target is re-attempted the next
+  time its connection reports `Connected`, after which the core library's durable subscriptions
+  carry it across reconnects on their own. Until then that target reports no alarms, and the
+  rest of the fleet is monitored normally. On a plant where PLCs are powered down for
+  maintenance, the alternative is a service that will not start. The attempts also run
+  concurrently, so an unreachable target costs one connection timeout for the whole fleet
+  rather than one each — startup stays prompt, exactly as the connection pool's does. Only
+  unreachability is forgiven: a `SymbolPath` the PLC does not have is a fault no reconnect will
+  fix, and still brings the host down — *if* that target answered at boot. If it did not, there
+  is no startup left to fail and the bad path surfaces on the deferred retry instead, logged at
+  `Error` and re-attempted on every reconnect.
+
+  **Transitions for one target are published in the order they were computed.** ADS
+  notifications arrive on a background thread and two snapshots for one target can overlap, so
+  the diff and the publication are held under one per-target lock. Without it a consumer folding
+  the stream into its own state could end on `Raised` after `Ended` and show a cleared alarm as
+  live — the wrong direction for an alarm system to fail in. The price is explicit: **a handler
+  that blocks delays that target's next snapshot**, so handlers must be quick. Other targets are
+  unaffected; the lock is per target, and ordering is not claimed across targets.
+
+  **`AlarmChanged` isolates its handlers; `Transitions` deliberately does not.** Each event
+  handler is invoked separately, so one that throws is logged and the rest still receive the
+  transition — invoking the multicast delegate directly would silently starve every handler
+  registered after the first thrower. `Transitions` is an ordinary observable and keeps the
+  standard Rx contract, under which throwing from `OnNext` is an observer bug: a subscriber that
+  throws can skip the ones after it. Swallowing observer exceptions there would make this
+  observable behave unlike every other one an Rx consumer composes with. Both paths guarantee
+  the same thing at the boundary — the exception never escapes onto the notification thread, and
+  the next transition is still delivered. `Transitions` is subscribe-only: what it hands back is
+  an observable and nothing else, so no consumer can cast its way to the underlying sequence and
+  complete, dispose, or push into the alarm stream for the whole process.
+
+  **On `Ended`, the kind is the authority and the payload is not.** `AlarmTransition.Alarm`
+  carries the last reading before the alarm ended, so its `IsActive` / `IsAcknowledged` describe
+  that reading rather than the ended state — an alarm also ends by its slot being reused or
+  blanked, in which case the newest thing ever seen is the alarm alive, and `Previous` is the
+  very same instance so a consumer diffing the two sees no change at all. Re-deriving
+  outstanding-ness from the payload therefore concludes the alarm is still live and never clears
+  it. Trust `Ended`: it means gone, whatever the fields say. The payload is deliberately not
+  normalised, because a synthesised reading would be one the PLC never produced.
+
+  **Acknowledgement asks the PLC to acknowledge; it does not write the entry.**
+  `AcknowledgeAsync` finds the alarm by `Key`, then calls the method named by
+  `AcknowledgeMethod` (default `AcknowledgeAlarm`) on the function block that owns
+  acknowledgement, passing that key. Writing `IsAcked` on the array entry — the obvious
+  reading, and what this package did while it was being built — is what hardware disproved:
+  the array is a projection, not state, rebuilt from the handler's own dictionary every scan,
+  so the write succeeds, ADS reports success, and the PLC overwrites those bytes within one
+  cycle. On the reference rack the write returned `true` and `IsAcked` was still `false` one
+  through six seconds later. A mechanism that reports success while doing nothing is worse
+  for an alarm system than one that fails outright, because an operator has no way to learn
+  the difference — it was only found by reading the PLC source. Naming the alarm by key
+  also retires the slot problem entirely: slots are permanent and reused, so the old path had
+  to read a slot's `sKey` back before writing it, and a window remained between that read and
+  the write. There is no slot in the call now, so there is no window. A `false` return means
+  there was nothing to acknowledge, in any of three ways: the target is not monitored, the
+  alarm is not in that target's outstanding set, or the PLC itself has nothing by that key.
+  The first two are answered locally and never reach the PLC at all. What `false` never means
+  is that the PLC refused — that raises `PlcAlarmAcknowledgeException`, so a caller can always
+  tell "it is gone" from "try again".
+
+  **Which function block, what it is called, and how its answer reads is the vendor's
+  business.** `IPlcAlarmDialect` is that seam: one implementation binds the notification and
+  performs the acknowledgement, and the shipped `FB_ErrorHandler` dialect is registered by
+  default so nothing has to be configured for the layout this package was written against.
+  `AcknowledgeInstancePath` and `AcknowledgeMethod` configure that default; a dialect for
+  another vendor receives them and may ignore them.
+
+  **The shipped dialect resolves `deaReturnType` by name, never by number.** Enum numbering
+  in a PLC program moves — a member inserted in the middle renumbers everything after it —
+  while names survive; the reference rack this was verified against publishes a numbering its
+  own source no longer agrees with, so a number-based mapping is correct only against the one
+  machine it was written for, and silently wrong everywhere else. `SUCCESS` and `NOT_FOUND`
+  are therefore matched as strings against the members the PLC itself publishes. The same
+  reasoning rules out reading the member by position: `GetEnumMembersAsync` promises
+  declaration order, not dense zero-based values, and `SUCCESS := 100` is ordinary ST.
+  The members are resolved *before* the call is issued, not after — every ordinary way that
+  resolution can fail would otherwise surface as a failure for an alarm the PLC had already
+  acknowledged.
+
+  **A shape mismatch throws rather than degrading — and then recovers.** If the PLC's
+  `ST_ErrorEntry` stops matching what the package binds, the binder raises
+  `PlcAlarmShapeException` naming the offending member and the symbol path. Defaulting instead
+  would publish a plausible-looking but wrong alarm list indefinitely, and for alarms that is
+  worse than no list. The monitor logs that at `Error` and drops the whole snapshot — the
+  outstanding set keeps its last good reading rather than a half-bound one — but the
+  subscription stays live, so a transient malformation recovers on the next well-formed
+  notification instead of requiring a restart.
+
+  **Verified against a live PLC, not just simulation.** A real notification arrives as a CLR
+  array of `TwinCAT.TypeSystem.DynamicValue`, with each element's members read through
+  `IStructValue` rather than a dictionary, and `E_ErrorType` decodes as a plain integral
+  matching the documented `None=0, Info=1, Warning=2, Error=3` numbering — none of which the
+  simulated store, built from seeded primitives, could confirm on its own. The alarms observed
+  on that run were themselves in the returned-to-normal-unacknowledged state, `IsActive=false`
+  with `NeedsAck=true`, the exact case the outstanding rule exists to keep visible rather than
+  dropping the moment a fault clears.
+
+  **Notification cost is one payload decode, no round-trips.** The monitor subscribes through
+  the untyped `SubscribeAsync`, which serves the whole array from the notification payload.
+  The metadata overload would instead build a neutral tree with one ADS read per member —
+  for an array of N entries with M members, N×M round-trips per notification.
+
+  **Timestamps state a clock or state none — they never guess.** The PLC's `TIMESTRUCT`
+  carries no time zone, so nothing in the payload can say whether it is UTC or the machine's
+  local time. `PlcAlarmTargetOptions.PlcClock` (a `PlcClockKind`: `Unspecified`, `Utc` or
+  `Local`) is how a caller declares it per target, and it is what sets the `DateTimeKind` on
+  every `PlcAlarm.PlcTimestamp`. The default is `Unspecified`, which makes no claim: stamping
+  a wrong `Kind` is worse than stamping none, because a consumer calling `ToUniversalTime()`
+  then silently shifts every alarm in the plant by the host's offset, and a shifted timestamp
+  looks exactly like a real one. Alarms are also ordered by this value — `Reoccurred` fires
+  when an already-active alarm's timestamp advances — so it is load-bearing, not decorative.
+
+  **`PlcAlarm.SlotIndex` reports where the alarm sat, and addresses nothing.** The array
+  index an alarm was bound from is surfaced for diagnostics and display, because an operator
+  reading a PLC's array alongside this package's output needs to line the two up. It is
+  explicitly not an identity: slots are permanent and reused, so an index identifies a
+  position rather than an alarm. Nothing in this package addresses an alarm by it —
+  acknowledgement goes by `Key`, which is what removes the read-then-write window a
+  slot-addressed design would need.
+
+  **`IAlarmTextCatalog` is a public extension point, not just the JSON file.** Register your
+  own implementation before `AddTwinCatAdsAlarms` to resolve alarm text from a database, a
+  resource assembly, a translation service or anything else; the built-in JSON catalog is
+  registered only when none is present, so overriding it takes no opt-out flag. Its one
+  method must be safe to call concurrently — text is resolved on the ADS notification thread
+  while binding each snapshot.
+
+  Ships with a JSON alarm text catalog (`sKey` → text, with per-key culture fallback) and
+  startup validation that reports every misconfiguration at once. A relative `TextCatalog`
+  resolves against the host's content root rather than the process working directory — the two
+  coincide under `dotnet run` and almost never do for a published or service-hosted app, so
+  anchoring to the working directory would turn the most natural configuration into a
+  `FileNotFoundException` that only appears on deployment. An absolute path is used as written.
+  `AddTwinCatAdsAlarmHealthCheck()` reports from the worst outstanding severity — and **only**
+  that. Healthy has to be earned: it needs a severity that is both a named `AlarmSeverity`
+  member and below both thresholds. `E_ErrorType` is signed and an unrecognised value is
+  preserved rather than dropped, so an alarm can arrive carrying a severity nothing can rank —
+  `(AlarmSeverity)(-1)` sorts below `None` and clears no threshold. That reports Degraded, not
+  Healthy: an outstanding alarm this package cannot interpret is a reason to look, though not
+  by itself proof of a fault. It is not a liveness check either: a target still waiting for its
+  first connection has no alarms and so reports healthy, indistinguishable from one that is
+  connected and quiet.
+  Register the core's `AddTwinCatAdsHealthCheck()` alongside it, which is what answers whether
+  a target can be seen at all.
+
+- **PLC method calls — `IAdsConnection.InvokeRpcMethodAsync`.** Calls a method on a function
+  block or program instance by path and name, with input arguments in declaration order, and
+  returns the method's return value alongside its output parameters as an `AdsRpcResult`.
+  Until now the library could read and write symbols but could not ask the PLC to *do*
+  anything, which for the alarm package meant the only acknowledgement it could express was a
+  write to a projection that ignores writes. The PLC method must carry
+  `{attribute 'TcRpcEnable'}` — without it TwinCAT does not expose it over ADS at all and the
+  call fails as an unknown method, whatever the path says.
+
+  **`AdsRpcResult` carries Beckhoff's own value shapes, not this library's neutral tree.** A
+  scalar arrives as a boxed primitive, which is what makes the common case look familiar, but a
+  struct or an array arrives as a `DynamicValue`-family object implementing `IStructValue` or
+  `IArrayValue` — not an `IReadOnlyDictionary<string, object?>` and not an `object?[]`. Casting
+  it to either throws. Decoding a returned container would require type metadata for the
+  method's signature, which this library deliberately does not fetch; when the neutral tree is
+  what you want, read the symbol with `ReadValueWithMetadataAsync`, which does decode.
+
+- **PLC enum metadata — `IAdsConnection.GetEnumMembersAsync`.** Resolves an enumeration's
+  members — name and numeric value, in declaration order — from the running program's own type
+  metadata, so a returned code can be read by the name the PLC gives it. Numbering is not
+  stable across a project's life and names are: a member inserted in the middle renumbers
+  everything after it, and a machine can be running a numbering its own source no longer
+  agrees with. Code that maps a returned integer by number is therefore correct only against
+  the machine it was written for and silently reports a different member elsewhere, with no
+  error anywhere to catch it. The result is cached for the life of the connection, since PLC
+  type metadata is fixed for a running program — which also means a download that changes an
+  enum is not seen until the connection is re-established. Resolving a type for the first time
+  makes the connection upload the running program's whole type system, which is a synchronous,
+  uncancellable Beckhoff operation; it is performed off the calling thread so that the
+  cancellation token and the per-target `TimeoutMs` genuinely bound the wait, as they do for
+  every other operation on the connection. Later calls for the same type are served from the
+  cache and wait for nothing.
+
+  Both surfaces exist on simulated connections too, seeded code-first by
+  `SimulatedAdsConnection.SetRpcHandler` and `SetEnumMembers`. Neither has a fallback: an
+  unseeded call **throws** rather than returning something plausible. A simulated
+  acknowledgement that appears to succeed while doing nothing is indistinguishable from one
+  that worked, and that is precisely the defect this release removes — simulation is not
+  allowed to stage it.
+
+- **`Dahlke.TwinCAT.Ads.Examples.ErrorHandler`** — a console example that walks a scripted
+  alarm lifecycle in simulation: two alarms on one machine, one that clears before it is
+  acknowledged, and an acknowledgement that ends it by calling a seeded `AcknowledgeAlarm`
+  method on the simulated PLC. The driver derives each entry's `IsAcked` from what that
+  method recorded rather than from a literal, so `[ACKNOWLEDGED]` in the output is evidence
+  the call reached the dialect and not a staged write.
+
 ## [0.6.0] - 2026-07-30
 
 ### Added

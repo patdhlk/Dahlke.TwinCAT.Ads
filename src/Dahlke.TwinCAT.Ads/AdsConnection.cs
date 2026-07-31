@@ -1,8 +1,11 @@
+using System.Collections.Concurrent;
+using System.Globalization;
 using TwinCAT;
 using TwinCAT.Ads;
 using TwinCAT.Ads.SumCommand;
 using TwinCAT.Ads.TypeSystem;
 using TwinCAT.TypeSystem;
+using TwinCAT.ValueAccess;
 
 namespace Dahlke.TwinCAT.Ads;
 
@@ -37,6 +40,22 @@ internal sealed class AdsConnection : IManagedConnection
     private readonly ILogger<AdsConnection> _logger;
     private readonly object _symbolLoaderLock = new();
     private volatile IDynamicSymbolLoader? _symbolLoader;
+
+    // Type metadata is fixed for a running PLC program, so one read serves the process.
+    // Cleared with the symbol loader on disconnect so a download is picked up on reconnect
+    // rather than serving a stale map forever.
+    private readonly ConcurrentDictionary<string, IReadOnlyList<AdsEnumMember>> _enumCache
+        = new(StringComparer.OrdinalIgnoreCase);
+
+    // Generation guard for _enumCache: bumped (before the clear, see Disconnect/ForceDisconnect)
+    // every time the cache is cleared. GetEnumMembersAsync captures this before resolving and only
+    // commits its result if the generation is still the one it started with. Without this, a
+    // resolve already past its cache-miss check when Disconnect/ForceDisconnect runs could still
+    // write `_enumCache[typeName] = members` AFTER the clear, resurrecting pre-download numbering
+    // into the very cache the clear exists to invalidate. No lock is held across the resolve —
+    // only this counter is checked — so a network round-trip is never serialised behind a
+    // disconnect.
+    private long _enumCacheGeneration;
 
     public string PlcId { get; }
     public string DisplayName => _options.DisplayName;
@@ -94,6 +113,12 @@ internal sealed class AdsConnection : IManagedConnection
     public void Disconnect()
     {
         lock (_symbolLoaderLock) { _symbolLoader = null; }
+        // Increment BEFORE clearing: an in-flight GetEnumMembersAsync rechecks the generation
+        // right before it writes. Clearing first would leave a window where that write's
+        // generation check still passes (not yet bumped) and lands AFTER Clear() with nothing left
+        // to invalidate it — see GetEnumMembersAsync's remarks.
+        Interlocked.Increment(ref _enumCacheGeneration);
+        _enumCache.Clear();
         if (_client.IsConnected)
         {
             _client.Disconnect();
@@ -104,6 +129,8 @@ internal sealed class AdsConnection : IManagedConnection
     public void ForceDisconnect()
     {
         lock (_symbolLoaderLock) { _symbolLoader = null; }
+        Interlocked.Increment(ref _enumCacheGeneration);
+        _enumCache.Clear();
         try { _client.Disconnect(); } catch { /* best effort */ }
     }
 
@@ -588,6 +615,188 @@ internal sealed class AdsConnection : IManagedConnection
             results[kvp.Key] = kvp.Value;
 
         return results;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Resolution goes through the same <see cref="GetSymbolLoader"/> dynamic tree every other
+    /// symbol operation uses; the RPC capability is the resolved symbol's own
+    /// <see cref="IRpcCallableInstance"/> facet, which only a function-block or program instance
+    /// carries. A symbol that resolves but lacks it is a caller mistake, not an ADS failure, so it
+    /// throws <see cref="InvalidOperationException"/> rather than an
+    /// <see cref="AdsErrorException"/>.
+    /// </para>
+    /// <para>
+    /// Timeout/cancellation follow the shape of every other operation here: one linked
+    /// <see cref="CancellationTokenSource"/> bounds the call, and
+    /// <see cref="CancellationDisambiguator"/> decides whether the caller cancelled
+    /// (<see cref="OperationCanceledException"/>) or the per-target timeout elapsed
+    /// (<see cref="TimeoutException"/>).
+    /// </para>
+    /// </remarks>
+    public async Task<AdsRpcResult> InvokeRpcMethodAsync(
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(symbolPath);
+        ArgumentNullException.ThrowIfNull(methodName);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        using var cts = CreateTimeoutCts(ct);
+        var symbolLoader = GetSymbolLoader();
+
+        if (!symbolLoader.Symbols.TryGetInstance(symbolPath, out var symbol))
+            throw new AdsErrorException($"Symbol '{symbolPath}' not found.", AdsErrorCode.DeviceSymbolNotFound);
+
+        if (symbol is not IRpcCallableInstance rpc)
+            throw new InvalidOperationException(
+                $"Symbol '{symbolPath}' on PLC '{PlcId}' is not RPC-callable, so method " +
+                $"'{methodName}' cannot be invoked on it. RPC requires a function block or " +
+                "program instance whose method carries {attribute 'TcRpcEnable'}.");
+
+        ResultRpcMethodAccess result;
+        try
+        {
+            // Beckhoff annotates inParameters as object[]? — a NON-nullable element type — but a
+            // PLC method may legitimately take an argument this library models as object?, so the
+            // public signature keeps object?[]. The two are the same type at runtime (nullability
+            // is erased), so an explicit cast converts the annotation without suppressing anything.
+            result = await rpc.InvokeRpcMethodAsync(methodName, (object[])parameters, cts.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
+        }
+
+        if (result.Failed)
+            // ResultRpcMethodAccess derives from the protocol-NEUTRAL TwinCAT.ValueAccess.ResultAccess,
+            // whose ErrorCode is a plain int — unlike the Ads-specific results elsewhere in this file,
+            // which already carry an AdsErrorCode. The value is an ADS error code either way; the cast
+            // only restores the type the neutral base erased.
+            throw new AdsErrorException(
+                $"RPC '{methodName}' on symbol '{symbolPath}' on PLC '{PlcId}' failed: {(AdsErrorCode)result.ErrorCode}",
+                (AdsErrorCode)result.ErrorCode);
+
+        return new AdsRpcResult(
+            result.ReturnValue,
+            result.OutParameters is null ? [] : [.. result.OutParameters]);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Resolution goes through the same <see cref="GetSymbolLoader"/> dynamic tree every other
+    /// symbol operation uses, but reads its <c>DataTypes</c> collection rather than
+    /// <c>Symbols</c> — enum members are TYPE metadata, not an instance path, so
+    /// there is no symbol to resolve. A type that resolves but is not an enum is a caller
+    /// mistake, not an ADS failure, so it throws <see cref="InvalidOperationException"/> rather
+    /// than an <see cref="AdsErrorException"/> — mirroring <see cref="InvokeRpcMethodAsync"/>'s
+    /// non-RPC-callable case.
+    /// </para>
+    /// <para>
+    /// <b>Cached for the connection's lifetime.</b> A running PLC program's type metadata is
+    /// fixed, so the result is cached the first time a given type is resolved and every later
+    /// call returns it with no further ADS round-trip. The cache is cleared alongside the symbol
+    /// loader on <see cref="Disconnect"/>/<see cref="ForceDisconnect"/>, so a reconnect after a
+    /// PLC download picks up the new numbering rather than serving a stale map for the process's
+    /// lifetime.
+    /// </para>
+    /// <para>
+    /// <b>Generation-guarded write.</b> A call already past the cache-miss check below when a
+    /// concurrent <see cref="Disconnect"/>/<see cref="ForceDisconnect"/> clears the cache must not
+    /// resurrect its (now potentially stale, pre-download) result into the cache afterwards — that
+    /// would defeat the very clear this method's caching depends on. <c>_enumCacheGeneration</c> is
+    /// captured before resolving and rechecked immediately before the write; a mismatch means a
+    /// clear happened while this call was in flight, so the result is still returned to THIS
+    /// caller but is not cached. No lock is held across the resolve, so this never serialises an
+    /// ADS round-trip behind a disconnect.
+    /// </para>
+    /// <para>
+    /// <b>Bounded, and off the caller's thread.</b> Resolution is entirely SYNCHRONOUS Beckhoff
+    /// work — the first touch of <c>DataTypes</c> triggers the type-system upload, a network
+    /// round-trip on a cold connection — so running it inline would block the awaiting thread for
+    /// as long as the PLC took, with no token able to interrupt it and the documented
+    /// <see cref="TimeoutException"/> unreachable. It runs on the thread pool instead, awaited
+    /// through one linked <see cref="CancellationTokenSource"/>, with
+    /// <see cref="CancellationDisambiguator"/> deciding caller-cancellation
+    /// (<see cref="OperationCanceledException"/>) from the elapsed per-target timeout
+    /// (<see cref="TimeoutException"/>) — the same shape as every other operation here.
+    /// The honest limit: Beckhoff's upload itself has no cancellation, so what the bound buys is
+    /// that the CALLER stops waiting. The abandoned resolve runs to completion on its own thread
+    /// and discards its result; it never reaches the cache, because only the awaiting path
+    /// writes there.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(typeName);
+        ct.ThrowIfCancellationRequested();
+
+        if (_enumCache.TryGetValue(typeName, out var cached))
+            return cached;
+
+        var generationAtStart = Volatile.Read(ref _enumCacheGeneration);
+
+        using var cts = CreateTimeoutCts(ct);
+
+        // CancellationToken.None on Task.Run deliberately: its token only decides whether the
+        // work is ever SCHEDULED, and once the upload is under way nothing can abort it. The
+        // bound that matters is the WaitAsync below.
+        var resolve = Task.Run(() => ResolveEnumMembers(typeName), CancellationToken.None);
+
+        AdsEnumMember[] members;
+        try
+        {
+            members = await resolve.WaitAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Nothing awaits `resolve` after this, so observe whatever it faults with rather
+            // than leaving an unobserved task exception to surface elsewhere.
+            _ = resolve.ContinueWith(
+                static abandoned => _ = abandoned.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+
+            throw CancellationDisambiguator.CreateException(ct, typeName, PlcId, _options.TimeoutMs);
+        }
+
+        // Only commit if no Disconnect/ForceDisconnect cleared the cache while this call was
+        // resolving (see the generation-guarded-write remarks above). Either way THIS caller
+        // still gets its freshly-resolved result — only the cache write is skipped.
+        if (Volatile.Read(ref _enumCacheGeneration) == generationAtStart)
+            _enumCache[typeName] = members;
+
+        return members;
+    }
+
+    /// <summary>
+    /// The blocking half of <see cref="GetEnumMembersAsync"/>: find the type among the symbol
+    /// loader's data types and project its members. Every line of it is synchronous Beckhoff
+    /// work, which is precisely why its caller runs it on the thread pool rather than inline.
+    /// </summary>
+    private AdsEnumMember[] ResolveEnumMembers(string typeName)
+    {
+        var symbolLoader = GetSymbolLoader();
+
+        var dataType = symbolLoader.DataTypes.FirstOrDefault(
+            d => string.Equals(d.Name, typeName, StringComparison.OrdinalIgnoreCase));
+
+        if (dataType is null)
+            throw new AdsErrorException(
+                $"Data type '{typeName}' was not found on PLC '{PlcId}'.",
+                AdsErrorCode.DeviceSymbolNotFound);
+
+        if (dataType is not IEnumType enumType)
+            throw new InvalidOperationException(
+                $"Data type '{typeName}' on PLC '{PlcId}' is not an enumeration " +
+                $"(category {dataType.Category}), so its members cannot be resolved.");
+
+        return enumType.EnumValues
+            .Select(v => new AdsEnumMember(v.Name, Convert.ToInt64(v.Value, CultureInfo.InvariantCulture)))
+            .ToArray();
     }
 
     /// <inheritdoc />

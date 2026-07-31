@@ -196,6 +196,12 @@ internal sealed class FakeManagedConnection : IManagedConnection
     public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
         => throw new NotSupportedException();
 
+    public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+        => throw new NotSupportedException();
+
     public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
         => throw new NotSupportedException();
 

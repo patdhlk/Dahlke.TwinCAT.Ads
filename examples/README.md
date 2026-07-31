@@ -1,6 +1,6 @@
 # Examples
 
-Both examples run out of the box in **simulation mode** — no TwinCAT installation or PLC required. Switch to a real PLC by adjusting the flag described per example and pointing `PlcTargets` in `appsettings.json` at your hardware.
+All examples run out of the box in **simulation mode** — no TwinCAT installation or PLC required. Switch to a real PLC by adjusting the flag described per example and pointing `PlcTargets` in `appsettings.json` at your hardware.
 
 ## Dahlke.TwinCAT.Ads.Examples.Cli
 
@@ -40,3 +40,51 @@ curl localhost:5000/plcs/plc1/symbols/GVL.Counter
 # Health check
 curl localhost:5000/health
 ```
+
+## Dahlke.TwinCAT.Ads.Examples.Reactive
+
+A console application using the optional `Dahlke.TwinCAT.Ads.Reactive` package. Demonstrates typed and untyped value streams composed with Rx operators (`Where`, `DistinctUntilChanged`, `Throttle`) and merged connection-state across targets. Runs entirely in simulation.
+
+```bash
+dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.Reactive
+```
+
+## Dahlke.TwinCAT.Ads.Examples.ErrorHandler
+
+Monitors a PLC alarm array with the optional `Dahlke.TwinCAT.Ads.Alarms` package and prints every transition — raised, acknowledged, cleared, reoccurred and ended — with text resolved from `alarms.json`. In simulation mode a background driver walks a scripted alarm lifecycle: two alarms on the same equipment, one of which clears before it is acknowledged and is then ended by an `AcknowledgeAsync` that reaches the PLC. The driver stops the host when the script finishes; against a real PLC the example runs until Ctrl+C.
+
+Acknowledgement is a method call, so the driver also plays the function block: it seeds `deaReturnType`'s members and an `AcknowledgeAlarm` handler on the simulated connection, and every array it writes afterwards derives each entry's `IsAcked` from what that handler recorded. Nothing in the script hardcodes the acknowledgement, so `[ACKNOWLEDGED]` below is evidence the call went through the monitor and the dialect. Both seedings are mandatory: an unseeded RPC or enum throws on a simulated connection rather than answering something plausible. `SymbolPath` is `MAIN.ErrorHandler.aHmiAlarms`, from which the shipped dialect derives the instance path `MAIN.ErrorHandler` — which is the path the handler is seeded under.
+
+**`--real` needs `appsettings.json` pointed at your own PLC first.** `MAIN.ErrorHandler.aHmiAlarms` is the reference rack's layout, not a path every PLC has, and the acknowledging function block is derived from it by trimming the last segment. A wrong `SymbolPath` is a configuration fault, not a transient one, so — provided the PLC answers at boot — it **faults `StartAsync` and the host never starts**; you get the subscription failure on the console and the process exits, rather than a half-running example. (If the PLC is *unreachable* at boot there is no startup left to fail: the bad path surfaces on the deferred retry instead, logged at `Error` and re-attempted on every reconnect. See [Behaviour worth knowing](../README.md#plc-alarms).) Acknowledgement is aimed at the derived block either way, so fix the path before blaming the method. The `AmsNetId` needs changing too, and the PLC's `AcknowledgeAlarm` method needs `{attribute 'TcRpcEnable'}` or the acknowledgement fails as an unknown method.
+
+```bash
+# Simulation mode (default)
+dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler
+
+# Against a real PLC
+dotnet run --project examples/Dahlke.TwinCAT.Ads.Examples.ErrorHandler -- --real
+```
+
+The full **simulation** output, verbatim — check your default-mode run against it:
+
+```text
+info: Dahlke.TwinCAT.Ads.Alarms.PlcAlarmMonitor[0] Monitoring alarms on plc1 at MAIN.ErrorHandler.aHmiAlarms every 200 ms
+[RAISED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
+[RAISED] BMK1Err500 (Warning) — Conveyor 1: drive overtemperature
+[CLEARED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
+Outstanding after the fault cleared:
+  BMK1Err404 on BMK1 (Error) active=False acknowledged=False
+  BMK1Err500 on BMK1 (Warning) active=True acknowledged=False
+AcknowledgeAsync("BMK1Err404") -> True
+info: Dahlke.TwinCAT.Ads.Alarms.PlcAlarmMonitor[0] Acknowledged BMK1Err404 on plc1
+[ACKNOWLEDGED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
+[ENDED] BMK1Err404 (Error) — Conveyor 1: material jam at the infeed
+Outstanding after the acknowledgement:
+  BMK1Err500 on BMK1 (Warning) active=True acknowledged=False
+```
+
+`BMK1Err404` stays outstanding after its fault clears because it still awaits acknowledgement — that is the point of the run.
+
+**Do not use the block above as the `--real` reference.** The scripted driver keeps the acknowledged entry in the array with `IsAcked := TRUE`, which is what produces the `[ACKNOWLEDGED]` line. The reference rack does not behave that way: a successful `AcknowledgeAlarm` **removes** the entry from the array, so the next notification simply lacks it and the store reports the alarm `Ended`. Against hardware you should therefore expect `AcknowledgeAsync(...) -> True`, the `Acknowledged … on plc1` log line, and then `[ENDED]` — with **no** `[ACKNOWLEDGED]` transition at all. Its absence is not a failure; on that layout it is the expected outcome, and the log line is the only trace the acknowledgement leaves.
+
+The `--real` mode is worth trying with the PLC switched off: the host starts anyway, logs that alarm monitoring could not be registered, and registers it when the target comes up. (That is unreachability. A `SymbolPath` the PLC does not have is the other case described above, and fails startup.)

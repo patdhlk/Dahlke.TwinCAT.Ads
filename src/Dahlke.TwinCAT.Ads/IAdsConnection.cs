@@ -371,6 +371,84 @@ public interface IAdsConnection
     Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct);
 
     /// <summary>
+    /// Calls a method on a PLC function block or program over ADS.
+    /// </summary>
+    /// <param name="symbolPath">The instance path of the function block, e.g. <c>MAIN.ErrorHandler</c>.</param>
+    /// <param name="methodName">The method name, e.g. <c>AcknowledgeAlarm</c>.</param>
+    /// <param name="parameters">Input arguments in declaration order.</param>
+    /// <param name="ct">Cancels the call; the per-target timeout applies as elsewhere.</param>
+    /// <remarks>
+    /// The PLC method must carry <c>{attribute 'TcRpcEnable'}</c>; without it TwinCAT does not
+    /// expose it over ADS and the call fails as an unknown method.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="symbolPath"/>, <paramref name="methodName"/> or
+    /// <paramref name="parameters"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="AdsErrorException">
+    /// The symbol was not found, or the call reported a non-success ADS error code.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The symbol resolved but is not RPC-callable — it is not a function block or program
+    /// instance. The message names the path and the method.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">Thrown when the per-target timeout elapses first.</exception>
+    Task<AdsRpcResult> InvokeRpcMethodAsync(
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct);
+
+    /// <summary>
+    /// Resolves a PLC enumeration's members — name and numeric value — from the running
+    /// program's own type metadata.
+    /// </summary>
+    /// <param name="typeName">
+    /// The enum type's name, e.g. <c>deaReturnType</c>, matched case-insensitively.
+    /// </param>
+    /// <param name="ct">Cancels the operation; the per-target timeout applies as elsewhere.</param>
+    /// <returns>
+    /// Every member of the enumeration, in the order the PLC declares them. The result is
+    /// cached for the life of the connection: PLC type metadata is fixed for a running
+    /// program, so repeated calls for the same type cost no further ADS round-trip.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="typeName"/> is <see langword="null"/>.</exception>
+    /// <exception cref="AdsErrorException">
+    /// <paramref name="typeName"/> does not resolve to any data type known to the PLC
+    /// (<see cref="AdsErrorCode.DeviceSymbolNotFound"/>).
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="typeName"/> resolved but is not an enumeration. The message names the
+    /// type and its actual category.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
+    /// <exception cref="TimeoutException">Thrown when the per-target timeout elapses first.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this exists.</b> PLC enum numbering is not stable across a project's life, while
+    /// names are: a value the running program assigns to a member today may not be the value
+    /// the project source assigns to that same member after an edit that has not yet been
+    /// downloaded and activated. Code that maps a returned integer to a member by NUMBER is
+    /// therefore correct only against the numbering it was written for; against a machine
+    /// running a different one it silently reports a different member, with no error anywhere.
+    /// Resolving by name — using this method's result — survives that divergence.
+    /// </para>
+    /// <para>
+    /// <b>Not a live subscription.</b> The returned list reflects the type as it was the FIRST
+    /// time this method was called for this connection; a PLC download that changes the enum's
+    /// members after that is not picked up until the connection is re-established.
+    /// </para>
+    /// <para>
+    /// <b>The first call can be slow, and never blocks the caller's thread.</b> Resolving a type
+    /// makes the connection upload the running program's type system, which on a cold connection
+    /// to a slow PLC is a real round-trip; it is performed off the calling thread so that
+    /// <paramref name="ct"/> and the per-target timeout genuinely apply to the wait. What they
+    /// bound is this call, not the upload — an upload already in flight has no cancellation of
+    /// its own and simply finishes unobserved. Later calls for the same type are served from the
+    /// cache and complete without waiting for anything.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct);
+
+    /// <summary>
     /// Reads the current ADS state of the target device (for example
     /// <see cref="AdsState.Run"/>, <see cref="AdsState.Stop"/>, or
     /// <see cref="AdsState.Config"/>).

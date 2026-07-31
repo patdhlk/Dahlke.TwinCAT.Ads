@@ -20,6 +20,10 @@ namespace Dahlke.TwinCAT.Ads.HardwareTests;
 ///     and TWINCAT_TEST_SYMBOL_ARRAY to an ARRAY symbol path (both read-only and stable
 ///     for the run) to close the container notification-decode gate — see
 ///     <see cref="HardwareTestConfig.SymbolStruct"/> / <see cref="HardwareTestConfig.SymbolArray"/>
+///   - Optionally set TWINCAT_TEST_ROUTER_NETID and TWINCAT_TEST_ROUTE_ADDRESS to configure
+///     the embedded AMS router instead of relying on the system router — required to reach
+///     a remote PLC from a machine without a TwinCAT installation; see
+///     <see cref="HardwareTestConfig.HasEmbeddedRouter"/>
 ///
 /// See tests/Dahlke.TwinCAT.Ads.HardwareTests/README.md for full setup guide.
 /// </summary>
@@ -47,13 +51,13 @@ public sealed class HardwareEndToEndTests : IAsyncLifetime
             {
                 services.AddTwinCatAds(o =>
                 {
-                    o.Targets[PlcId] = new PlcTargetOptions
+                    HardwareTestOptionsConfigurator.ConfigureTarget(o, PlcId, new PlcTargetOptions
                     {
                         AmsNetId = HardwareTestConfig.AmsNetId,
                         Port = HardwareTestConfig.Port,
                         DisplayName = "HardwareTest",
                         TimeoutMs = TestTimeoutMs,
-                    };
+                    });
                 });
                 services.AddHealthChecks().AddTwinCatAdsHealthCheck();
             })

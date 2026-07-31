@@ -617,6 +617,12 @@ public class AdsConnectionFacadeTests
         public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
             => Task.FromResult(default(AdsState));
 
+        public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+            => throw new NotSupportedException();
+
         // Never exercised: these routing tests assert read/write delegation only (see the strict
         // stub policy — real only where genuinely read).
         public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)

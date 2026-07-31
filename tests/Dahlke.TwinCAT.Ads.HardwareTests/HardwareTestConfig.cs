@@ -51,6 +51,18 @@ internal static class HardwareTestConfig
     public static string? SymbolArray =>
         Environment.GetEnvironmentVariable("TWINCAT_TEST_SYMBOL_ARRAY");
 
+    /// <summary>
+    /// Fully-qualified name of an alarm array symbol (<c>ARRAY[..] OF ST_ErrorEntry</c>).
+    /// Set via TWINCAT_TEST_SYMBOL_ALARMS.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="SymbolStruct"/> and <see cref="SymbolArray"/> this symbol need NOT be
+    /// stable: the alarm test asserts the array BINDS, not that a notification matches a
+    /// re-read, so a live alarm list is a perfectly good — arguably better — target.
+    /// </remarks>
+    public static string? SymbolAlarms =>
+        Environment.GetEnvironmentVariable("TWINCAT_TEST_SYMBOL_ALARMS");
+
     /// <summary>Returns true when at least the INT symbol is configured.</summary>
     public static bool HasSymbolInt => !string.IsNullOrWhiteSpace(SymbolInt);
 
@@ -59,4 +71,46 @@ internal static class HardwareTestConfig
 
     /// <summary>Returns true when an array symbol is configured.</summary>
     public static bool HasSymbolArray => !string.IsNullOrWhiteSpace(SymbolArray);
+
+    /// <summary>Returns true when an alarm array symbol is configured.</summary>
+    public static bool HasSymbolAlarms => !string.IsNullOrWhiteSpace(SymbolAlarms);
+
+    /// <summary>
+    /// The <c>sKey</c> of an alarm the acknowledge test may acknowledge for real. Set via
+    /// TWINCAT_TEST_ALARM_ACK_KEY.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="SymbolAlarms"/> and deliberately opt-in: every other hardware
+    /// test only reads, and acknowledging changes machine state. Point it at a test alarm.
+    /// </remarks>
+    public static string? AlarmAckKey =>
+        Environment.GetEnvironmentVariable("TWINCAT_TEST_ALARM_ACK_KEY");
+
+    /// <summary>Returns true when an acknowledgeable alarm key is configured.</summary>
+    public static bool HasAlarmAckKey => !string.IsNullOrWhiteSpace(AlarmAckKey);
+
+    /// <summary>
+    /// This host's AMS Net ID for the embedded router. Set via TWINCAT_TEST_ROUTER_NETID.
+    /// When unset, <c>Router</c> is left untouched and the system router is used instead —
+    /// see <see cref="HasEmbeddedRouter"/>.
+    /// </summary>
+    public static string? RouterNetId =>
+        Environment.GetEnvironmentVariable("TWINCAT_TEST_ROUTER_NETID");
+
+    /// <summary>
+    /// The target's IP address or host name, used to build the single route to
+    /// <see cref="AmsNetId"/>. Set via TWINCAT_TEST_ROUTE_ADDRESS.
+    /// </summary>
+    public static string? RouteAddress =>
+        Environment.GetEnvironmentVariable("TWINCAT_TEST_ROUTE_ADDRESS");
+
+    /// <summary>
+    /// Returns true when both <see cref="RouterNetId"/> and <see cref="RouteAddress"/> are
+    /// configured — a router with no route to the target is useless, so the embedded router
+    /// is only wired up when both are present. On a machine without a TwinCAT installation,
+    /// these are required to reach a remote PLC at all: see the remarks on
+    /// <c>AmsRouterOptions.Routes</c>.
+    /// </summary>
+    public static bool HasEmbeddedRouter =>
+        !string.IsNullOrWhiteSpace(RouterNetId) && !string.IsNullOrWhiteSpace(RouteAddress);
 }
