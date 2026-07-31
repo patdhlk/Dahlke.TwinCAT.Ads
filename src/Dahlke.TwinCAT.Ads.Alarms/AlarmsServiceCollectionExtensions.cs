@@ -40,8 +40,14 @@ public static class AlarmsServiceCollectionExtensions
 
         // Scanned BEFORE anything below registers a dialect, so the built-in dialect and the
         // validator for ITS configuration go in as one unit or not at all.
+        //
+        // !d.IsKeyedService: PlcAlarmMonitor resolves this seam unkeyed, so a keyed registration
+        // has not claimed it — the container would still have no unkeyed IPlcAlarmDialect to
+        // give it, and fail to build with a message that points at this library, not at the
+        // consumer's registration. Counting keyed descriptors here regressed that failure
+        // against 0.7.0, whose TryAddSingleton compared ServiceKey and so left it alone.
         var dialectAlreadyRegistered =
-            services.Any(d => d.ServiceType == typeof(IPlcAlarmDialect));
+            services.Any(d => d.ServiceType == typeof(IPlcAlarmDialect) && !d.IsKeyedService);
 
         // TryAddEnumerable, not TryAddSingleton: the latter adds only when NO descriptor for
         // IValidateOptions<PlcAlarmsOptions> exists at all, so a consumer registering any

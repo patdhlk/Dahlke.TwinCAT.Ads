@@ -102,6 +102,28 @@ public class AlarmValidationRegistrationTests
     }
 
     [Fact]
+    public void KeyedDialectRegistered_StillRegistersTheBuiltInDialectAndItsValidator()
+    {
+        // A keyed IPlcAlarmDialect has not claimed the unkeyed seam that matters:
+        // PlcAlarmMonitor's constructor resolves IPlcAlarmDialect unkeyed. Counting a keyed
+        // descriptor as "a dialect is registered" left no unkeyed dialect for it to find —
+        // ServiceDescriptor.ServiceType is set on keyed descriptors too, so a naive scan matches
+        // them. TryAddSingleton compared ServiceKey as well as ServiceType on .NET 8+, so 0.7.0
+        // never hit this; a hand-rolled scan that checks ServiceType alone regresses it.
+        using var provider = BuildContainer(
+            ["plc1"],
+            Target("plc1", "MAIN.ErrorHandler.aHmiAlarms"),
+            services => services.AddKeyedSingleton<IPlcAlarmDialect, StubDialect>("plc1"));
+
+        Assert.IsType<ErrorHandlerAlarmDialect>(provider.GetRequiredService<IPlcAlarmDialect>());
+
+        var validators = provider.GetServices<IValidateOptions<PlcAlarmsOptions>>().ToList();
+
+        Assert.Contains(validators, v => v is PlcAlarmsOptionsValidator);
+        Assert.Contains(validators, v => v is ErrorHandlerAlarmDialectOptionsValidator);
+    }
+
+    [Fact]
     public void CustomDialect_StillGetsTheVendorNeutralRules()
     {
         // The dialect owns how its PLC acknowledges. It does not own whether an alarm array was
