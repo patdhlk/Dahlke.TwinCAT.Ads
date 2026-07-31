@@ -65,6 +65,13 @@ public sealed class PlcAlarmTargetOptions
     /// this member applies to you — bring your own <c>IValidateOptions&lt;PlcAlarmsOptions&gt;</c>
     /// for whatever your dialect does need.
     /// </para>
+    /// <para>
+    /// If ordering genuinely cannot be controlled — a wrapper library calls
+    /// <c>AddTwinCatAdsAlarms</c> internally, say — setting this to any non-blank value still
+    /// satisfies the rule and is passed through unread, exactly as in 0.7.0. That is a fallback
+    /// for that situation, not a recommendation: registering your dialect first remains the
+    /// right answer whenever you control the ordering.
+    /// </para>
     /// </remarks>
     public string? AcknowledgeInstancePath { get; set; }
 
