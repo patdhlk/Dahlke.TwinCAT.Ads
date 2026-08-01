@@ -246,6 +246,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `AdsRawChannelSeed.Port` is now `int?`, and required.** A seed entry names its
+  target by Net ID AND port, so an entry without a port matches no channel and seeds nothing —
+  but a non-nullable `int` cannot say "not specified": it defaults to `0`, which is exactly what
+  the binder produces for an entry that never mentions a port. From
+  `Microsoft.Extensions.Configuration.Binder` 10.0.0 that includes `"Port": null`, where through
+  9.x the same text was an unconvertible empty string that dropped the whole entry and failed
+  startup. So one `appsettings.json` failed on .NET 8 and started silently on .NET 10, seeding a
+  target nobody asked for while the intended one answered every read with an ADS error — and no
+  rule could tell the two apart while `0` WAS the default.
+
+  ```jsonc
+  // All three are now "the operator did not name a port", on every target framework,
+  // and all three fail startup: RawChannels:Seed:0:Port is required
+  { "AmsNetId": "1.2.3.4.5.6" }
+  { "AmsNetId": "1.2.3.4.5.6", "Port": null }
+  { "AmsNetId": "1.2.3.4.5.6", "Port": "" }
+  ```
+
+  **Port `0` is rejected too**, which it was not before: the seed rule read `[0, 65535]` while
+  `PlcTargets:{id}:Port` has always read `[1, 65535]`. Port `0` addresses nothing on an ADS
+  device, so it is a typo wherever it appears rather than legal in one place and not the other.
+  Missing and out-of-range are reported as separate failures, because telling someone a port "is
+  required" when they wrote `70000` sends them looking for a line they already have.
+
+  **What to change.** Configuration needs nothing unless it relied on the default — a seed entry
+  with no port was never doing anything useful, and now says so. Code-first callers assigning
+  `Port = 851` are unaffected; anyone READING `seed.Port` gets an `int?` and needs a null check
+  or `.Value`. Pre-1.0, so this lands as a plain break rather than an obsolete-and-wait.
+
 - **Dependency version policy is now stated, and the Microsoft.Extensions references follow it.**
   ([#45](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/45)) `Beckhoff.TwinCAT.Ads` was
   bracketed with eight lines of reasoning while `Microsoft.Extensions.*` floated on `8.*` directly
@@ -310,13 +339,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   host has least slack, hung instead of unwinding. `StartAsync` is now overridden to resolve the
   signal when the token is cancelled; it is a no-op on every version that does run `ExecuteAsync`.
 
-  Two further differences in that release are behaviour, not defects, and are now pinned by tests
-  rather than left to be rediscovered: `BackgroundService.StopAsync` no longer waits for
-  `ExecuteAsync` to finish, and the configuration binder treats `"Port": null` in a
-  `RawChannels:Seed` entry as "leave the default" (binding `0`) rather than as an unconvertible
-  value that drops the element and fails startup. The second is a real net8/net10 divergence in
-  this package with no fix available short of making `Port` nullable — a breaking change to the
-  configuration surface — so it is asserted on both sides instead of quietly differing.
+  One further difference in that release is behaviour rather than a defect, and is now pinned by
+  a test rather than left to be rediscovered: `BackgroundService.StopAsync` no longer waits for
+  `ExecuteAsync` to finish. One test had leaned on it as a completion barrier and became a race
+  against the thread pool; it awaits `ExecuteTask` directly now.
 
 ## [0.8.0] - 2026-08-01
 

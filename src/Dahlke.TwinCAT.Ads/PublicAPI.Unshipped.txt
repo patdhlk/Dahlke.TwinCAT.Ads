@@ -1,4 +1,6 @@
 #nullable enable
+*REMOVED*Dahlke.TwinCAT.Ads.AdsRawChannelSeed.Port.get -> int
+Dahlke.TwinCAT.Ads.AdsRawChannelSeed.Port.get -> int?
 Dahlke.TwinCAT.Ads.AdsConnectionBase
 Dahlke.TwinCAT.Ads.AdsConnectionBase.AdsConnectionBase() -> void
 Dahlke.TwinCAT.Ads.AdsConnectionBase.ConnectionStateChanged -> System.EventHandler<Dahlke.TwinCAT.Ads.ConnectionStateChangedEventArgs!>?

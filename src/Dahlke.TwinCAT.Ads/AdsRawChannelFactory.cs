@@ -197,7 +197,13 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
             // Normalise the CONFIGURED id too: amsNetId arrives already normalised
             // from Get/TryGetSimulated, so a seed entry spelled "01.2.3.4.5.6"
             // would otherwise never match the "1.2.3.4.5.6" channel it names.
-            if (seed.Port != port ||
+            // A null Port names no target and so matches no channel. Startup validation
+            // rejects one, so reaching here means the seed was added in code after validation
+            // ran — the same case the slot loop below skips rather than throws on. Spelled out
+            // because `seed.Port != port` already does it by lifted comparison, and a reader
+            // checking whether null falls through should not have to derive that.
+            if (seed.Port is not { } seedPort ||
+                seedPort != port ||
                 !string.Equals(AmsNetIdRule.Normalise(seed.AmsNetId), amsNetId, StringComparison.OrdinalIgnoreCase))
                 continue;
 

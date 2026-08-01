@@ -274,10 +274,24 @@ internal sealed class TwinCatAdsOptionsValidator : IValidateOptions<TwinCatAdsOp
     {
         AmsNetIdRule.Require($"RawChannels:Seed:{index}:AmsNetId", seed.AmsNetId, failures);
 
-        if (seed.Port is < 0 or > 65535)
+        // Two failures, not one, because they are two different mistakes. A MISSING port means
+        // the entry never named a target — the binder yields null for an absent key and, from
+        // Binder 10.0.0, for "Port": null too, which through 9.x dropped the entry instead. An
+        // OUT-OF-RANGE port means a target was named and the number is wrong. Reporting "is
+        // required" for a port of 70000 would send an operator looking for a line they already
+        // wrote; reporting the range for an absent one would name a value they never gave.
+        if (seed.Port is null)
         {
             failures.Add(
-                $"RawChannels:Seed:{index}:Port '{seed.Port}' is outside the range 0-65535.");
+                $"RawChannels:Seed:{index}:Port is required — a seed entry names a target by " +
+                $"AmsNetId AND port, so one without a port matches no channel and silently seeds " +
+                $"nothing (typical TwinCAT 3 value: 851).");
+        }
+        else if (seed.Port is < 1 or > 65535)
+        {
+            failures.Add(
+                $"RawChannels:Seed:{index}:Port '{seed.Port}' is outside the valid range " +
+                $"[1, 65535]. Fix 'RawChannels:Seed:{index}:Port' (typical TwinCAT 3 value: 851).");
         }
 
         for (var s = 0; s < seed.Slots.Count; s++)

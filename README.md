@@ -789,7 +789,7 @@ Each `Seed` entry:
 | Property | Type | Default | Description |
 |-----|------|---------|-------------|
 | `AmsNetId` | `string` | `""` | Six dot-separated octets each in 0–255. Matched against a channel after normalisation, so `01.2.3.4.5.6` seeds `1.2.3.4.5.6` |
-| `Port` | `int` | `0` | ADS port, 0–65535. Decimal or `0x`-prefixed hex — `65535` and `"0xFFFF"` both bind. **`"0x851"` is 2129, not 851** — the canonical TC3 runtime port is decimal `851` |
+| `Port` | `int?` | *(required)* | ADS port, 1–65535. Decimal or `0x`-prefixed hex — `65535` and `"0xFFFF"` both bind. **`"0x851"` is 2129, not 851** — the canonical TC3 runtime port is decimal `851` |
 | `Slots` | `List<AdsRawChannelSeedSlot>` | `[]` | The slots to pre-load. An entry with none declares a reachable but empty target |
 
 Each `Slots` entry:
@@ -803,6 +803,8 @@ Each `Slots` entry:
 The Net ID here is validated **more strictly than `IAdsRawChannelFactory.Get`**, which accepts an out-of-range octet and resolves it the way the ADS stack does. A seed entry is a declaration whose typo has no correct reading, so `999.1.1.1.1.1` fails the host at startup rather than silently seeding `0.1.1.1.1.1`.
 
 An entry or slot the configuration binder cannot bind also fails the host at startup. This has to be caught deliberately: the binder reports a bad *scalar* by throwing, but silently **discards a collection element** it cannot bind. Two mistakes hit that path — a `Port` that is not a number (`"Port": "typo"` drops the whole entry) and a slot written as a bare value instead of an object (`"Slots": [ "0x11", "0x12" ]` drops every slot). Either would otherwise leave the target reachable but unseeded, so every read answers an ADS error and a configuration mistake looks like a device fault.
+
+**`Port` is `int?` rather than `int`, and required.** A seed entry names its target by Net ID *and* port, so an entry without one matches no channel and seeds nothing. A non-nullable `int` cannot express that: it defaults to `0`, and `0` is exactly what the binder produces for an entry that never mentions a port — which since `Microsoft.Extensions.Configuration.Binder` 10.0.0 includes `"Port": null`, where through 9.x that was an unconvertible empty string that dropped the entry and failed startup instead. The same `appsettings.json` therefore failed on .NET 8 and started silently on .NET 10. Nullable, an absent key, a `null` and a `""` all arrive as "not specified" on every framework and are rejected by name. Port `0` is likewise rejected now, matching `PlcTargets:{id}:Port`, which has always required `[1, 65535]`.
 
 ### `AdsSymbolDump` section (optional diagnostics)
 
