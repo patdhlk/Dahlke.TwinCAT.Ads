@@ -539,6 +539,50 @@ if (pool.TryGetSimulatedConnection("plc1", out var sim))
     sim.SetInitialValues(new Dictionary<string, object?> { ["GVL.A"] = 99 });
 ```
 
+### Hand-written doubles — `AdsConnectionBase`
+
+`SimulatedAdsConnection` is the right first answer for a test: it is a working connection with a real value store, real subscriptions and real RPC seeding. What it deliberately does not do is **fail** — a specific `AdsErrorCode`, a timeout on the third call, a symbol that disappears mid-run — and that is where a hand-written double comes from.
+
+`IAdsConnection` has over two dozen members, so writing one by hand used to mean a screenful of throwing stubs around the two that matter. Derive from `AdsConnectionBase` instead and override only what the code under test reaches:
+
+```csharp
+// A working simulated connection that times out on the third read and nowhere else.
+private sealed class FlakyConnection(IAdsConnection inner) : AdsConnectionBase
+{
+    private int _reads;
+
+    public override string PlcId => inner.PlcId;
+
+    public override Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct = default)
+        => Interlocked.Increment(ref _reads) == 3
+            ? throw new AdsErrorException("no answer", AdsErrorCode.ClientSyncTimeOut)
+            : inner.ReadValueAsync<T>(symbolPath, ct);
+}
+```
+
+Every member you do not override throws `NotSupportedException` naming your type and the member — `FlakyConnection.SearchSymbolsAsync is not implemented` — rather than answering with a plausible `null` or an empty list that would let the test pass while exercising a path you never specified. Note that a double built this way forwards only what it declares: the example above delegates typed reads and nothing else, so a service that also browses symbols needs that override too.
+
+Three members have working defaults, because throwing there would cost overrides that have nothing to do with what you are testing:
+
+| Member | Default |
+|---|---|
+| `State` / `IsConnected` | Starts `Connected`. `SetConnectionState(…)` (protected) moves it and raises `ConnectionStateChanged` in one call, so a double can simulate an outage. |
+| `ConnectionStateChanged` | Raised by `SetConnectionState` and nothing else. |
+| `WithTimeout` | Validates the argument, then returns itself — a double does no I/O, so it has no bound to change. |
+
+`PlcId` and `DisplayName` still throw: there is no honest default for an identity, and a double reporting the wrong one is how a routing test passes while testing nothing. Both are a one-line override.
+
+```csharp
+public sealed class OutageDouble : AdsConnectionBase
+{
+    public override string PlcId => "plc1";
+
+    public void GoOffline() => SetConnectionState(ConnectionState.Disconnected);
+}
+```
+
+Note this softens — but does not remove — the cost of adding a member to `IAdsConnection`: a double deriving from the base keeps compiling and picks up a throwing default, while one implementing the interface directly does not.
+
 ## Raw ADS channels
 
 For targets the symbol API cannot reach — EtherCAT masters and slaves, the TwinCAT system service — inject `IAdsRawChannelFactory` and address them by index group and index offset.

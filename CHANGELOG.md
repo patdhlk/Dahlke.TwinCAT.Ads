@@ -9,6 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AdsConnectionBase` — a hand-written connection double costs two overrides, not twenty-five.**
+  ([#48](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/48)) `IAdsConnection` has twenty-five
+  members. A consumer faking only reads — the common case in a unit test for their own service —
+  had to implement all of them, or reach for a mocking framework to fill in the rest with throwing
+  stubs. (The issue said eighteen; `WithTimeout`, `GetSymbolTreeAsync` and the `includeChildren`
+  overloads have landed since it was filed.)
+
+  `SimulatedAdsConnection` remains the right first answer and is unchanged. What it deliberately
+  does not do is FAIL: a particular `AdsErrorCode`, a timeout on the third call, a symbol that
+  disappears mid-run. That is where hand-written doubles come from, and now they start here:
+
+  ```csharp
+  private sealed class FlakyConnection(IAdsConnection inner) : AdsConnectionBase
+  {
+      private int _reads;
+
+      public override string PlcId => inner.PlcId;
+
+      public override Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct = default)
+          => Interlocked.Increment(ref _reads) == 3
+              ? throw new AdsErrorException("no answer", AdsErrorCode.ClientSyncTimeOut)
+              : inner.ReadValueAsync<T>(symbolPath, ct);
+  }
+  ```
+
+  **Every operation throws `NotSupportedException` until overridden**, naming the deriving type and
+  the member — `FlakyConnection.SearchSymbolsAsync is not implemented`. Nothing answers with a
+  plausible `null` or an empty list, because a default that did would let a test pass while
+  exercising a path the double was never told about, and the failure would surface downstream on a
+  value it should never have had.
+
+  **Three members have working defaults**, because throwing there would cost a double overrides
+  that have nothing to do with what it is testing. `State`, `IsConnected` and
+  `ConnectionStateChanged` are a coherent trio: the connection starts `Connected`, and the
+  protected `SetConnectionState` moves it and raises the event in one call, so a double can
+  simulate an outage without re-deriving bookkeeping every hand-written double gets slightly
+  differently. `WithTimeout` validates its argument and returns itself — a double does no I/O, so
+  it has no bound to change.
+
+  `PlcId` and `DisplayName` still throw: there is no honest default for an identity, and a double
+  reporting the wrong one is exactly how a routing or per-target logging test passes while testing
+  nothing. Both are a one-line override. `SetConnectionState` needs `PlcId` only when a handler is
+  attached — the event args name the target — and reads it before it moves the state, so a double
+  missing that override never lands in the new state having told nobody it got there.
+
+  One deliberate divergence from a real connection: a `ConnectionStateChanged` handler that throws
+  is **surfaced**, not swallowed. The live pool logs it at Warning and carries on, because one bad
+  subscriber must not stop reconnection; doing that in a double would turn a broken handler into a
+  silently passing test. Every handler still runs — one that throws does not skip the rest — and
+  the failures are rethrown together as an `AggregateException`.
+
+  This softens, but does not remove, the cost of adding a member to `IAdsConnection`: a double
+  deriving from this class keeps compiling and picks up a throwing default, while one implementing
+  the interface directly does not. Interface segregation (`IAdsValues` / `IAdsSymbols` /
+  `IAdsDevice`) remains the better modelling and is still open; it is breaking for anyone
+  implementing `IAdsConnection` today, and this does not preclude it.
+
 - **Symbol packages and Source Link — the library is debuggable from a consumer's project.**
   ([#38](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/38)) No `.snupkg` was published, so
   no PDB ever reached a consumer: an exception thrown inside the connection pool arrived as a bare
