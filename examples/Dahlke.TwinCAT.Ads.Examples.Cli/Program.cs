@@ -26,7 +26,9 @@ using var host = builder.Build();
 await host.StartAsync();
 
 var pool = host.Services.GetRequiredService<IAdsConnectionPool>();
-var ct = CancellationToken.None;
+
+// No CancellationToken is passed anywhere below: it defaults on every async member, so a
+// console app with no token to give simply omits it. Pass one wherever you have one.
 
 Console.WriteLine($"Mode: {(useRealPlc ? "real PLC" : "simulation")}");
 Console.WriteLine();
@@ -49,13 +51,13 @@ if (!connection.IsConnected)
 // -----------------------------------------------------------------
 // Typed write then typed read (preferred pattern)
 // -----------------------------------------------------------------
-await connection.WriteValueAsync<float>("GVL.SetpointTemperature", 21.5f, ct);
-float temp = await connection.ReadValueAsync<float>("GVL.SetpointTemperature", ct);
+await connection.WriteValueAsync<float>("GVL.SetpointTemperature", 21.5f);
+float temp = await connection.ReadValueAsync<float>("GVL.SetpointTemperature");
 Console.WriteLine($"GVL.SetpointTemperature = {temp} °C");
 
 // Write and read back an integer symbol.
-await connection.WriteValueAsync("GVL.Counter", (short)42, ct);
-short counter = await connection.ReadValueAsync<short>("GVL.Counter", ct);
+await connection.WriteValueAsync("GVL.Counter", (short)42);
+short counter = await connection.ReadValueAsync<short>("GVL.Counter");
 Console.WriteLine($"GVL.Counter = {counter}");
 
 // -----------------------------------------------------------------
@@ -65,10 +67,10 @@ await connection.WriteValuesAsync(new Dictionary<string, object?>
 {
     ["GVL.SetpointTemperature"] = 23.0f,
     ["GVL.PumpRunning"] = true,
-}, ct);
+});
 
 var results = await connection.ReadValuesAsync(
-    ["GVL.SetpointTemperature", "GVL.PumpRunning"], ct);
+    ["GVL.SetpointTemperature", "GVL.PumpRunning"]);
 
 // Each entry carries a per-symbol AdsValueResult: Succeeded plus Value (or Error).
 foreach (var (symbol, result) in results)
@@ -84,7 +86,7 @@ if (results["GVL.SetpointTemperature"].Succeeded)
 // -----------------------------------------------------------------
 // ADS state
 // -----------------------------------------------------------------
-var state = await connection.GetAdsStateAsync(ct);
+var state = await connection.GetAdsStateAsync();
 Console.WriteLine($"ADS state: {state}");
 
 // -----------------------------------------------------------------
@@ -96,12 +98,11 @@ Console.WriteLine($"ADS state: {state}");
 using var typedSub = await connection.SubscribeAsync<float>(
     "GVL.SetpointTemperature",
     cycleTimeMs: 200,
-    (symbol, value) => Console.WriteLine($"Typed notification: {symbol} = {value} °C"),
-    CancellationToken.None);
+    (symbol, value) => Console.WriteLine($"Typed notification: {symbol} = {value} °C"));
 
 // Write a changed value to trigger the simulated subscription callback.
-await connection.WriteValueAsync<float>("GVL.SetpointTemperature", 25.0f, ct);
-await Task.Delay(TimeSpan.FromMilliseconds(100), ct);
+await connection.WriteValueAsync<float>("GVL.SetpointTemperature", 25.0f);
+await Task.Delay(TimeSpan.FromMilliseconds(100));
 
 // -----------------------------------------------------------------
 // Untyped subscription
@@ -109,10 +110,9 @@ await Task.Delay(TimeSpan.FromMilliseconds(100), ct);
 using var untypedSub = await connection.SubscribeAsync(
     "GVL.Counter",
     cycleTimeMs: 200,
-    (symbol, value) => Console.WriteLine($"Untyped notification: {symbol} = {value}"),
-    CancellationToken.None);
+    (symbol, value) => Console.WriteLine($"Untyped notification: {symbol} = {value}"));
 
-await connection.WriteValueAsync("GVL.Counter", (short)99, ct);
-await Task.Delay(TimeSpan.FromSeconds(1), ct);
+await connection.WriteValueAsync("GVL.Counter", (short)99);
+await Task.Delay(TimeSpan.FromSeconds(1));
 
 await host.StopAsync();
