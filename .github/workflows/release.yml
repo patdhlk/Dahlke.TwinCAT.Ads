@@ -35,5 +35,22 @@ jobs:
           dotnet pack src/Dahlke.TwinCAT.Ads.Reactive/Dahlke.TwinCAT.Ads.Reactive.csproj --configuration Release --no-build -p:Version=${{ steps.version.outputs.VERSION }} --output ./nupkg
           dotnet pack src/Dahlke.TwinCAT.Ads.Alarms/Dahlke.TwinCAT.Ads.Alarms.csproj --configuration Release --no-build -p:Version=${{ steps.version.outputs.VERSION }} --output ./nupkg
 
+      - name: Verify symbols were packed
+        # A missing .snupkg is the whole failure this guards: the push below would succeed, the
+        # release would look fine, and consumers would silently get no line numbers. Cheaper to
+        # fail the release than to discover it from a bug report.
+        run: |
+          for pkg in ./nupkg/*.nupkg; do
+            symbols="${pkg%.nupkg}.snupkg"
+            if [ ! -f "$symbols" ]; then
+              echo "::error::No symbol package beside $(basename "$pkg"). Check IncludeSymbols/SymbolPackageFormat in src/Directory.Build.props."
+              exit 1
+            fi
+          done
+          echo "Symbol packages present for all $(ls ./nupkg/*.nupkg | wc -l) package(s)."
+
       - name: Push to NuGet
+        # Pushing a .nupkg also pushes the .snupkg sitting beside it — nuget.org's documented
+        # behaviour, and why the glob below deliberately does NOT match *.snupkg as well. Pushing
+        # both explicitly would attempt the symbol package twice.
         run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

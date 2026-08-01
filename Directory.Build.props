@@ -1,0 +1,34 @@
+<Project>
+
+  <!--
+    Repository-wide build settings. Applies to EVERY project — src, tests, examples, prototypes —
+    so only things that are harmless everywhere belong here. Package metadata and documentation
+    generation live in src/Directory.Build.props instead: GenerateDocumentationFile in particular
+    turns on CS1591 (missing XML comment) for every public member, which is right for the shipped
+    libraries and pure noise in a test project.
+  -->
+
+  <PropertyGroup>
+    <!--
+      Deterministic builds are already the SDK default; stated explicitly because
+      ContinuousIntegrationBuild below is only meaningful alongside it, and a future edit that
+      turned it off would silently defeat that.
+    -->
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <!--
+      Normalises the absolute source paths baked into the PDB to deterministic placeholders, so a
+      package built on a hosted runner is bit-for-bit reproducible and does not carry
+      /home/runner/work/... around inside it. Those normalised paths are exactly what SourceLink
+      maps back to github.com URLs, so this and SourceLink only pay off together.
+
+      Keyed off GITHUB_ACTIONS rather than passed as -p: on each workflow step, so a new workflow
+      (or a new pack step in an existing one) cannot forget it. A LOCAL build deliberately does not
+      set it: normalised paths would stop the debugger finding the sources sitting on disk.
+    -->
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+</Project>

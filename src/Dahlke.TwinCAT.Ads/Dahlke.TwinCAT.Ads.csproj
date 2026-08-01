@@ -1,32 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-
-    <!-- NuGet Package Metadata -->
+    <!-- What differs per package; the rest is in src/Directory.Build.props -->
     <PackageId>Dahlke.TwinCAT.Ads</PackageId>
-    <!-- Placeholder. The release workflow packs with -p:Version from the git tag, so this
-         value only ever reaches a local `dotnet pack`. Holding a real version here just
-         let it drift: it still read 0.7.0 the day 0.8.0 shipped. Matches the Reactive and
-         Alarms packages, which have always carried the placeholder. -->
-    <Version>0.0.0-dev</Version>
-    <Authors>Patrick Dahlke</Authors>
     <Description>Reusable TwinCAT ADS connection pool with health checks, reconnection, simulation mode, and ASP.NET Core integration.</Description>
     <PackageTags>TwinCAT;ADS;Beckhoff;PLC;Automation;IPC</PackageTags>
-    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/patdhlk/Dahlke.TwinCAT.Ads</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/patdhlk/Dahlke.TwinCAT.Ads.git</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
-
-  <ItemGroup>
-    <None Include="../../README.md" Pack="true" PackagePath="/" />
-  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Dahlke.TwinCAT.Ads.Tests" />

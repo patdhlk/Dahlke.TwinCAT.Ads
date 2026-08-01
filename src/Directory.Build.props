@@ -1,0 +1,68 @@
+<Project>
+
+  <!--
+    Shared settings for the three shipped packages. Everything here was previously duplicated
+    verbatim in all three csprojs, which is how the Version placeholder came to drift once already
+    (it still read 0.7.0 the day 0.8.0 shipped). Each csproj now declares only what genuinely
+    differs: its PackageId, Description and PackageTags.
+  -->
+
+  <Import Project="../Directory.Build.props" />
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- NuGet package metadata shared by every package in this repository. -->
+    <Authors>Patrick Dahlke</Authors>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/patdhlk/Dahlke.TwinCAT.Ads</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/patdhlk/Dahlke.TwinCAT.Ads.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReleaseNotes>https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/CHANGELOG.md</PackageReleaseNotes>
+
+    <!--
+      Placeholder. The release workflow packs with -p:Version from the git tag, so this value only
+      ever reaches a local `dotnet pack`. Holding a real version here just let it drift.
+    -->
+    <Version>0.0.0-dev</Version>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
+      Source Link and symbols. Without these a consumer debugging into this library gets no source
+      and no line numbers — an exception from inside the pool arrives as a bare frame, and the only
+      way to see where it came from is to clone the repo and build it yourself.
+
+      SourceLink itself needs no PackageReference: the .NET SDK has bundled the GitHub provider
+      since 8.0 and enables it for a repository with a GitHub origin. What still has to be asked
+      for is everything below.
+    -->
+
+    <!-- Writes RepositoryUrl and the exact commit SHA into the nuspec — the anchor SourceLink
+         resolves sources against, so a package is tied to the commit that produced it. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+
+    <!-- Embeds sources that are NOT in source control (generated files) directly into the PDB.
+         SourceLink cannot fetch those from GitHub because they were never committed, so without
+         this they are the one hole in an otherwise steppable build. -->
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+
+    <!-- Produce a symbol package beside each .nupkg. snupkg is the format nuget.org accepts and
+         Visual Studio / Rider fetch on demand, so a consumer gets line numbers without the main
+         package carrying PDBs for everyone who does not need them. -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>
