@@ -812,6 +812,76 @@ public abstract class AdsConnectionContractTests
     }
 
     // =====================================================================
+    // Struct-shaped values bind onto a .NET type — identically on both implementations
+    // =====================================================================
+    //
+    // A PLC struct read into a C# type is the most common domain shape in a real project, and
+    // the one a simulated target most needs to stand in for. These [Fact]s run on both harnesses
+    // so the two cannot drift the way they had already drifted before this suite existed.
+    //
+    // What they deliberately do NOT assert is member ORDER. A decoded tree is keyed by name and
+    // has none; a real symbol read maps PLC memory by declaration order through Beckhoff's
+    // marshaller. That asymmetry is documented on PlcTreeBinder and pinned in PlcTreeBinderTests —
+    // it is the limit of what a simulated target can prove, not an oversight here.
+
+    public record ContractMotor(int Speed, bool Running);
+
+    [Fact]
+    public async Task TypedRead_OfAStructShapedValue_BindsOntoTheTargetType()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Motor", new Dictionary<string, object?>
+        {
+            ["Speed"] = 1500,
+            ["Running"] = true,
+        });
+
+        var motor = await h.Connection.ReadValueAsync<ContractMotor>("MAIN.Motor");
+
+        Assert.Equal(new ContractMotor(1500, true), motor);
+    }
+
+    [Fact]
+    public async Task TypedRead_OfAStructShapedValue_MissingMember_ThrowsNamingIt()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Motor", new Dictionary<string, object?> { ["Speed"] = 1500 });
+
+        var ex = await Assert.ThrowsAsync<InvalidCastException>(
+            () => h.Connection.ReadValueAsync<ContractMotor>("MAIN.Motor"));
+
+        // A disagreement between the target type and the PLC is loud on both implementations —
+        // never a silently defaulted member.
+        Assert.Contains("'Running'", ex.Message);
+    }
+
+    [Fact]
+    public async Task TypedRead_OfAnArrayShapedValue_BindsElementwise()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Speeds", new object?[] { 10, 20, 30 });
+
+        var speeds = await h.Connection.ReadValueAsync<int[]>("MAIN.Speeds");
+
+        Assert.Equal([10, 20, 30], speeds);
+    }
+
+    [Fact]
+    public async Task BatchRead_OfAStructShapedValue_BindsThroughGetValue()
+    {
+        await using var h = await CreateHarnessAsync();
+        await h.WriteRawAsync("MAIN.Motor", new Dictionary<string, object?>
+        {
+            ["Speed"] = 640,
+            ["Running"] = false,
+        });
+
+        var results = await h.Connection.ReadValuesAsync(["MAIN.Motor"]);
+
+        Assert.Equal(new ContractMotor(640, false), results["MAIN.Motor"].GetValue<ContractMotor>());
+    }
+
+    // =====================================================================
     // Shared timing knobs (real-time guards only; never a primary sync mechanism).
     // =====================================================================
 

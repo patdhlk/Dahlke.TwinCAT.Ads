@@ -85,6 +85,15 @@ internal static class AdsValueConverter
             }
         }
 
+        // A decoded PLC value tree — the dictionary a struct/function block/union decodes to, or
+        // the array an ARRAY decodes to — binds onto the target type by member name. This is what
+        // lets a simulated target stand in for hardware on a struct read, and what lets
+        // AdsValueResult.GetValue<T>() turn a real connection's metadata or batch result into a
+        // domain type instead of a dictionary the caller destructures by hand. See
+        // PlcTreeBinder for the by-name/by-layout caveat this carries.
+        if (PlcTreeBinder.IsTree(value))
+            return PlcTreeBinder.Bind(value, Nullable.GetUnderlyingType(targetType) ?? targetType, context);
+
         // Non-IConvertible, not assignable: fail with an actionable message.
         throw new InvalidCastException(
             $"Symbol '{context}': stored value has type '{value.GetType().Name}' " +

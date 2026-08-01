@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.0] - 2026-08-01
 
+### Added
+
+- **A PLC struct binds onto a .NET type.**
+  ([#34](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/34)) A struct, function block, union
+  or array decodes to a neutral member tree, and that tree now binds onto a record, class or
+  struct by member name.
+
+  ```csharp
+  public record MotorState(int Speed, bool Running);
+
+  var result = await conn.ReadValueWithMetadataAsync("MAIN.Motor");
+  MotorState motor = result.GetValue<MotorState>();
+  ```
+
+  Two gaps close at once. A **simulated** target could previously read a struct as `T` only when
+  its store happened to hold that exact CLR type, because the conversion core did a direct cast
+  and `IConvertible` and nothing else — so simulation could not stand in for hardware on the most
+  common domain shape in a real project, and the divergence stayed invisible until commissioning.
+  And on **any** connection, real included, `AdsValueResult.GetValue<T>()` could not turn the
+  dictionary a metadata or batch read produces for a struct into a domain type, so callers
+  destructured it by hand. Both go through the same conversion core, so both are fixed by the
+  same binder. `ReadValueAsync<T>` against real hardware is unchanged — it goes to Beckhoff's
+  marshaller as it always did.
+
+  Positional records, mutable classes, structs, nested trees and arrays all bind; names match
+  case-insensitively, and members get the same widening a scalar read performs.
+
+  **Every member of the target type must be present in the tree.** A member the PLC does not
+  supply fails naming it rather than being left at its default — the target type and the PLC's
+  type disagreeing is exactly what a consumer wants to hear about, and this library refuses
+  silently-wrong data elsewhere for the same reason. Extra members in the PLC's struct are
+  ignored, so the target type drives; reading a subset means reading the symbol as
+  `IReadOnlyDictionary<string, object?>`.
+
+  **What simulation still cannot prove:** binding matches by NAME, because a decoded tree has no
+  memory layout, while a real `ReadValueAsync<T>` maps PLC memory by declaration ORDER through
+  Beckhoff's marshaller. A simulated target therefore catches a misspelled or mistyped member and
+  cannot catch a mis-ordered one. That asymmetry is documented on the binder and pinned by a test
+  so it stays a decision on record. JSON `InitialValues` still seed one scalar per entry, so a
+  struct-shaped symbol has to be seeded in code
+  ([#50](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/50)).
+
+  The shared contract suite now pins struct binding on both in-repo implementations, so the two
+  cannot drift apart again.
+
 ### Deprecated
 
 - **`GetSymbolsAsync(parentPath, ct)` is deprecated in favour of `GetSymbolTreeAsync`.**
