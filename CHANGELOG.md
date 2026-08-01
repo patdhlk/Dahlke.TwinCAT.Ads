@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Symbol packages and Source Link — the library is debuggable from a consumer's project.**
+  ([#38](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/38)) No `.snupkg` was published, so
+  no PDB ever reached a consumer: an exception thrown inside the connection pool arrived as a bare
+  frame with no line number, and the only way to see where it came from was to clone the
+  repository and build it yourself.
+
+  Each package now ships a symbol package whose PDBs carry a Source Link map to the exact commit
+  that produced them, so a debugger fetches the matching source on demand — step into
+  `GetConnection`, put a breakpoint inside the reconnect loop, read a real stack trace off a
+  production log. `EmbedUntrackedSources` covers generated files, which Source Link cannot fetch
+  from GitHub because they were never committed.
+
+  Builds on GitHub Actions additionally set `ContinuousIntegrationBuild`, which normalises the
+  absolute source paths baked into the PDB — a published package no longer carries
+  `/home/runner/work/...` inside it, and the build is reproducible. It is keyed off the
+  `GITHUB_ACTIONS` environment variable rather than passed per workflow step, so a new pack step
+  cannot forget it, and a LOCAL build deliberately leaves it off: normalised paths would stop a
+  debugger finding the sources on disk.
+
+  The release workflow fails if any package is missing its symbols, and CI packs and asserts the
+  Source Link map on every pull request. Both guards exist because packaging regresses silently —
+  nothing in the test suite notices, and the first report would come from a consumer.
+
+  Two `Directory.Build.props` files arrive with this: a repository-wide one for the determinism
+  settings, and one under `src/` holding the package metadata that was previously duplicated
+  verbatim in all three csprojs — which is how the version placeholder came to drift once already.
+  Each csproj now declares only its `PackageId`, `Description` and `PackageTags`.
+
+  `PackageIcon` is still unset: it needs a real icon committed to the repository, which is a
+  branding decision rather than a build one.
+
 - **A PLC struct binds onto a .NET type.**
   ([#34](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/34)) A struct, function block, union
   or array decodes to a neutral member tree, and that tree now binds onto a record, class or
@@ -51,36 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The shared contract suite now pins struct binding on both in-repo implementations, so the two
   cannot drift apart again.
-
-### Deprecated
-
-- **`GetSymbolsAsync(parentPath, ct)` is deprecated in favour of `GetSymbolTreeAsync`.**
-  ([#41](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/41)) The two-argument overload has
-  always meant `includeChildren: true`, so the terse call projected the ENTIRE subtree — every
-  symbol on the PLC for a `null` parent, tens of thousands of `AdsSymbolInfo` objects on a large
-  program — while the cheap one-level browse needed the longer three-argument signature. That is
-  backwards: the call a consumer reaches for first, and writes while exploring, was the expensive
-  one. Making the token optional in this same release lowered the bar further, since
-  `GetSymbolsAsync(null)` now compiles.
-
-  Replace it with whichever was meant. Both are exact and neither is a silent change:
-
-  ```csharp
-  await conn.GetSymbolTreeAsync(parentPath);                          // same full-subtree result
-  await conn.GetSymbolsAsync(parentPath, includeChildren: false);     // one level, the cheap shape
-  ```
-
-  **The deprecated overload still behaves exactly as it always did** and will keep doing so until
-  it is removed — it warns, it does not change. That is the point of deprecating rather than
-  flipping the default: a flip would have left every call site compiling while silently changing
-  what it did, which is the failure mode with no compile error and no test failure. For the same
-  reason **no future version will reintroduce `GetSymbolsAsync(parentPath, ct)` as a one-level
-  browse**; the shape is being retired, not repurposed.
-
-  The internal `IManagedConnection` seam member was renamed alongside it, so the same misleading
-  name does not survive one layer down.
-
-### Added
 
 - **The `CancellationToken` is optional on every async member.** `IAdsConnection`,
   `IAdsRawChannel` and `IPlcAlarmMonitor` required one at every call site, so code with no token
@@ -142,6 +143,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **This cannot verify a path against the PLC.** Nothing on this side of the wire can, so those
   runtime failures remain possible; what changes is that there is exactly one place per symbol to
   correct when they happen.
+
+### Deprecated
+
+- **`GetSymbolsAsync(parentPath, ct)` is deprecated in favour of `GetSymbolTreeAsync`.**
+  ([#41](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/41)) The two-argument overload has
+  always meant `includeChildren: true`, so the terse call projected the ENTIRE subtree — every
+  symbol on the PLC for a `null` parent, tens of thousands of `AdsSymbolInfo` objects on a large
+  program — while the cheap one-level browse needed the longer three-argument signature. That is
+  backwards: the call a consumer reaches for first, and writes while exploring, was the expensive
+  one. Making the token optional in this same release lowered the bar further, since
+  `GetSymbolsAsync(null)` now compiles.
+
+  Replace it with whichever was meant. Both are exact and neither is a silent change:
+
+  ```csharp
+  await conn.GetSymbolTreeAsync(parentPath);                          // same full-subtree result
+  await conn.GetSymbolsAsync(parentPath, includeChildren: false);     // one level, the cheap shape
+  ```
+
+  **The deprecated overload still behaves exactly as it always did** and will keep doing so until
+  it is removed — it warns, it does not change. That is the point of deprecating rather than
+  flipping the default: a flip would have left every call site compiling while silently changing
+  what it did, which is the failure mode with no compile error and no test failure. For the same
+  reason **no future version will reintroduce `GetSymbolsAsync(parentPath, ct)` as a one-level
+  browse**; the shape is being retired, not repurposed.
+
+  The internal `IManagedConnection` seam member was renamed alongside it, so the same misleading
+  name does not survive one layer down.
 
 ## [0.8.0] - 2026-08-01
 

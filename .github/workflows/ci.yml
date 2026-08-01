@@ -30,14 +30,59 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
 
+  package:
+    # Packaging can regress silently: nothing in the test suite notices if the symbol package
+    # stops being produced or the PDB loses its Source Link map, and the first report would come
+    # from a consumer who cannot step into a released build. One pack, on one SDK, asserting the
+    # two things a consumer actually depends on.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Pack
+        run: dotnet pack src/Dahlke.TwinCAT.Ads/Dahlke.TwinCAT.Ads.csproj --configuration Release --output ./nupkg
+
+      - name: Verify the symbol package carries Source Link
+        run: |
+          set -euo pipefail
+          snupkg=$(ls ./nupkg/*.snupkg 2>/dev/null | head -1)
+          if [ -z "$snupkg" ]; then
+            echo "::error::No .snupkg was produced. Check IncludeSymbols/SymbolPackageFormat in src/Directory.Build.props."
+            exit 1
+          fi
+
+          unzip -q "$snupkg" -d ./symbols
+          pdb=$(find ./symbols -name '*.pdb' | head -1)
+          if [ -z "$pdb" ]; then
+            echo "::error::The symbol package contains no PDB."
+            exit 1
+          fi
+
+          # The Source Link map is stored in the PDB as a JSON blob of raw.githubusercontent.com
+          # URLs keyed by the commit. No map means a consumer gets frames with no source behind them.
+          if ! strings "$pdb" | grep -q 'raw.githubusercontent.com/patdhlk/Dahlke.TwinCAT.Ads'; then
+            echo "::error::$(basename "$pdb") has no Source Link map. Check PublishRepositoryUrl and that the checkout has git history."
+            exit 1
+          fi
+          echo "Source Link verified in $(basename "$pdb")."
+
   all_good:
     if: always()
-    needs: build-and-test
+    needs: [build-and-test, package]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all jobs passed
         run: |
           if [[ "${{ needs.build-and-test.result }}" != "success" ]]; then
             echo "build-and-test failed"
+            exit 1
+          fi
+          if [[ "${{ needs.package.result }}" != "success" ]]; then
+            echo "package failed"
             exit 1
           fi
