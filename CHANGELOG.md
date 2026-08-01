@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-08-01
+
+### Added
+
+- **The `CancellationToken` is optional on every async member.** `IAdsConnection`,
+  `IAdsRawChannel` and `IPlcAlarmMonitor` required one at every call site, so code with no token
+  to give wrote `CancellationToken.None` — noise that had reached the shipped examples and the
+  README, which is where a consumer learns how the API reads. The token now defaults on those
+  contracts and on `SimulatedAdsConnection`, which consumers hold directly in their own tests and
+  which therefore carries the defaults at its own declaration site.
+
+  Nothing about existing code changes: no candidate's required parameter list moved, so an
+  omitted token only fills a trailing argument that previously failed to compile outright, and
+  every existing call site still resolves to the overload it always did.
+
+- **`IAdsConnection.WithTimeout(TimeSpan)` bounds individual calls.** `PlcTargetOptions.TimeoutMs`
+  is per target, so one slow symbol, one long-running RPC or one large struct decode could only be
+  accommodated by raising the bound for every operation on that PLC — or by configuring a second
+  target pointing at the same AMS Net ID, doubling the connections and the health polling to buy
+  one longer read.
+
+  ```csharp
+  var value = await conn.WithTimeout(TimeSpan.FromSeconds(30)).ReadValueAsync<float>("GVL.BigStruct");
+  ```
+
+  The return is a lightweight view, not a second connection: it shares the target's identity,
+  state, `ConnectionStateChanged` event, transport and durable subscriptions, opens nothing and
+  needs no disposal. Three behaviours are worth knowing. It replaces **both** configured bounds,
+  `TimeoutMs` and `SymbolBrowseTimeoutMs`, so one scope covers the slowest operation rather than
+  silently exempting it — which also means a scope built for a quick read and reused for a browse
+  SHORTENS that browse. It bounds the wait for a connection too, so wait-then-throw keeps its
+  shape but a scoped call parks for the scope rather than for `TimeoutMs`. And scopes replace
+  rather than nest: `WithTimeout(a).WithTimeout(b)` is bounded by `b`.
+
+  For subscriptions the scope bounds the registration call, the only part that waits; the
+  subscription stays as durable as any other and the bound does not follow it into the callbacks.
+  On a simulated target only the wait-for-connection half is observable, since a simulated
+  operation completes against an in-memory store with no bound to change.
+
+- **`PlcSymbol<T>` declares a symbol's path and .NET type once.** Both were previously repeated at
+  every call site that touched a symbol, and neither is checked by anything: a path misspelled in
+  one place and correct in another surfaces as `DeviceSymbolNotFound` at runtime, on hardware, and
+  a symbol read as the wrong type surfaces as `InvalidCastException` the same way.
+
+  ```csharp
+  static class Symbols
+  {
+      public static readonly PlcSymbol<float> Setpoint = new("GVL.Setpoint");
+  }
+
+  float setpoint = await conn.ReadValueAsync(Symbols.Setpoint);
+  await conn.WriteValueAsync(Symbols.Setpoint, 23.5f);
+  ```
+
+  Handles reach reads, writes, metadata reads, subscriptions and batch results
+  (`results.GetValue(Symbols.Setpoint)`), plus matching `ObserveValue` overloads in the Rx
+  companion. They are extension methods rather than interface members, so `IAdsConnection` stays
+  at one member per operation for implementers and mockers, a handle works against any
+  implementation including a consumer's own test double, and it composes with `WithTimeout` for
+  free.
+
+  **This cannot verify a path against the PLC.** Nothing on this side of the wire can, so those
+  runtime failures remain possible; what changes is that there is exactly one place per symbol to
+  correct when they happen.
+
 ## [0.8.0] - 2026-08-01
 
 ### Changed

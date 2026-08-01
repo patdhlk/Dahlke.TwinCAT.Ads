@@ -39,6 +39,43 @@ public static class AdsReactiveExtensions
     }
 
     /// <summary>
+    /// Observes typed value changes for <paramref name="symbol"/> as a cold
+    /// <see cref="IObservable{T}"/>, taking the symbol's path and type from a
+    /// <see cref="PlcSymbol{T}"/> handle.
+    /// </summary>
+    /// <remarks>
+    /// Identical in every respect to
+    /// <see cref="ObserveValue{T}(Dahlke.TwinCAT.Ads.IAdsConnection, string, int)"/> — cold,
+    /// durable across reconnects, delivered on a background thread — with the path and the type
+    /// argument both coming from the handle instead of the call site.
+    /// </remarks>
+    public static IObservable<AdsValueChange<T>> ObserveValue<T>(
+        this IAdsConnection connection, PlcSymbol<T> symbol, int cycleTimeMs = 200)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        return Observable.Create<AdsValueChange<T>>((observer, ct) =>
+            connection.SubscribeAsync(
+                symbol, cycleTimeMs,
+                (path, value) => observer.OnNext(new AdsValueChange<T>(path, value)),
+                ct));
+    }
+
+    /// <summary>
+    /// Resolves the facade for <paramref name="plcId"/> via the pool and observes typed value
+    /// changes for <paramref name="symbol"/>. An unknown target id surfaces as
+    /// <see cref="UnknownPlcTargetException"/> on the observable's <c>OnError</c> when subscribed.
+    /// </summary>
+    public static IObservable<AdsValueChange<T>> ObserveValue<T>(
+        this IAdsConnectionPool pool, string plcId, PlcSymbol<T> symbol, int cycleTimeMs = 200)
+    {
+        ArgumentNullException.ThrowIfNull(pool);
+        ArgumentNullException.ThrowIfNull(plcId);
+
+        return Observable.Defer(() => pool.GetConnection(plcId).ObserveValue(symbol, cycleTimeMs));
+    }
+
+    /// <summary>
     /// Observes untyped (boxed) value changes for <paramref name="symbolPath"/> as a
     /// cold <see cref="IObservable{T}"/>. See <see cref="ObserveValue{T}(Dahlke.TwinCAT.Ads.IAdsConnection, string, int)"/> for the
     /// cold/durable/threading semantics.

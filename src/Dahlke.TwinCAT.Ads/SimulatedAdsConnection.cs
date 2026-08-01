@@ -196,7 +196,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// caller explicitly requested a concrete type.
     /// </para>
     /// </remarks>
-    public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+    public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -218,7 +218,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     }
 
     /// <inheritdoc />
-    public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+    public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         _store.TryRead(symbolPath, out var value);
@@ -241,7 +241,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// reason (a missing symbol has no metadata to report).
     /// </para>
     /// </remarks>
-    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -290,7 +290,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// apply the conversion rules documented on
     /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>.
     /// </summary>
-    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
+    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct = default)
         => WriteValueAsync(symbolPath, (object)value!, ct);
 
     /// <summary>
@@ -314,7 +314,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// recapture the already-updated value and do not fire again.
     /// </para>
     /// </remarks>
-    public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
+    public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -337,7 +337,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// untyped single-read path; it is kept consistent here and flagged for the
     /// contract suite. Cancellation aborts the whole batch before any result is produced.
     /// </remarks>
-    public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+    public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         var results = new Dictionary<string, AdsValueResult>();
@@ -382,7 +382,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// <see cref="AdsValueResult.Failure(Exception, string?)"/> — matching the real connection, which cannot write a
     /// null — and is NOT stored. Cancellation aborts the whole batch before any value is stored.
     /// </remarks>
-    public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
+    public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         var results = new Dictionary<string, AdsValueResult>();
@@ -449,7 +449,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// </para>
     /// </remarks>
     public Task<AdsRpcResult> InvokeRpcMethodAsync(
-        string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(symbolPath);
         ArgumentNullException.ThrowIfNull(methodName);
@@ -498,7 +498,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// appeared to succeed while reporting no members is the same class of defect
     /// <see cref="InvokeRpcMethodAsync"/>'s unseeded-call throw exists to make impossible.
     /// </remarks>
-    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(typeName);
         ct.ThrowIfCancellationRequested();
@@ -520,7 +520,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// Starts at <see cref="AdsState.Run"/> and reflects the most recent
     /// <see cref="WriteControlAsync"/> call immediately.
     /// </remarks>
-    public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
+    public Task<AdsState> GetAdsStateAsync(CancellationToken ct = default)
     {
         // Honours the token like every other member here. It previously did not, which made this
         // the one operation whose cancellation behaviour differed from the in-memory double the
@@ -531,7 +531,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
 
     /// <inheritdoc />
     /// <remarks>Records the requested state so <see cref="GetAdsStateAsync"/> reflects it immediately.</remarks>
-    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         _adsState = state;
@@ -546,7 +546,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// Reports a synthetic identity so simulated consumers get a well-formed response. The name
     /// is deliberately recognisable as simulated rather than imitating a real runtime.
     /// </remarks>
-    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(new AdsDeviceInfo("Simulated ADS Device", "0.0.0"));
@@ -592,7 +592,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// See the class-level remarks.
     /// </para>
     /// </remarks>
-    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -608,7 +608,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// conversion (or a null with a non-nullable value-type <typeparamref name="T"/>) is
     /// dropped with a Warning rather than delivered.
     /// </remarks>
-    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
 
     /// <inheritdoc />
@@ -629,7 +629,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// </para>
     /// </remarks>
     public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs,
-        Action<AdsNotification> callback, CancellationToken ct)
+        Action<AdsNotification> callback, CancellationToken ct = default)
         => SubscribeAsync(
             symbolPath,
             cycleTimeMs,
@@ -649,7 +649,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// browse to bound, so — unlike <see cref="AdsConnection"/> — this completes synchronously and
     /// never consults <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/>.
     /// </remarks>
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct = default)
         => GetSymbolsAsync(parentPath, includeChildren: true, ct);
 
     /// <inheritdoc />
@@ -658,7 +658,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// <see cref="GetSymbolsAsync(string?, CancellationToken)"/>; <paramref name="includeChildren"/>
     /// selects whether each returned node carries its nested subtree, matching a real connection.
     /// </remarks>
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(SimulatedSymbolTree.GetSymbols(_store, parentPath, includeChildren));
@@ -671,7 +671,7 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// <see cref="SimulatedSymbolTree"/>), so its cost is proportional to the number of seeded
     /// symbols.
     /// </remarks>
-    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(SimulatedSymbolTree.Search(_store, pattern, includeChildren));
@@ -682,6 +682,125 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     Task<bool> IManagedConnection.IsAliveAsync(CancellationToken ct) => Task.FromResult(true);
     void IManagedConnection.ForceDisconnect() { }
     void IManagedConnection.LogSymbolTree(SymbolDumpOptions options) { }
+
+    // =========================================================================
+    // IManagedConnection operational surface — the pool's seam
+    // =========================================================================
+
+    /// <remarks>
+    /// <para>
+    /// <b>Why these are explicit, and why they all discard <c>timeout</c>.</b> The pool's seam
+    /// carries a per-call timeout override (see <see cref="IManagedConnection"/>) that the
+    /// consumer contract does not, so the two signatures differ by exactly that parameter.
+    /// Implementing the seam explicitly keeps it off this type's PUBLIC surface: a consumer
+    /// holding a <see cref="SimulatedAdsConnection"/> directly — a documented testing pattern —
+    /// sees the same members they would see on <see cref="IAdsConnection"/>, and no
+    /// <c>TimeSpan?</c>-taking twin appears beside each one.
+    /// </para>
+    /// <para>
+    /// The override is discarded because a simulated operation has no bound to override. Every
+    /// one of them completes against an in-memory store without I/O, so no timeout can elapse
+    /// and none is armed in the first place — the simulated connection has never honoured
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> either. What a scope still governs for a
+    /// simulated TARGET is the facade's wait for a connection, which the facade applies itself
+    /// before it ever reaches this type. Cancellation is unaffected and still observed here.
+    /// </para>
+    /// </remarks>
+    Task<T> IManagedConnection.ReadValueAsync<T>(string symbolPath, CancellationToken ct, TimeSpan? timeout)
+        => ReadValueAsync<T>(symbolPath, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<object?> IManagedConnection.ReadValueAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout)
+        => ReadValueAsync(symbolPath, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<AdsValueResult> IManagedConnection.ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout)
+        => ReadValueWithMetadataAsync(symbolPath, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task IManagedConnection.WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct, TimeSpan? timeout)
+        => WriteValueAsync(symbolPath, value, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task IManagedConnection.WriteValueAsync(string symbolPath, object value, CancellationToken ct, TimeSpan? timeout)
+        => WriteValueAsync(symbolPath, value, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyDictionary<string, AdsValueResult>> IManagedConnection.ReadValuesAsync(
+        IEnumerable<string> symbolPaths, CancellationToken ct, TimeSpan? timeout)
+        => ReadValuesAsync(symbolPaths, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyDictionary<string, AdsValueResult>> IManagedConnection.WriteValuesAsync(
+        IReadOnlyDictionary<string, object?> values, CancellationToken ct, TimeSpan? timeout)
+        => WriteValuesAsync(values, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<AdsRpcResult> IManagedConnection.InvokeRpcMethodAsync(
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct, TimeSpan? timeout)
+        => InvokeRpcMethodAsync(symbolPath, methodName, parameters, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyList<AdsEnumMember>> IManagedConnection.GetEnumMembersAsync(
+        string typeName, CancellationToken ct, TimeSpan? timeout)
+        => GetEnumMembersAsync(typeName, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<AdsState> IManagedConnection.GetAdsStateAsync(CancellationToken ct, TimeSpan? timeout)
+        => GetAdsStateAsync(ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<AdsDeviceInfo> IManagedConnection.GetDeviceInfoAsync(CancellationToken ct, TimeSpan? timeout)
+        => GetDeviceInfoAsync(ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task IManagedConnection.WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct, TimeSpan? timeout)
+        => WriteControlAsync(state, deviceState, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IDisposable> IManagedConnection.SubscribeAsync(
+        string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct, TimeSpan? timeout)
+        => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IDisposable> IManagedConnection.SubscribeAsync<T>(
+        string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct, TimeSpan? timeout)
+        where T : default
+        => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IDisposable> IManagedConnection.SubscribeAsync(
+        string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct, TimeSpan? timeout)
+        => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyList<AdsSymbolInfo>> IManagedConnection.GetSymbolsAsync(
+        string? parentPath, CancellationToken ct, TimeSpan? timeout)
+        => GetSymbolsAsync(parentPath, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyList<AdsSymbolInfo>> IManagedConnection.GetSymbolsAsync(
+        string? parentPath, bool includeChildren, CancellationToken ct, TimeSpan? timeout)
+        => GetSymbolsAsync(parentPath, includeChildren, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyList<AdsSymbolInfo>> IManagedConnection.SearchSymbolsAsync(
+        string pattern, bool includeChildren, CancellationToken ct, TimeSpan? timeout)
+        => SearchSymbolsAsync(pattern, includeChildren, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A simulated operation has no bound to shorten or lengthen — it completes against an
+    /// in-memory store without I/O — so a scope would change nothing observable here and this
+    /// returns the same instance. A simulated TARGET reached through the pool is a different
+    /// matter: there the consumer holds a facade, whose own <c>WithTimeout</c> returns a real
+    /// scope and does bound the wait for a connection.
+    /// </remarks>
+    public IAdsConnection WithTimeout(TimeSpan timeout)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+        return this;
+    }
 
     /// <summary>
     /// Disposes the simulated connection. A no-op: the in-memory store and subscriber

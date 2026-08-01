@@ -581,78 +581,78 @@ public class AdsConnectionFacadeTests
         public string? LastReadPath { get; private set; }
         public (string Path, object Value)? LastWrite { get; private set; }
 
-        public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+        public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
         {
             LastReadPath = symbolPath;
             return Task.FromResult((T)ReadResult!);
         }
 
-        public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+        public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
         {
             LastReadPath = symbolPath;
             return Task.FromResult(ReadResult);
         }
 
-        public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+        public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
-        public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
+        public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct, TimeSpan? timeout = null)
         {
             LastWrite = (symbolPath, value!);
             return Task.CompletedTask;
         }
 
-        public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
+        public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct, TimeSpan? timeout = null)
         {
             LastWrite = (symbolPath, value);
             return Task.CompletedTask;
         }
 
-        public Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+        public Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct, TimeSpan? timeout = null)
             => Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(new Dictionary<string, AdsValueResult>());
 
-        public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
+        public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct, TimeSpan? timeout = null)
             => Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(new Dictionary<string, AdsValueResult>());
 
-        public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
+        public Task<AdsState> GetAdsStateAsync(CancellationToken ct, TimeSpan? timeout = null)
             => Task.FromResult(default(AdsState));
 
-        public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+        public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
-        public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
-            => throw new NotSupportedException();
-
-        // Never exercised: these routing tests assert read/write delegation only (see the strict
-        // stub policy — real only where genuinely read).
-        public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+        public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
         // Never exercised: these routing tests assert read/write delegation only (see the strict
         // stub policy — real only where genuinely read).
-        public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+        public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
-        public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
+        // Never exercised: these routing tests assert read/write delegation only (see the strict
+        // stub policy — real only where genuinely read).
+        public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct, TimeSpan? timeout = null)
+            => throw new NotSupportedException();
+
+        public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct, TimeSpan? timeout = null)
             => Task.FromResult<IDisposable>(new DummyDisposable());
 
-        public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+        public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
         // Never exercised: these routing tests assert read/write delegation only (see the strict
         // stub policy — real only where genuinely read).
-        public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+        public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
         // Never exercised: these routing tests assert read/write delegation only (see the strict
         // stub policy — real only where genuinely read).
-        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
-        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
-        public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+        public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
         public void Connect() => IsConnected = true;

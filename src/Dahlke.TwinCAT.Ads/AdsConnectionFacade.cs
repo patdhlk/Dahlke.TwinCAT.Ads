@@ -291,7 +291,7 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     /// timeout or when the facade is stopped, or <see cref="OperationCanceledException"/>
     /// if <paramref name="ct"/> fires first.
     /// </summary>
-    private ValueTask<IManagedConnection> SnapshotAsync(CancellationToken ct)
+    private ValueTask<IManagedConnection> SnapshotAsync(CancellationToken ct, TimeSpan? timeout)
     {
         // Fast path: a connection is already current — return it without allocating
         // a Task. A stopped facade short-circuits to a fast fail-fast throw.
@@ -302,10 +302,10 @@ internal sealed class AdsConnectionFacade : IAdsConnection
         if (_stopped)
             return ValueTask.FromException<IManagedConnection>(StoppedException());
 
-        return new ValueTask<IManagedConnection>(WaitForConnectionAsync(ct));
+        return new ValueTask<IManagedConnection>(WaitForConnectionAsync(ct, timeout));
     }
 
-    private async Task<IManagedConnection> WaitForConnectionAsync(CancellationToken ct)
+    private async Task<IManagedConnection> WaitForConnectionAsync(CancellationToken ct, TimeSpan? timeout)
     {
         // Arm (or join) the shared waiter TCS. CompareExchange installs ours only
         // if the slot is empty; otherwise an existing waiter's TCS is reused, so
@@ -328,7 +328,7 @@ internal sealed class AdsConnectionFacade : IAdsConnection
         try
         {
             return await shared.Task
-                .WaitAsync(TimeSpan.FromMilliseconds(_options.TimeoutMs), _timeProvider, ct)
+                .WaitAsync(timeout ?? TimeSpan.FromMilliseconds(_options.TimeoutMs), _timeProvider, ct)
                 .ConfigureAwait(false);
         }
         catch (TimeoutException)
@@ -344,38 +344,53 @@ internal sealed class AdsConnectionFacade : IAdsConnection
             innerException: null);
 
     /// <inheritdoc />
-    public async Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+    public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+        => ReadValueAsync<T>(symbolPath, ct, null);
+
+    internal async Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.ReadValueAsync<T>(symbolPath, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.ReadValueAsync<T>(symbolPath, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+    public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+        => ReadValueAsync(symbolPath, ct, null);
+
+    internal async Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.ReadValueAsync(symbolPath, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.ReadValueAsync(symbolPath, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+        => ReadValueWithMetadataAsync(symbolPath, ct, null);
+
+    internal async Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.ReadValueWithMetadataAsync(symbolPath, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.ReadValueWithMetadataAsync(symbolPath, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
+    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
+        => WriteValueAsync<T>(symbolPath, value, ct, null);
+
+    internal async Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        await conn.WriteValueAsync<T>(symbolPath, value, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        await conn.WriteValueAsync<T>(symbolPath, value, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
+    public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
+        => WriteValueAsync(symbolPath, value, ct, null);
+
+    internal async Task WriteValueAsync(string symbolPath, object value, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        await conn.WriteValueAsync(symbolPath, value, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        await conn.WriteValueAsync(symbolPath, value, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -386,57 +401,79 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     /// <see cref="PlcTargetOptions.TimeoutMs"/> then throws
     /// <see cref="AdsConnectionUnavailableException"/> for the whole batch.
     /// </remarks>
-    public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+    public Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+        => ReadValuesAsync(symbolPaths, ct, null);
+
+    internal async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.ReadValuesAsync(symbolPaths, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.ReadValuesAsync(symbolPaths, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// Snapshot-once: see <see cref="ReadValuesAsync"/>. The whole batch runs against one
+    /// Snapshot-once: see <see cref="ReadValuesAsync(IEnumerable{string}, CancellationToken)"/>. The whole batch runs against one
     /// captured connection.
     /// </remarks>
-    public async Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
+    public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
+        => WriteValuesAsync(values, ct, null);
+
+    internal async Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.WriteValuesAsync(values, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.WriteValuesAsync(values, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task<AdsRpcResult> InvokeRpcMethodAsync(
+    public Task<AdsRpcResult> InvokeRpcMethodAsync(
         string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+        => InvokeRpcMethodAsync(symbolPath, methodName, parameters, ct, null);
+
+    internal async Task<AdsRpcResult> InvokeRpcMethodAsync(
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.InvokeRpcMethodAsync(symbolPath, methodName, parameters, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.InvokeRpcMethodAsync(symbolPath, methodName, parameters, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+        => GetEnumMembersAsync(typeName, ct, null);
+
+    internal async Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.GetEnumMembersAsync(typeName, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.GetEnumMembersAsync(typeName, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task<AdsState> GetAdsStateAsync(CancellationToken ct)
+    public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
+        => GetAdsStateAsync(ct, null);
+
+    internal async Task<AdsState> GetAdsStateAsync(CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.GetAdsStateAsync(ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.GetAdsStateAsync(ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+        => GetDeviceInfoAsync(ct, null);
+
+    internal async Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.GetDeviceInfoAsync(ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.GetDeviceInfoAsync(ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+        => WriteControlAsync(state, deviceState, ct, null);
+
+    internal async Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        await conn.WriteControlAsync(state, deviceState, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        await conn.WriteControlAsync(state, deviceState, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -450,9 +487,14 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     /// the subscription permanently when disposed.
     /// </remarks>
     public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
+        => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct, null);
+
+    internal Task<IDisposable> SubscribeAsync(
+        string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct, TimeSpan? timeout)
         => SubscribeCoreAsync(
             symbolPath,
-            (conn, token) => conn.SubscribeAsync(symbolPath, cycleTimeMs, callback, token),
+            (conn, token) => conn.SubscribeAsync(symbolPath, cycleTimeMs, callback, token, timeout),
+            timeout,
             ct);
 
     /// <inheritdoc />
@@ -464,9 +506,14 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     /// the registry's restore and register paths never branch on callback shape.
     /// </remarks>
     public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+        => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct, null);
+
+    internal Task<IDisposable> SubscribeAsync(
+        string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct, TimeSpan? timeout)
         => SubscribeCoreAsync(
             symbolPath,
-            (conn, token) => conn.SubscribeAsync(symbolPath, cycleTimeMs, callback, token),
+            (conn, token) => conn.SubscribeAsync(symbolPath, cycleTimeMs, callback, token, timeout),
+            timeout,
             ct);
 
     /// <summary>
@@ -479,6 +526,7 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     private Task<IDisposable> SubscribeCoreAsync(
         string symbolPath,
         Func<IManagedConnection, CancellationToken, Task<IDisposable>> register,
+        TimeSpan? timeout,
         CancellationToken ct)
         // AddAsync publishes the record BEFORE the initial registration below
         // runs, and rolls it back if that registration fails — see the registry's
@@ -491,7 +539,7 @@ internal sealed class AdsConnectionFacade : IAdsConnection
             (_, conn, token) => register(conn, token),
             initialRegister: async record =>
             {
-                var conn = await SnapshotAsync(ct).ConfigureAwait(false);
+                var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
                 await _subscriptions.RegisterAsync(record, conn, ct).ConfigureAwait(false);
             });
 
@@ -505,27 +553,47 @@ internal sealed class AdsConnectionFacade : IAdsConnection
     /// without the facade needing to know the subscription was typed.
     /// </remarks>
     public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
-        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
+        => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct, null);
+
+    internal Task<IDisposable> SubscribeAsync<T>(
+        string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct, TimeSpan? timeout)
+        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct, timeout);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+        => GetSymbolsAsync(parentPath, ct, null);
+
+    internal async Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.GetSymbolsAsync(parentPath, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.GetSymbolsAsync(parentPath, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+        => GetSymbolsAsync(parentPath, includeChildren, ct, null);
+
+    internal async Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.GetSymbolsAsync(parentPath, includeChildren, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.GetSymbolsAsync(parentPath, includeChildren, ct, timeout).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+        => SearchSymbolsAsync(pattern, includeChildren, ct, null);
+
+    internal async Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct, TimeSpan? timeout)
     {
-        var conn = await SnapshotAsync(ct).ConfigureAwait(false);
-        return await conn.SearchSymbolsAsync(pattern, includeChildren, ct).ConfigureAwait(false);
+        var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
+        return await conn.SearchSymbolsAsync(pattern, includeChildren, ct, timeout).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public IAdsConnection WithTimeout(TimeSpan timeout)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+        return new TimeoutScopedConnection(this, timeout);
     }
 
 }

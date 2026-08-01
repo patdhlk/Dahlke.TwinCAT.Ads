@@ -175,49 +175,49 @@ internal sealed class FakeManagedConnection : IManagedConnection
 
     // ---- IAdsConnection members never exercised by the pool --------------
 
-    public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+    public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+    public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
+    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
+    public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+    public Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
+    public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+    public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
+    public Task<AdsState> GetAdsStateAsync(CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
-    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException();
 
     // ---- Subscription support (durable-subscription tests) ---------------
@@ -291,7 +291,7 @@ internal sealed class FakeManagedConnection : IManagedConnection
         lock (_gate) { _subscribeCalled = NewTcsT(); }
     }
 
-    public async Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
+    public async Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct, TimeSpan? timeout = null)
     {
         TaskCompletionSource toSignal;
         lock (_gate) { toSignal = _subscribeCalled; }
@@ -328,7 +328,7 @@ internal sealed class FakeManagedConnection : IManagedConnection
     /// metadata fidelity (the shared contract suite pins that against
     /// <see cref="InMemoryManagedConnection"/>).
     /// </remarks>
-    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct, TimeSpan? timeout = null)
         => SubscribeAsync(
             symbolPath,
             cycleTimeMs,
@@ -345,7 +345,7 @@ internal sealed class FakeManagedConnection : IManagedConnection
     /// durable record, so only the untyped <see cref="SubscribeAsync"/> ever reaches a
     /// managed connection. Implemented as a hard failure to assert that contract.
     /// </summary>
-    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct, TimeSpan? timeout = null)
         => throw new NotSupportedException(
             "FakeManagedConnection only speaks the untyped SubscribeAsync; the facade wraps typed callbacks before reaching it.");
 }

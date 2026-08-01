@@ -295,6 +295,9 @@ internal sealed class FakeRpcConnection(IReadOnlyList<AdsEnumMember> members, ob
     /// </summary>
     public Func<Exception>? EnumMembersFailure { get; set; }
 
+    /// <summary>Not exercised here: these doubles test behaviour no timeout scope changes.</summary>
+    public IAdsConnection WithTimeout(TimeSpan timeout) => this;
+
     public Task<AdsRpcResult> InvokeRpcMethodAsync(
         string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
     {

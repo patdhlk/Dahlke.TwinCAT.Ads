@@ -13,6 +13,26 @@ insert_final_newline = true
 csharp_style_namespace_declarations = file_scoped:suggestion
 csharp_using_directive_placement = outside_namespace:suggestion
 
+# The two consumer-facing operation contracts carry `CancellationToken ct = default` on every
+# async member, including members that are part of an overload group. RS0026 flags exactly that
+# shape, because a default value is baked into the CALLER's compiled code: a consumer built
+# against one overload set keeps its old binding until it is recompiled, so a LATER overload
+# addition can make recompiled and non-recompiled callers resolve differently.
+#
+# Accepted here, deliberately, for these members only:
+#   * The optional parameter is a trailing `CancellationToken` — the BCL's own convention for
+#     this exact shape (Stream.ReadAsync, DbCommand.ExecuteReaderAsync, …), and the thing a .NET
+#     consumer expects when they omit the argument.
+#   * No existing call site changes meaning. No candidate's REQUIRED parameter list moved, so the
+#     default only fills a trailing argument that previously failed to compile outright.
+#
+# What this suppression costs: adding a FURTHER optional-parameter overload to one of these
+# groups is the case RS0026 is actually there to catch, and it will now pass silently. Before
+# adding one, read the hazard note it points at:
+# https://github.com/dotnet/roslyn/blob/main/docs/Adding%20Optional%20Parameters%20in%20Public%20API.md
+[{IAdsConnection,IAdsRawChannel,SimulatedAdsConnection}.cs]
+dotnet_diagnostic.RS0026.severity = none
+
 [*.{csproj,sln,xml,json,yml,yaml}]
 indent_size = 2
 

@@ -27,7 +27,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// </para>
 /// <para>
 /// <b>Subscription callbacks.</b> Callbacks registered via
-/// <see cref="SubscribeAsync(string,int,Action{string,object?},CancellationToken)"/> are invoked on
+/// <see cref="SubscribeAsync(string,int,Action{string,object?},CancellationToken,TimeSpan?)"/> are invoked on
 /// a background thread owned by the underlying ADS client — never the caller's thread. Callbacks
 /// must be thread-safe and must not block; an exception thrown by a callback is caught, logged at
 /// Warning severity, and does not interrupt the subscription.
@@ -134,9 +134,9 @@ internal sealed class AdsConnection : IManagedConnection
         try { _client.Disconnect(); } catch { /* best effort */ }
     }
 
-    public async Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+    public async Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
     {
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
 
         ResultValue<T> result;
         try
@@ -145,7 +145,7 @@ internal sealed class AdsConnection : IManagedConnection
         }
         catch (OperationCanceledException)
         {
-            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, TimeoutMsFor(timeout));
         }
 
         if (result.Failed)
@@ -158,14 +158,14 @@ internal sealed class AdsConnection : IManagedConnection
         return result.Value!;
     }
 
-    public async Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+    public async Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
     {
         // NOTE: making this a proper async method (not a sync throw + Task.FromResult) is itself a
         // subtle behavioral fix: any synchronous exception (symbol not found) now arrives via the
         // Task rather than being thrown before the task is returned. The facade awaits this method
         // so consumers see no difference in how exceptions surface, but it is safer API practice.
 
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
         var symbolLoader = GetSymbolLoader();
 
         if (!symbolLoader.Symbols.TryGetInstance(symbolPath, out var symbol) || symbol is not IValueSymbol)
@@ -180,7 +180,7 @@ internal sealed class AdsConnection : IManagedConnection
         {
             // Either the caller's token or the timeout CTS fired.
             // Disambiguate: OCE when caller cancelled, TimeoutException when timeout elapsed.
-            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, TimeoutMsFor(timeout));
         }
 
         if (result.Failed)
@@ -214,9 +214,9 @@ internal sealed class AdsConnection : IManagedConnection
     /// both via <see cref="CancellationDisambiguator"/>.
     /// </para>
     /// </remarks>
-    public async Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+    public async Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
     {
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
         var symbolLoader = GetSymbolLoader();
 
         if (!symbolLoader.Symbols.TryGetInstance(symbolPath, out var symbol) || symbol is not IValueSymbol)
@@ -254,12 +254,12 @@ internal sealed class AdsConnection : IManagedConnection
         }
         catch (OperationCanceledException)
         {
-            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, TimeoutMsFor(timeout));
         }
     }
 
-    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
-        => WriteValueAsync(symbolPath, (object)value!, ct);
+    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct, TimeSpan? timeout = null)
+        => WriteValueAsync(symbolPath, (object)value!, ct, timeout);
 
     /// <summary>
     /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
@@ -269,16 +269,16 @@ internal sealed class AdsConnection : IManagedConnection
     /// invoke-ids and correlates responses independently. No write lock is held; concurrent writes
     /// to different (or the same) symbols interleave freely at the ADS transport layer.
     /// </remarks>
-    public async Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
+    public async Task WriteValueAsync(string symbolPath, object value, CancellationToken ct, TimeSpan? timeout = null)
     {
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
         try
         {
             await _client.WriteSymbolAsync(symbolPath, value, cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, TimeoutMsFor(timeout));
         }
     }
 
@@ -316,7 +316,7 @@ internal sealed class AdsConnection : IManagedConnection
     /// the whole batch — neither is recorded as a per-symbol failure.
     /// </para>
     /// </remarks>
-    public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+    public async Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct, TimeSpan? timeout = null)
     {
         // De-dup: a repeated path is read once.
         var paths = symbolPaths.Distinct().ToArray();
@@ -362,7 +362,7 @@ internal sealed class AdsConnection : IManagedConnection
 
         // One timeout/cancellation budget for the whole batch, whether that means one sum
         // command, one container loop, or both.
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
 
         // Scalars: one sum-read round-trip for all of them.
         if (scalars.Count > 0)
@@ -384,7 +384,7 @@ internal sealed class AdsConnection : IManagedConnection
             catch (OperationCanceledException)
             {
                 // Whole-batch: caller cancellation → OCE; timeout → TimeoutException.
-                var ex = CancellationDisambiguator.CreateException(ct, $"batch({scalarSymbols.Count} symbols)", PlcId, _options.TimeoutMs);
+                var ex = CancellationDisambiguator.CreateException(ct, $"batch({scalarSymbols.Count} symbols)", PlcId, TimeoutMsFor(timeout));
                 if (ex is OperationCanceledException oce)
                     throw oce;
                 throw (TimeoutException)ex;
@@ -447,7 +447,7 @@ internal sealed class AdsConnection : IManagedConnection
             catch (OperationCanceledException)
             {
                 // Whole-batch cancellation/timeout is NOT a per-symbol failure — rethrow.
-                var ex = CancellationDisambiguator.CreateException(ct, path, PlcId, _options.TimeoutMs);
+                var ex = CancellationDisambiguator.CreateException(ct, path, PlcId, TimeoutMsFor(timeout));
                 if (ex is OperationCanceledException oce)
                     throw oce;
                 throw (TimeoutException)ex;
@@ -539,7 +539,7 @@ internal sealed class AdsConnection : IManagedConnection
     /// <see cref="TimeoutException"/> for the whole batch.
     /// </para>
     /// </remarks>
-    public async Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
+    public async Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct, TimeSpan? timeout = null)
     {
         // Empty input shortcut — no ADS call.
         if (values.Count == 0)
@@ -590,7 +590,7 @@ internal sealed class AdsConnection : IManagedConnection
 
         // One sum-write round-trip — no serialization lock needed; AdsClient multiplexes
         // concurrent requests via invoke-ids (see class remarks).
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
         ResultSumCommand sumResult;
         try
         {
@@ -600,7 +600,7 @@ internal sealed class AdsConnection : IManagedConnection
         catch (OperationCanceledException)
         {
             // Whole-batch: caller cancellation → OCE; timeout → TimeoutException.
-            var ex = CancellationDisambiguator.CreateException(ct, $"batch({foundSymbols.Count} symbols)", PlcId, _options.TimeoutMs);
+            var ex = CancellationDisambiguator.CreateException(ct, $"batch({foundSymbols.Count} symbols)", PlcId, TimeoutMsFor(timeout));
             if (ex is OperationCanceledException oce)
                 throw oce;
             throw (TimeoutException)ex;
@@ -636,13 +636,13 @@ internal sealed class AdsConnection : IManagedConnection
     /// </para>
     /// </remarks>
     public async Task<AdsRpcResult> InvokeRpcMethodAsync(
-        string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct, TimeSpan? timeout = null)
     {
         ArgumentNullException.ThrowIfNull(symbolPath);
         ArgumentNullException.ThrowIfNull(methodName);
         ArgumentNullException.ThrowIfNull(parameters);
 
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
         var symbolLoader = GetSymbolLoader();
 
         if (!symbolLoader.Symbols.TryGetInstance(symbolPath, out var symbol))
@@ -666,7 +666,7 @@ internal sealed class AdsConnection : IManagedConnection
         }
         catch (OperationCanceledException)
         {
-            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, _options.TimeoutMs);
+            throw CancellationDisambiguator.CreateException(ct, symbolPath, PlcId, TimeoutMsFor(timeout));
         }
 
         if (result.Failed)
@@ -728,7 +728,7 @@ internal sealed class AdsConnection : IManagedConnection
     /// writes there.
     /// </para>
     /// </remarks>
-    public async Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    public async Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct, TimeSpan? timeout = null)
     {
         ArgumentNullException.ThrowIfNull(typeName);
         ct.ThrowIfCancellationRequested();
@@ -738,7 +738,7 @@ internal sealed class AdsConnection : IManagedConnection
 
         var generationAtStart = Volatile.Read(ref _enumCacheGeneration);
 
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
 
         // CancellationToken.None on Task.Run deliberately: its token only decides whether the
         // work is ever SCHEDULED, and once the upload is under way nothing can abort it. The
@@ -760,7 +760,7 @@ internal sealed class AdsConnection : IManagedConnection
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
 
-            throw CancellationDisambiguator.CreateException(ct, typeName, PlcId, _options.TimeoutMs);
+            throw CancellationDisambiguator.CreateException(ct, typeName, PlcId, TimeoutMsFor(timeout));
         }
 
         // Only commit if no Disconnect/ForceDisconnect cleared the cache while this call was
@@ -808,9 +808,9 @@ internal sealed class AdsConnection : IManagedConnection
     /// hand a consumer rendering PLC state a value indistinguishable from one the device actually
     /// reported. This mirrors <see cref="GetDeviceInfoAsync"/>.
     /// </remarks>
-    public async Task<AdsState> GetAdsStateAsync(CancellationToken ct)
+    public async Task<AdsState> GetAdsStateAsync(CancellationToken ct, TimeSpan? timeout = null)
     {
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
         ResultReadDeviceState result;
         try
         {
@@ -818,7 +818,7 @@ internal sealed class AdsConnection : IManagedConnection
         }
         catch (OperationCanceledException)
         {
-            throw CancellationDisambiguator.CreateException(ct, "AdsState", PlcId, _options.TimeoutMs);
+            throw CancellationDisambiguator.CreateException(ct, "AdsState", PlcId, TimeoutMsFor(timeout));
         }
 
         if (result.Failed)
@@ -830,9 +830,9 @@ internal sealed class AdsConnection : IManagedConnection
     }
 
     /// <inheritdoc />
-    public async Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+    public async Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct, TimeSpan? timeout = null)
     {
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
 
         ResultDeviceInfo result;
         try
@@ -841,7 +841,7 @@ internal sealed class AdsConnection : IManagedConnection
         }
         catch (OperationCanceledException)
         {
-            throw CancellationDisambiguator.CreateException(ct, "<device-info>", PlcId, _options.TimeoutMs);
+            throw CancellationDisambiguator.CreateException(ct, "<device-info>", PlcId, TimeoutMsFor(timeout));
         }
 
         if (result.Failed)
@@ -855,9 +855,9 @@ internal sealed class AdsConnection : IManagedConnection
     }
 
     /// <inheritdoc />
-    public async Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+    public async Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct, TimeSpan? timeout = null)
     {
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
 
         try
         {
@@ -869,7 +869,7 @@ internal sealed class AdsConnection : IManagedConnection
         }
         catch (OperationCanceledException)
         {
-            throw CancellationDisambiguator.CreateException(ct, $"<write-control:{state}>", PlcId, _options.TimeoutMs);
+            throw CancellationDisambiguator.CreateException(ct, $"<write-control:{state}>", PlcId, TimeoutMsFor(timeout));
         }
     }
 
@@ -897,7 +897,9 @@ internal sealed class AdsConnection : IManagedConnection
         if (!_client.IsConnected) return false;
         try
         {
-            using var cts = CreateTimeoutCts(ct);
+            // The pool's own liveness probe, never a consumer call, so there is no per-call
+            // override to honour — always the target's configured bound.
+            using var cts = CreateTimeoutCts(ct, timeout: null);
             var result = await _client.ReadStateAsync(cts.Token).ConfigureAwait(false);
 
             if (result.Failed)
@@ -918,9 +920,9 @@ internal sealed class AdsConnection : IManagedConnection
         }
     }
 
-    public async Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
+    public async Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct, TimeSpan? timeout = null)
     {
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
         var symbol = _client.ReadSymbol(symbolPath);
         var settings = new NotificationSettings(AdsTransMode.OnChange, cycleTimeMs, 0);
         var notificationHandle = await _client.AddDeviceNotificationAsync(
@@ -1024,9 +1026,9 @@ internal sealed class AdsConnection : IManagedConnection
     /// </para>
     /// </remarks>
     public async Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs,
-        Action<AdsNotification> callback, CancellationToken ct)
+        Action<AdsNotification> callback, CancellationToken ct, TimeSpan? timeout = null)
     {
-        using var cts = CreateTimeoutCts(ct);
+        using var cts = CreateTimeoutCts(ct, timeout);
         var symbol = _client.ReadSymbol(symbolPath);
         var typeName = symbol.TypeName;
         var settings = new NotificationSettings(AdsTransMode.OnChange, cycleTimeMs, 0);
@@ -1249,7 +1251,7 @@ internal sealed class AdsConnection : IManagedConnection
     /// unit-testable without a connected <see cref="AdsClient"/> — the same reasoning as
     /// <see cref="IsContainer"/> and <see cref="SetSymbolLoaderForTesting"/>. Production code
     /// reaches it only from the notification handler in
-    /// <see cref="SubscribeAsync(string, int, Action{AdsNotification}, CancellationToken)"/>.
+    /// <see cref="SubscribeAsync(string, int, Action{AdsNotification}, CancellationToken, TimeSpan?)"/>.
     /// </para>
     /// </remarks>
     internal void DeliverDecodedContainerInBackground(string symbolPath, object? raw, ISymbol symbol,
@@ -1260,7 +1262,11 @@ internal sealed class AdsConnection : IManagedConnection
         {
             try
             {
-                using var cts = CreateTimeoutCts(disposed);
+                // The target's configured bound, never a WithTimeout scope's. A scope bounds the
+                // REGISTRATION call — the only part the caller awaits — and does not follow the
+                // subscription into its callbacks, which outlive the scoped view that created
+                // them and fire for as long as the handle is held.
+                using var cts = CreateTimeoutCts(disposed, timeout: null);
                 var value = await PlcValueDecoder.DecodeAsync(raw, symbol, cts.Token).ConfigureAwait(false);
 
                 // The handle may have been disposed while we decoded. Delivering now would push a
@@ -1311,20 +1317,20 @@ internal sealed class AdsConnection : IManagedConnection
     /// <summary>
     /// Typed subscription: wraps <paramref name="callback"/> with
     /// <see cref="TypedCallbackAdapter.Wrap{T}"/> and delegates to the untyped
-    /// <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/>. Each notification value is converted to
+    /// <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken, TimeSpan?)"/>. Each notification value is converted to
     /// <typeparamref name="T"/> with the same rules as
-    /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>; an unconvertible value
+    /// <see cref="ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>; an unconvertible value
     /// is dropped with a Warning rather than delivered.
     /// </summary>
-    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
-        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct);
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct, TimeSpan? timeout = null)
+        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct, timeout);
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
-        => GetSymbolsAsync(parentPath, includeChildren: true, ct);
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
+        => GetSymbolsAsync(parentPath, includeChildren: true, ct, timeout);
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)
         => RunBrowseAsync(() =>
         {
             var loader = GetSymbolLoader();
@@ -1344,10 +1350,10 @@ internal sealed class AdsConnection : IManagedConnection
             return (IReadOnlyList<AdsSymbolInfo>)symbols
                 .Select(s => MapSymbol(s, includeChildren))
                 .ToList();
-        }, parentPath ?? "<root>", ct);
+        }, parentPath ?? "<root>", timeout, ct);
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)
         => RunBrowseAsync(() =>
         {
             var loader = GetSymbolLoader();
@@ -1356,7 +1362,7 @@ internal sealed class AdsConnection : IManagedConnection
                 .Where(s => s.InstancePath.Contains(pattern, StringComparison.OrdinalIgnoreCase))
                 .Select(s => MapSymbol(s, includeChildren))
                 .ToList();
-        }, pattern, ct);
+        }, pattern, timeout, ct);
 
     /// <summary>
     /// Runs a synchronous symbol-browse <paramref name="browse"/> on the thread pool, racing it
@@ -1397,14 +1403,14 @@ internal sealed class AdsConnection : IManagedConnection
     /// </list>
     /// </remarks>
     private async Task<IReadOnlyList<AdsSymbolInfo>> RunBrowseAsync(
-        Func<IReadOnlyList<AdsSymbolInfo>> browse, string context, CancellationToken ct)
+        Func<IReadOnlyList<AdsSymbolInfo>> browse, string context, TimeSpan? timeout, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
         var browseTask = Task.Run(browse);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var timeoutTask = Task.Delay(_options.SymbolBrowseTimeoutMs, timeoutCts.Token);
+        var timeoutTask = Task.Delay(BrowseTimeoutMsFor(timeout), timeoutCts.Token);
 
         var winner = await Task.WhenAny(browseTask, timeoutTask).ConfigureAwait(false);
 
@@ -1422,7 +1428,7 @@ internal sealed class AdsConnection : IManagedConnection
         // exception, so this is the only place that failure can be diagnosed.
         LogIfAbandonedBrowseFails(browseTask, context);
 
-        throw CancellationDisambiguator.CreateException(ct, context, PlcId, _options.SymbolBrowseTimeoutMs);
+        throw CancellationDisambiguator.CreateException(ct, context, PlcId, BrowseTimeoutMsFor(timeout));
     }
 
     /// <summary>
@@ -1599,11 +1605,42 @@ internal sealed class AdsConnection : IManagedConnection
     /// </summary>
     internal void SetSymbolLoaderForTesting(IDynamicSymbolLoader loader) => _symbolLoader = loader;
 
-    private CancellationTokenSource CreateTimeoutCts(CancellationToken ct)
+    private CancellationTokenSource CreateTimeoutCts(CancellationToken ct, TimeSpan? timeout)
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(_options.TimeoutMs);
+        cts.CancelAfter(TimeoutMsFor(timeout));
         return cts;
+    }
+
+    /// <summary>
+    /// The per-operation bound in milliseconds: <paramref name="timeout"/> when a
+    /// <see cref="IAdsConnection.WithTimeout"/> scope supplied one, otherwise the target's
+    /// configured <see cref="PlcTargetOptions.TimeoutMs"/>.
+    /// </summary>
+    /// <remarks>
+    /// Clamped to <see cref="int.MaxValue"/> rather than left to overflow. A
+    /// <see cref="TimeSpan"/> spans far more milliseconds than an <see cref="int"/> can hold, and
+    /// the value reaches here straight from a consumer's <c>WithTimeout(...)</c> argument, so
+    /// <c>TimeSpan.FromDays(30)</c> is legal input rather than a hypothetical. Negatives cannot
+    /// arrive — <see cref="AdsConnectionFacade.WithTimeout"/> rejects them at the boundary — but
+    /// the floor of 0 keeps a bad internal caller from reaching
+    /// <see cref="CancellationTokenSource.CancelAfter(int)"/>'s own argument exception.
+    /// </remarks>
+    private int TimeoutMsFor(TimeSpan? timeout) => ToMilliseconds(timeout, _options.TimeoutMs);
+
+    /// <summary>
+    /// The browse bound in milliseconds. Same rule as <see cref="TimeoutMsFor"/>, but falling back
+    /// to <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> — a scope's timeout deliberately
+    /// replaces the browse bound too, so one <c>WithTimeout</c> covers every operation the scoped
+    /// connection performs rather than silently exempting the slowest one.
+    /// </summary>
+    private int BrowseTimeoutMsFor(TimeSpan? timeout) => ToMilliseconds(timeout, _options.SymbolBrowseTimeoutMs);
+
+    private static int ToMilliseconds(TimeSpan? timeout, int fallbackMs)
+    {
+        if (timeout is not { } value) return fallbackMs;
+        var ms = (long)value.TotalMilliseconds;
+        return ms < 0 ? 0 : ms > int.MaxValue ? int.MaxValue : (int)ms;
     }
 
     private sealed class NotificationSubscription(Action dispose) : IDisposable

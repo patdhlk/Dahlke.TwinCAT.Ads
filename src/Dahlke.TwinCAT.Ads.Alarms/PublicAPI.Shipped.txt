@@ -57,7 +57,6 @@ Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect.AcknowledgeAsync(Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext! context, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<bool>!
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect.Bind(Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext! context) -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!>!
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor
-Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.AcknowledgeAsync(string! plcId, string! alarmKey, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<bool>!
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.AlarmChanged -> System.EventHandler<Dahlke.TwinCAT.Ads.Alarms.AlarmTransition!>?
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.GetOutstanding() -> System.Collections.Generic.IReadOnlyCollection<Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!>!
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.GetOutstanding(string! plcId) -> System.Collections.Generic.IReadOnlyCollection<Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!>!

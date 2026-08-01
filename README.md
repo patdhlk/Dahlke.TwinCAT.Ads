@@ -8,7 +8,9 @@ A .NET library for TwinCAT ADS with durable connections, typed symbol access, si
 
 ## Features
 
-- **Typed reads and writes** — `ReadValueAsync<T>` / `WriteValueAsync<T>` with automatic widening conversions and invariant-culture string parsing; `object?` overloads as a dynamic escape hatch
+- **Typed reads and writes** — `ReadValueAsync<T>` / `WriteValueAsync<T>` with automatic widening conversions and invariant-culture string parsing; `object?` overloads as a dynamic escape hatch. The `CancellationToken` is optional on every async member
+- **Typed symbol handles** — `PlcSymbol<T>` declares a symbol's path and .NET type once, so neither is repeated (or mistyped) at the call site; works with reads, writes, subscriptions, batch results and the Rx companion
+- **Per-call timeouts** — `WithTimeout(TimeSpan)` returns a lightweight scoped view so one slow symbol, RPC or browse does not require raising the bound for the whole target
 - **Stable connection facades** — `GetConnection` returns one object per target whose identity never changes; reconnects are invisible; cached references never go stale
 - **Wait-then-throw semantics** — operations wait up to the configured `TimeoutMs` for a connection, then throw `AdsConnectionUnavailableException`; `TimeoutException` for hardware/network stalls; `OperationCanceledException` only for caller cancellation
 - **Durable subscriptions** — survive reconnects automatically; the returned `IDisposable` stays valid through outages; simulated subscriptions fire on changed writes
@@ -140,6 +142,41 @@ await conn.WriteValueAsync<float>("GVL.Setpoint", 23.5f, ct);
 // Or let the compiler infer T:
 await conn.WriteValueAsync("GVL.Counter", (short)42, ct);
 ```
+
+### The cancellation token is optional
+
+Every async member defaults its `CancellationToken`, so code with no token to pass writes nothing rather than `CancellationToken.None`:
+
+```csharp
+float temp = await conn.ReadValueAsync<float>("GVL.Temp");
+await conn.WriteValueAsync("GVL.Setpoint", 23.5f);
+```
+
+Pass one wherever you have one — the semantics are unchanged, and an omitted token means `None`.
+
+### Typed symbol handles
+
+A path written as a string literal and a type written as a type argument are both unchecked, and both are repeated at every call site that touches the symbol. `PlcSymbol<T>` declares them once:
+
+```csharp
+static class Symbols
+{
+    public static readonly PlcSymbol<float> Setpoint = new("GVL.Setpoint");
+    public static readonly PlcSymbol<bool>  Pump     = new("GVL.PumpRunning");
+}
+
+float setpoint = await conn.ReadValueAsync(Symbols.Setpoint);   // T inferred from the handle
+await conn.WriteValueAsync(Symbols.Pump, true);                 // bool checked at compile time
+using var sub = await conn.SubscribeAsync(Symbols.Setpoint, 200, (_, v) => Console.WriteLine(v));
+
+// Batch results are keyed by path and untyped; read one back through its handle:
+var results = await conn.ReadValuesAsync([Symbols.Setpoint.Path, Symbols.Pump.Path]);
+float fromBatch = results.GetValue(Symbols.Setpoint);
+```
+
+Handles are plain values — equal by path and type, free to build, holding no connection and registering nothing. They are extension methods over `IAdsConnection`, so they work against any implementation (including your own test doubles) and compose with `WithTimeout`.
+
+**This cannot check a path against the PLC** — nothing on this side of the wire can, so `DeviceSymbolNotFound` and `InvalidCastException` remain possible. What changes is that there is exactly one place per symbol to correct when they happen. The Rx companion has matching `ObserveValue` overloads.
 
 ## Batch Operations
 
@@ -293,7 +330,7 @@ await app.StartAsync();
 foreach (var alarm in monitor.GetOutstanding())
     Console.WriteLine($"{alarm.Key} ({alarm.Severity}): {alarm.Text}");
 
-await monitor.AcknowledgeAsync("plc1", "BMK1Err404", CancellationToken.None);
+await monitor.AcknowledgeAsync("plc1", "BMK1Err404");
 
 await app.WaitForShutdownAsync();
 ```
@@ -373,6 +410,28 @@ IReadOnlyList<PlcTargetStatus> states = pool.GetTargetStates();
 When no live connection is available (connecting, mid-outage), every operation on an `IAdsConnection` waits up to the target's `TimeoutMs` milliseconds for a connection to be published, then throws `AdsConnectionUnavailableException`. After the pool is stopped (host shutdown), operations fail fast without waiting.
 
 `TimeoutException` is thrown when the hardware round-trip exceeds `TimeoutMs`. `OperationCanceledException` is thrown only when the caller's `CancellationToken` fires. The two are never conflated.
+
+### Per-call timeouts — `WithTimeout`
+
+`TimeoutMs` is per **target**, so one slow symbol, one long-running RPC or one large struct decode would otherwise mean raising the bound for every operation on that PLC. `WithTimeout` scopes the change to the calls that need it:
+
+```csharp
+var slow = conn.WithTimeout(TimeSpan.FromSeconds(30));
+var value = await slow.ReadValueAsync<float>("GVL.BigStruct");
+
+// or inline, for a one-off:
+await conn.WithTimeout(TimeSpan.FromMinutes(2)).SearchSymbolsAsync("Motor", includeChildren: false);
+```
+
+The returned value is a lightweight view, not a second connection: it shares the target's identity, state, `ConnectionStateChanged` event, transport and subscriptions. Nothing is opened and nothing needs disposing.
+
+Three things worth knowing:
+
+- **It replaces both configured bounds.** Operations that would use `TimeoutMs` and browses that would use `SymbolBrowseTimeoutMs` both use the scope, so one `WithTimeout` covers every operation the view performs rather than silently exempting the slowest. A scope built for a quick read and then reused for a browse therefore **shortens** that browse, which by default is allowed six times longer.
+- **It bounds the wait for a connection too.** Wait-then-throw keeps its shape, but a scoped call waits the scope — not `TimeoutMs` — before throwing `AdsConnectionUnavailableException`, so a long scope also lengthens how long that one call parks during an outage.
+- **Scopes replace rather than nest.** `conn.WithTimeout(a).WithTimeout(b)` is bounded by `b`.
+
+For subscriptions the scope bounds the **registration** call — the only part that waits. The subscription itself is as durable as any other, and the timeout does not follow it into the callbacks. On a simulated target only the wait-for-connection half is observable, since a simulated operation completes against an in-memory store with no bound to change.
 
 ## Simulation Mode
 
@@ -614,8 +673,8 @@ Each key is a PLC identifier used with `GetConnection(plcId)`.
 | `AmsNetId` | `string` | — | AMS Net ID of the PLC (required for `Real` targets): six dot-separated octets each in 0–255. Enforced **strictly** — `999.1.1.1.1.1` fails the host rather than being laundered to `0.1.1.1.1.1` |
 | `Port` | `int` | `851` | ADS port number |
 | `DisplayName` | `string` | `""` | Human-readable name for logging |
-| `TimeoutMs` | `int` | `5000` | Per-operation timeout in milliseconds. Must be greater than zero |
-| `SymbolBrowseTimeoutMs` | `int` | `30000` | Timeout for `GetSymbolsAsync` / `SearchSymbolsAsync`, which upload the PLC's symbol table and take far longer than a single read. Must be greater than zero |
+| `TimeoutMs` | `int` | `5000` | Per-operation timeout in milliseconds. Must be greater than zero. Override it for individual calls with [`WithTimeout`](#per-call-timeouts--withtimeout) rather than raising it for the whole target |
+| `SymbolBrowseTimeoutMs` | `int` | `30000` | Timeout for `GetSymbolsAsync` / `SearchSymbolsAsync`, which upload the PLC's symbol table and take far longer than a single read. Must be greater than zero. Also overridden by `WithTimeout` |
 | `Mode` | `ConnectionMode` | `Real` | `Real` or `Simulated` |
 | `InitialValues` | `Dictionary<string, object?>` | `{}` | Symbol seed values for simulated targets. A bare scalar seeds a `string`; `{ "value": …, "type": "DINT" }` seeds the declared PLC type — see [Seeding initial values](#seeding-initial-values) |
 
