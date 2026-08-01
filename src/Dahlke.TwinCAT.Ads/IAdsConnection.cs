@@ -128,7 +128,7 @@ public interface IAdsConnection
     /// use <see cref="ReadValueAsync(string, CancellationToken)"/> — the dynamic escape hatch.
     /// Cancellation, timeout, and ADS error semantics are identical between both overloads.
     /// </remarks>
-    Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct);
+    Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct = default);
 
     /// <summary>
     /// Reads the current value of a PLC symbol identified by <paramref name="symbolPath"/>.
@@ -165,7 +165,7 @@ public interface IAdsConnection
     /// prefer <see cref="ReadValueAsync{T}(string, CancellationToken)"/>, which provides
     /// compile-time type safety and actionable conversion errors.
     /// </remarks>
-    Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct);
+    Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct = default);
 
     /// <summary>
     /// Reads a PLC symbol and returns its decoded value together with the symbol's PLC type
@@ -205,7 +205,7 @@ public interface IAdsConnection
     /// sub-ranges, structs, function blocks, unions and arrays — decodes as described above.
     /// </para>
     /// </remarks>
-    Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct);
+    Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct = default);
 
     /// <summary>
     /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
@@ -232,7 +232,7 @@ public interface IAdsConnection
     /// writes use <see cref="WriteValueAsync(string, object, CancellationToken)"/> — the dynamic
     /// escape hatch.
     /// </remarks>
-    Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct);
+    Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct = default);
 
     /// <summary>
     /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
@@ -262,7 +262,7 @@ public interface IAdsConnection
     /// aborting the whole batch.
     /// </para>
     /// </remarks>
-    Task WriteValueAsync(string symbolPath, object value, CancellationToken ct);
+    Task WriteValueAsync(string symbolPath, object value, CancellationToken ct = default);
     /// <summary>
     /// Reads several PLC symbols in one call, returning a per-symbol outcome for each.
     /// </summary>
@@ -321,7 +321,7 @@ public interface IAdsConnection
     /// per-symbol failure.
     /// </para>
     /// </remarks>
-    Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct);
+    Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct = default);
 
     /// <summary>
     /// Writes several PLC symbols in one call, returning a per-symbol outcome for each.
@@ -368,7 +368,7 @@ public interface IAdsConnection
     /// <see cref="TimeoutException"/>.
     /// </para>
     /// </remarks>
-    Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct);
+    Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct = default);
 
     /// <summary>
     /// Calls a method on a PLC function block or program over ADS.
@@ -395,7 +395,7 @@ public interface IAdsConnection
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
     /// <exception cref="TimeoutException">Thrown when the per-target timeout elapses first.</exception>
     Task<AdsRpcResult> InvokeRpcMethodAsync(
-        string symbolPath, string methodName, object?[] parameters, CancellationToken ct);
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct = default);
 
     /// <summary>
     /// Resolves a PLC enumeration's members — name and numeric value — from the running
@@ -446,7 +446,7 @@ public interface IAdsConnection
     /// cache and complete without waiting for anything.
     /// </para>
     /// </remarks>
-    Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct);
+    Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct = default);
 
     /// <summary>
     /// Reads the current ADS state of the target device (for example
@@ -465,7 +465,7 @@ public interface IAdsConnection
     /// Thrown when the per-target <see cref="PlcTargetOptions.TimeoutMs"/> elapses before the
     /// read completes, without <paramref name="ct"/> having been cancelled first.
     /// </exception>
-    Task<AdsState> GetAdsStateAsync(CancellationToken ct);
+    Task<AdsState> GetAdsStateAsync(CancellationToken ct = default);
 
     /// <summary>Reads the target device's name and version.</summary>
     /// <param name="ct">Cancels the operation; <see cref="PlcTargetOptions.TimeoutMs"/> applies.</param>
@@ -473,7 +473,7 @@ public interface IAdsConnection
     /// <exception cref="AdsErrorException">Thrown when the read reports a non-success error code.</exception>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="ct"/> is cancelled.</exception>
     /// <exception cref="TimeoutException">Thrown when the per-target timeout elapses first.</exception>
-    Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct);
+    Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Issues an ADS WriteControl request, asking the device to transition to
@@ -493,7 +493,7 @@ public interface IAdsConnection
     /// ACCEPTED the request, not that it has finished transitioning. Poll
     /// <see cref="GetAdsStateAsync"/> to observe the settled state.
     /// </remarks>
-    Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct);
+    Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct = default);
 
     /// <summary>
     /// Subscribes to value-change notifications for <paramref name="symbolPath"/>,
@@ -541,7 +541,7 @@ public interface IAdsConnection
     /// never after, disposal completes for the registration it was attached to.
     /// </para>
     /// </remarks>
-    Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct);
+    Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct = default);
 
     /// <summary>
     /// Subscribes to value-change notifications for <paramref name="symbolPath"/>, invoking <paramref name="callback"/> with the value converted to <typeparamref name="T"/>.
@@ -565,7 +565,7 @@ public interface IAdsConnection
     /// reference or nullable <typeparamref name="T"/> invokes the callback with
     /// <see langword="null"/>.
     /// </remarks>
-    Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct);
+    Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default);
 
     /// <summary>
     /// Subscribes to value-change notifications for <paramref name="symbolPath"/>, delivering the
@@ -638,7 +638,7 @@ public interface IAdsConnection
     /// so a subscriber whose sink cannot tolerate a concurrent late write must guard it itself.
     /// </para>
     /// </remarks>
-    Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct);
+    Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct = default);
 
     /// <summary>
     /// Enumerates the symbols directly under <paramref name="parentPath"/>, each with its ENTIRE
@@ -682,7 +682,7 @@ public interface IAdsConnection
     /// allocating the projection above on a thread-pool thread after the caller has given up.
     /// </para>
     /// </remarks>
-    Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct);
+    Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct = default);
 
     /// <summary>
     /// Enumerates the symbols directly under <paramref name="parentPath"/>, choosing whether each
@@ -722,7 +722,7 @@ public interface IAdsConnection
     /// <see cref="GetSymbolsAsync(string?, CancellationToken)"/>; see its remarks.
     /// </para>
     /// </remarks>
-    Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct);
+    Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct = default);
 
     /// <summary>
     /// Searches the whole symbol tree for symbols whose instance path contains
@@ -753,5 +753,5 @@ public interface IAdsConnection
     /// walk cannot itself be interrupted, only the caller's wait for it (see its remarks).
     /// </para>
     /// </remarks>
-    Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct);
+    Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct = default);
 }

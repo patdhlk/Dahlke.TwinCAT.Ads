@@ -115,5 +115,5 @@ public interface IPlcAlarmMonitor
     /// <exception cref="TimeoutException">
     /// The per-target timeout elapsed before the acknowledgement completed.
     /// </exception>
-    Task<bool> AcknowledgeAsync(string plcId, string alarmKey, CancellationToken ct);
+    Task<bool> AcknowledgeAsync(string plcId, string alarmKey, CancellationToken ct = default);
 }

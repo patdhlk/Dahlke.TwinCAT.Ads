@@ -1,1 +1,2 @@
 #nullable enable
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.AcknowledgeAsync(string! plcId, string! alarmKey, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!

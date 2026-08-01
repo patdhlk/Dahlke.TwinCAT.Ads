@@ -117,7 +117,7 @@ public interface IAdsRawChannel
     /// <exception cref="OperationCanceledException"><paramref name="ct"/> was cancelled.</exception>
     /// <exception cref="TimeoutException">Every attempt exceeded its bound.</exception>
     /// <exception cref="AdsConnectionUnavailableException">The transport could not be opened.</exception>
-    Task<int> ReadAsync(uint indexGroup, uint indexOffset, Memory<byte> destination, CancellationToken ct);
+    Task<int> ReadAsync(uint indexGroup, uint indexOffset, Memory<byte> destination, CancellationToken ct = default);
 
     /// <inheritdoc cref="ReadAsync(uint, uint, Memory{byte}, CancellationToken)"/>
     /// <param name="indexGroup">Index group to read from.</param>
@@ -125,7 +125,7 @@ public interface IAdsRawChannel
     /// <param name="destination">Buffer the response is copied into.</param>
     /// <param name="timeout">Overrides <see cref="AdsRawChannelOptions.TimeoutMs"/> for THIS ATTEMPT.</param>
     /// <param name="ct">Cancels the operation.</param>
-    Task<int> ReadAsync(uint indexGroup, uint indexOffset, Memory<byte> destination, TimeSpan timeout, CancellationToken ct);
+    Task<int> ReadAsync(uint indexGroup, uint indexOffset, Memory<byte> destination, TimeSpan timeout, CancellationToken ct = default);
 
     /// <summary>Writes <paramref name="source"/> using the configured timeout.</summary>
     /// <param name="indexGroup">Index group to write to.</param>
@@ -135,7 +135,7 @@ public interface IAdsRawChannel
     /// <exception cref="AdsErrorException">The device answered with an error code.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="ct"/> was cancelled.</exception>
     /// <exception cref="TimeoutException">Every attempt exceeded its bound.</exception>
-    Task WriteAsync(uint indexGroup, uint indexOffset, ReadOnlyMemory<byte> source, CancellationToken ct);
+    Task WriteAsync(uint indexGroup, uint indexOffset, ReadOnlyMemory<byte> source, CancellationToken ct = default);
 
     /// <inheritdoc cref="WriteAsync(uint, uint, ReadOnlyMemory{byte}, CancellationToken)"/>
     /// <param name="indexGroup">Index group to write to.</param>
@@ -143,7 +143,7 @@ public interface IAdsRawChannel
     /// <param name="source">Payload to write.</param>
     /// <param name="timeout">Overrides the configured timeout for THIS ATTEMPT.</param>
     /// <param name="ct">Cancels the operation.</param>
-    Task WriteAsync(uint indexGroup, uint indexOffset, ReadOnlyMemory<byte> source, TimeSpan timeout, CancellationToken ct);
+    Task WriteAsync(uint indexGroup, uint indexOffset, ReadOnlyMemory<byte> source, TimeSpan timeout, CancellationToken ct = default);
 
     /// <summary>
     /// Writes <paramref name="source"/> and reads the response in ONE round trip
@@ -162,7 +162,7 @@ public interface IAdsRawChannel
     /// <returns>The number of bytes actually read.</returns>
     Task<int> ReadWriteAsync(
         uint indexGroup, uint indexOffset,
-        Memory<byte> destination, ReadOnlyMemory<byte> source, CancellationToken ct);
+        Memory<byte> destination, ReadOnlyMemory<byte> source, CancellationToken ct = default);
 
     /// <inheritdoc cref="ReadWriteAsync(uint, uint, Memory{byte}, ReadOnlyMemory{byte}, CancellationToken)"/>
     /// <param name="indexGroup">Index group of the service.</param>
@@ -173,7 +173,7 @@ public interface IAdsRawChannel
     /// <param name="ct">Cancels the operation.</param>
     Task<int> ReadWriteAsync(
         uint indexGroup, uint indexOffset,
-        Memory<byte> destination, ReadOnlyMemory<byte> source, TimeSpan timeout, CancellationToken ct);
+        Memory<byte> destination, ReadOnlyMemory<byte> source, TimeSpan timeout, CancellationToken ct = default);
 
     /// <summary>Reads the target's ADS and device state.</summary>
     /// <remarks>
@@ -184,7 +184,7 @@ public interface IAdsRawChannel
     /// </remarks>
     /// <param name="ct">Cancels the operation.</param>
     /// <returns>The target's ADS state and device state word.</returns>
-    Task<StateInfo> ReadStateAsync(CancellationToken ct);
+    Task<StateInfo> ReadStateAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Subscribes to device notifications for the given index group and offset.
@@ -278,5 +278,5 @@ public interface IAdsRawChannel
     /// </remarks>
     Task<IDisposable> SubscribeAsync(
         uint indexGroup, uint indexOffset, int length,
-        int cycleTimeMs, RawNotificationHandler handler, CancellationToken ct);
+        int cycleTimeMs, RawNotificationHandler handler, CancellationToken ct = default);
 }
