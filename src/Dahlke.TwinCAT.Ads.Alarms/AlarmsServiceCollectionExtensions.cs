@@ -104,6 +104,56 @@ public static class AlarmsServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Registers <typeparamref name="THandler"/> to receive every alarm transition, resolved by
+    /// the monitor before it subscribes to anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the seam to prefer over <see cref="IPlcAlarmMonitor.AlarmChanged"/>. The monitor
+    /// registers its subscriptions during host startup and the PLC's first snapshot follows
+    /// immediately, so an event handler has to be attached before the host starts — which DI
+    /// cannot express, and which silently costs the consumer every alarm the PLC was already
+    /// holding when they get it wrong. A handler registered here is resolved as the first step
+    /// of the monitor's own startup and cannot be too late.
+    /// </para>
+    /// <para>
+    /// Registered as a singleton, because the monitor is one and resolves these from the root
+    /// provider; a handler needing per-transition scoped services should inject
+    /// <see cref="IServiceScopeFactory"/> and open its own scope. Call order relative to
+    /// <see cref="AddTwinCatAdsAlarms"/> does not matter — nothing is resolved until the host
+    /// starts. Registering the same handler TYPE twice is idempotent rather than a way to be
+    /// called twice; register two distinct types to be called twice.
+    /// </para>
+    /// <para>
+    /// <see cref="IPlcAlarmHandler"/> is an ordinary enumerable seam, so a handler needing
+    /// construction arguments can equally be registered with
+    /// <c>services.AddSingleton&lt;IPlcAlarmHandler&gt;(sp =&gt; new PagerNotifier(...))</c>.
+    /// The monitor collects whatever is registered, however it got there.
+    /// </para>
+    /// <para>
+    /// Read <see cref="IPlcAlarmHandler"/> before writing one: it is invoked on the ADS
+    /// notification thread and awaited, so a slow handler delays that target's next snapshot.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="THandler">The handler to register.</typeparam>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="services"/> is <see langword="null"/>.
+    /// </exception>
+    public static IServiceCollection AddAlarmHandler<THandler>(this IServiceCollection services)
+        where THandler : class, IPlcAlarmHandler
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        // TryAddEnumerable, not Add: it dedupes on (service type, implementation type), so a
+        // library that registers its own handler and an application that registers the same one
+        // defensively produce one delivery rather than two. Doubling an alarm notification is
+        // not a harmless duplicate — it is a second page, or a second ticket.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IPlcAlarmHandler, THandler>());
+
+        return services;
+    }
+
+    /// <summary>
     /// Anchors a relative <see cref="PlcAlarmsOptions.TextCatalog"/> to the host's content
     /// root, leaving an absolute path exactly as configured.
     /// </summary>

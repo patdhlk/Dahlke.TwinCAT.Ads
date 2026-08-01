@@ -14,6 +14,14 @@ namespace Dahlke.TwinCAT.Ads.Alarms;
 /// Until then it reports no alarms.
 /// </para>
 /// <para>
+/// <b>Prefer <see cref="IPlcAlarmHandler"/> to <see cref="AlarmChanged"/>.</b> Subscriptions
+/// open during host startup and the PLC's first snapshot follows immediately, so an event
+/// handler attached after <c>StartAsync</c> misses every alarm the PLC was already holding —
+/// silently. A handler registered with <c>AddAlarmHandler</c> is resolved before the monitor
+/// subscribes to anything and cannot be attached too late. <see cref="AlarmChanged"/> stays
+/// for consumers who want the event and will attach it before starting the host.
+/// </para>
+/// <para>
 /// <b>Ordering.</b> Transitions for one target are delivered in the order they were
 /// computed, so a consumer folding the stream into its own state never sees, say, a
 /// <c>Raised</c> arrive after the <c>Ended</c> that followed it. This is guaranteed per
@@ -55,9 +63,19 @@ public interface IPlcAlarmMonitor
 
     /// <summary>Raised for every alarm state change.</summary>
     /// <remarks>
+    /// <para>
+    /// <b>Attach this before starting the host</b>, or the first snapshot is gone before you
+    /// are listening. <see cref="IPlcAlarmHandler"/> removes that ordering requirement rather
+    /// than documenting it, and is the better default for anything registered through DI.
+    /// </para>
+    /// <para>
     /// Handlers are isolated from one another — a handler that throws is logged and does
-    /// not stop delivery to the handlers registered after it. See the type-level
-    /// threading remarks for how this differs from <see cref="Transitions"/>.
+    /// not stop delivery to the handlers registered after it. That isolation does NOT survive
+    /// <c>async void</c>: such a handler returns at its first <c>await</c> and anything it
+    /// throws afterwards escapes onto the thread pool, out of reach. Implement
+    /// <see cref="IPlcAlarmHandler"/> instead of reaching for <c>async void</c> here. See the
+    /// type-level threading remarks for how this differs from <see cref="Transitions"/>.
+    /// </para>
     /// </remarks>
     event EventHandler<AlarmTransition>? AlarmChanged;
 

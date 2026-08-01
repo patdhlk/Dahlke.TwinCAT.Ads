@@ -341,15 +341,11 @@ A target absent from `PlcAlarms:Targets` is simply not monitored — the package
 ```csharp
 builder.Services
     .AddTwinCatAds(builder.Configuration)
-    .AddTwinCatAdsAlarms(builder.Configuration);
+    .AddTwinCatAdsAlarms(builder.Configuration)
+    .AddAlarmHandler<PagerNotifier>();
 
 var app = builder.Build();
 var monitor = app.Services.GetRequiredService<IPlcAlarmMonitor>();
-
-// Attach handlers BEFORE starting the host: the monitor is a hosted service, so it
-// registers its subscription during startup and the PLC's first snapshot follows
-// immediately — a handler attached afterwards can miss it.
-monitor.AlarmChanged += (_, t) => Console.WriteLine($"{t.Kind}: {t.Alarm.Key}");
 
 await app.StartAsync();
 
@@ -361,7 +357,20 @@ foreach (var alarm in monitor.GetOutstanding())
 await monitor.AcknowledgeAsync("plc1", "BMK1Err404");
 
 await app.WaitForShutdownAsync();
+
+sealed class PagerNotifier(ILogger<PagerNotifier> log) : IPlcAlarmHandler
+{
+    public Task OnTransitionAsync(AlarmTransition t, CancellationToken ct)
+    {
+        log.LogWarning("{Kind}: {Key}", t.Kind, t.Alarm.Key);
+        return Task.CompletedTask;
+    }
+}
 ```
+
+**Register handlers with `AddAlarmHandler`, not `AlarmChanged`.** The monitor is a hosted service: it registers its subscriptions during startup, and ADS delivers one notification per subscription *as that subscription is registered* — so the whole outstanding set arrives inside `StartAsync`. An `AlarmChanged` handler therefore has to be attached before the host starts, which DI cannot express and which fails silently when you get it wrong: every alarm the PLC was already holding at boot simply never reaches you. A handler registered with `AddAlarmHandler` is resolved as the first step of the monitor's own startup, before any subscription exists, so being too late is not a mistake it is possible to make. `AlarmChanged` remains for consumers who want the event and will attach it before `StartAsync`.
+
+`IPlcAlarmHandler.OnTransitionAsync` returns a `Task`, but that does not mean it returns immediately: the monitor **awaits it** before publishing anything else, which is what buys per-target ordering. The contract is the same as for `AlarmChanged` — be quick and hand the work off. What the `Task` buys is that a handler with genuinely asynchronous work no longer has to write `async void`, whose exceptions escape the monitor's isolation after the first `await`. The `CancellationToken` is cancelled at shutdown; pass it along to anything slow. Handlers are singletons — open a scope with `IServiceScopeFactory` if a transition needs scoped services — and are isolated from one another exactly as `AlarmChanged` handlers are.
 
 **An alarm is outstanding while its fault is present OR it still awaits acknowledgement.** A PLC alarm array is fixed-size with permanent slots — an alarm ends by `IsActive := FALSE`, never by leaving the array — and when `NeedsAck` is set the entry outlives its fault condition until an operator acknowledges it. So a fault that self-clears before anyone looks still reaches you, `Cleared` marks the fault ending while the alarm stays outstanding, and `Ended` fires only once the alarm is genuinely finished.
 
@@ -377,7 +386,7 @@ await app.WaitForShutdownAsync();
 
 **Transitions for one target arrive in the order they were computed**, so a consumer folding the stream into its own state never sees a `Raised` land after the `Ended` that followed it. That ordering is bought by holding the target's lock across delivery, which means **a handler that blocks delays that target's next snapshot** — do the minimum on the notification thread and hand the work off. Ordering is per target, not across targets.
 
-`AlarmChanged` and `Transitions` treat a throwing consumer differently, on purpose. `AlarmChanged` handlers are isolated from one another: a handler that throws is logged and the remaining handlers still receive that transition. `Transitions` is an ordinary `IObservable<AlarmTransition>` and follows the standard Rx contract — throwing from `OnNext` is an observer bug, and a subscriber that throws can starve the subscribers after it for that transition. Either way the exception never escapes onto the notification thread, and the next transition is still delivered.
+`IPlcAlarmHandler`/`AlarmChanged` and `Transitions` treat a throwing consumer differently, on purpose. Registered handlers and `AlarmChanged` handlers are isolated from one another: one that throws is logged and the rest still receive that transition. `Transitions` is an ordinary `IObservable<AlarmTransition>` and follows the standard Rx contract — throwing from `OnNext` is an observer bug, and a subscriber that throws can starve the subscribers after it for that transition. Either way the exception never escapes onto the notification thread, and the next transition is still delivered.
 
 **A shape mismatch is loud, but not fatal.** If the PLC's `ST_ErrorEntry` stops matching what the package binds, it throws `PlcAlarmShapeException` naming the member and the symbol path rather than degrading to defaults — a silently wrong alarm list is worse than an absent one. That snapshot is dropped whole and logged at `Error`, the outstanding set keeps its last good reading, and the subscription survives to recover on the next well-formed notification. The report is **once per outage, not once per notification** — a mismatch is a property of the PLC's type and would otherwise repeat at cycle rate for as long as the fault lasts. Further failures are counted silently; when a notification binds again the monitor says so at `Information` and names how many failed in between, and a fault that recurs after a recovery is reported in full again.
 

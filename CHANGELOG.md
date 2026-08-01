@@ -201,6 +201,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime failures remain possible; what changes is that there is exactly one place per symbol to
   correct when they happen.
 
+- **`IPlcAlarmHandler` — an alarm handler that cannot be attached too late.**
+  ([#44](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/44)) The alarms README used to say
+  the quiet part out loud: attach `AlarmChanged` BEFORE starting the host, because the monitor is
+  a hosted service and the PLC's first snapshot follows registration immediately. That is an
+  accurate description of an ordering trap, and documenting a trap is worth less than removing
+  it. DI cannot express "resolve this singleton and mutate it before the host starts", so the
+  consumer had to know; and the failure when they did not was silent — alarms already outstanding
+  at boot never reached their handler, on the one code path nobody tests because it needs a PLC
+  that is already faulted when the process starts.
+
+  ```csharp
+  builder.Services
+      .AddTwinCatAdsAlarms(builder.Configuration)
+      .AddAlarmHandler<PagerNotifier>();
+
+  sealed class PagerNotifier(IPagerGateway gateway) : IPlcAlarmHandler
+  {
+      public Task OnTransitionAsync(AlarmTransition t, CancellationToken ct) =>
+          gateway.EnqueueAsync(t, ct);
+  }
+  ```
+
+  `PlcAlarmMonitor` resolves every registered handler as the FIRST step of its own `StartAsync`,
+  before a single subscription exists, so a handler registered this way is structurally incapable
+  of missing that first snapshot. `AlarmChanged` is unchanged and stays for consumers who want the
+  event; its ordering caveat now applies only to it.
+
+  **The `Task` return does not mean "returns immediately".** The monitor awaits each handler
+  before publishing anything else, because per-target ordering is bought by not releasing that
+  target's lock until delivery is done — fire-and-forget would hand a handler `Raised` after the
+  `Ended` that followed it. The contract is exactly `AlarmChanged`'s: be quick, hand the work off.
+  What the `Task` buys is that a handler with genuinely asynchronous work no longer has to write
+  `async void`, which returns at its first `await` and throws the monitor's isolation away with
+  it — anything such a handler threw after that point escaped onto the thread pool. A faulted
+  `Task` is caught wherever it came from.
+
+  Handlers are singletons, isolated from one another the way `AlarmChanged` handlers already were
+  (one that throws is logged at Warning and the rest still receive that transition), and are given
+  a `CancellationToken` that is cancelled at shutdown so a slow one does not hold up `StopAsync`.
+  Registering the same handler type twice is idempotent rather than a way to be paged twice.
+  `IPlcAlarmHandler` is an ordinary enumerable seam, so a handler needing constructor arguments
+  can be registered with a plain `AddSingleton<IPlcAlarmHandler>(sp => ...)`.
+
+### Changed
+
+- **Dependency version policy is now stated, and the Microsoft.Extensions references follow it.**
+  ([#45](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/45)) `Beckhoff.TwinCAT.Ads` was
+  bracketed with eight lines of reasoning while `Microsoft.Extensions.*` floated on `8.*` directly
+  beneath it, with nothing saying whether the difference was reasoned or accidental. It was
+  reasoned, and the reasoning now lives in `Directory.Build.props` where both halves can be read
+  together: **a ceiling only works on a package nothing else in the consumer's graph references.**
+  Beckhoff is a leaf, so its ceiling costs a consumer nothing worse than a restore error a
+  maintainer can evaluate. ASP.NET Core references `Microsoft.Extensions.*` directly, so the same
+  bracket would be an unresolvable conflict for any net9 or net10 web app — breaking working
+  consumers rather than protecting them, and unfixable from their end.
+
+  Two things changed as a result. The floors are **fixed rather than floating**: `8.*` packs as
+  ">= whatever nuget.org held on the day the release ran", which made the declared floor of a
+  shipped package a function of build timing — the opposite of what `Deterministic` and
+  `ContinuousIntegrationBuild` are there to buy. And they are now **per target framework**, so the
+  net9 and net10 legs declare 9.0.0 and 10.0.0 instead of handing a net10 consumer 8.x
+  abstractions unless something else in their graph lifted them.
+
+  Nothing here raises a floor a consumer must meet: net8 still floors at 8.0.0. `System.Reactive`
+  floors at 6.1.0 rather than 6.0.0 because `Beckhoff.TwinCAT.Ads` 7.0.292 itself requires it —
+  a floor is the lowest version that resolves, not the lowest that compiles.
+
 ### Deprecated
 
 - **`GetSymbolsAsync(parentPath, ct)` is deprecated in favour of `GetSymbolTreeAsync`.**
@@ -228,6 +295,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The internal `IManagedConnection` seam member was renamed alongside it, so the same misleading
   name does not survive one layer down.
+
+### Fixed
+
+- **The embedded router's ready signal no longer hangs the host when startup is cancelled, on
+  .NET 10.** Found while making the net10 leg actually reference `Microsoft.Extensions.*` 10.x
+  (above), which is what a net10 consumer has been getting all along whenever their own graph
+  lifted it — every ASP.NET Core 10 app. `AdsRouterService.ExecuteAsync` resolves its
+  `AdsRouterReadySignal` on every exit, which was a complete guarantee only for as long as
+  `BackgroundService` always invoked it. From `Microsoft.Extensions.Hosting.Abstractions` 10.0.0
+  it does not: `StartAsync` short-circuits on an already-cancelled token and leaves `ExecuteTask`
+  Canceled without ever calling `ExecuteAsync`. The signal then stayed pending forever and every
+  pool loop awaiting it waited with it — so a shutdown requested *during* startup, exactly when a
+  host has least slack, hung instead of unwinding. `StartAsync` is now overridden to resolve the
+  signal when the token is cancelled; it is a no-op on every version that does run `ExecuteAsync`.
+
+  Two further differences in that release are behaviour, not defects, and are now pinned by tests
+  rather than left to be rediscovered: `BackgroundService.StopAsync` no longer waits for
+  `ExecuteAsync` to finish, and the configuration binder treats `"Port": null` in a
+  `RawChannels:Seed` entry as "leave the default" (binding `0`) rather than as an unconvertible
+  value that drops the element and fails startup. The second is a real net8/net10 divergence in
+  this package with no fix available short of making `Port` nullable — a breaking change to the
+  configuration surface — so it is asserted on both sides instead of quietly differing.
 
 ## [0.8.0] - 2026-08-01
 

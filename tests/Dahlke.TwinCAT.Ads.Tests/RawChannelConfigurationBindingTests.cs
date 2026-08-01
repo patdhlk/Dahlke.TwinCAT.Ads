@@ -490,8 +490,14 @@ public class RawChannelConfigurationBindingTests
     /// have quietly proved the wrong thing.
     /// </para>
     /// </remarks>
+    /// <remarks>
+    /// <para>
+    /// A JSON <c>null</c> used to belong here and no longer does — it is
+    /// <see cref="SeedEntryWithANullPortInJson_BindsToZeroFrom10_0_0"/> instead, because the
+    /// binder stopped treating it as an unconvertible empty string in 10.0.0.
+    /// </para>
+    /// </remarks>
     [Theory]
-    [InlineData("null")]
     [InlineData("\"\"")]
     [InlineData("\"typo\"")]
     public void SeedEntryWithAnUnconvertiblePortInJson_FailsAtStartup(string portLiteral)
@@ -582,9 +588,77 @@ public class RawChannelConfigurationBindingTests
 
         var ex = Assert.Throws<OptionsValidationException>(() => _ = options.Value);
 
+        // WHICH failure fires depends on the configuration binder's major version, and both
+        // readings are correct. Binder 8.0.0 binds a scalar element where an object belongs to
+        // a DEFAULT-VALUED element, so the counts agree, the discard check stays quiet, and the
+        // per-element rules reject it by index and member instead. From 9.0.0 the same element
+        // is DROPPED, and the discard check reports the shortfall. Measured across all three
+        // legs of this repository's target frameworks, which now reference the matching major.
+        //
+        // Asserting on either message would pass on one framework and fail on another while the
+        // library behaved correctly on both. What must hold everywhere is the guarantee this
+        // section exists for: the host FAILS AT STARTUP naming the offending path, rather than
+        // starting with a slot silently missing from the seeded target.
+        Assert.Contains(ex.Failures, f => f.Contains("RawChannels:Seed:0"));
+    }
+
+    /// <summary>
+    /// <c>"Port": null</c> stopped being a startup failure in
+    /// <c>Microsoft.Extensions.Configuration.Binder</c> 10.0.0, and this pins BOTH readings so
+    /// the change cannot pass unnoticed on either.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Through 9.x the JSON provider represents a JSON <c>null</c> as an EMPTY STRING, which
+    /// fails to convert to <see cref="int"/> and drops the whole element — caught by the
+    /// discard check, so the host fails at startup. From 10.0.0 the binder skips the property
+    /// instead and <see cref="AdsRawChannelSeed.Port"/> keeps its default of <c>0</c>: nothing
+    /// is dropped, the counts agree, and <c>0</c> is inside the documented 0-65535 range, so
+    /// there is nothing left for the validator to object to and the host starts.
+    /// </para>
+    /// <para>
+    /// <b>Written down rather than fixed</b>, because <c>0</c> is a legal value of a
+    /// non-nullable <see cref="int"/> and no rule this side of the binder can tell "the operator
+    /// wrote null" from "the operator wrote 0". Making it detectable would mean making
+    /// <c>Port</c> nullable, which is a breaking change to the configuration surface and wants
+    /// deciding on its own merits. The practical exposure is small — <c>"Port": null</c> is a
+    /// typo, not an idiom — but it IS a real difference between running this package on net8 and
+    /// on net10, and a silent one, which is why it is asserted rather than left to be discovered.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void SeedEntryWithANullPortInJson_BindsToZeroFrom10_0_0()
+    {
+        var json = """
+            {
+              "PlcTargets": { "plc1": { "AmsNetId": "1.2.3.4.5.6" } },
+              "RawChannels": {
+                "Mode": "Simulated",
+                "Seed": [ { "AmsNetId": "1.2.3.4.5.6", "Port": null } ]
+              }
+            }
+            """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var configuration = new ConfigurationBuilder().AddJsonStream(stream).Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAds(configuration);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<TwinCatAdsOptions>>();
+
+#if NET10_0_OR_GREATER
+        var seed = Assert.Single(options.Value.RawChannels.Seed);
+        Assert.Equal(0, seed.Port);
+#else
+        var ex = Assert.Throws<OptionsValidationException>(() => _ = options.Value);
+
         Assert.Contains(
             ex.Failures,
-            f => f.Contains("RawChannels:Seed:0:Slots") && f.Contains("DISCARDED"));
+            f => f.Contains("RawChannels:Seed") && f.Contains("DISCARDED"));
+#endif
     }
 
     /// <summary>
