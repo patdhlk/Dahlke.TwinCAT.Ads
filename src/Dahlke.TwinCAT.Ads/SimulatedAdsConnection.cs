@@ -683,6 +683,125 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     void IManagedConnection.ForceDisconnect() { }
     void IManagedConnection.LogSymbolTree(SymbolDumpOptions options) { }
 
+    // =========================================================================
+    // IManagedConnection operational surface — the pool's seam
+    // =========================================================================
+
+    /// <remarks>
+    /// <para>
+    /// <b>Why these are explicit, and why they all discard <c>timeout</c>.</b> The pool's seam
+    /// carries a per-call timeout override (see <see cref="IManagedConnection"/>) that the
+    /// consumer contract does not, so the two signatures differ by exactly that parameter.
+    /// Implementing the seam explicitly keeps it off this type's PUBLIC surface: a consumer
+    /// holding a <see cref="SimulatedAdsConnection"/> directly — a documented testing pattern —
+    /// sees the same members they would see on <see cref="IAdsConnection"/>, and no
+    /// <c>TimeSpan?</c>-taking twin appears beside each one.
+    /// </para>
+    /// <para>
+    /// The override is discarded because a simulated operation has no bound to override. Every
+    /// one of them completes against an in-memory store without I/O, so no timeout can elapse
+    /// and none is armed in the first place — the simulated connection has never honoured
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> either. What a scope still governs for a
+    /// simulated TARGET is the facade's wait for a connection, which the facade applies itself
+    /// before it ever reaches this type. Cancellation is unaffected and still observed here.
+    /// </para>
+    /// </remarks>
+    Task<T> IManagedConnection.ReadValueAsync<T>(string symbolPath, CancellationToken ct, TimeSpan? timeout)
+        => ReadValueAsync<T>(symbolPath, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<object?> IManagedConnection.ReadValueAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout)
+        => ReadValueAsync(symbolPath, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<AdsValueResult> IManagedConnection.ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout)
+        => ReadValueWithMetadataAsync(symbolPath, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task IManagedConnection.WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct, TimeSpan? timeout)
+        => WriteValueAsync(symbolPath, value, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task IManagedConnection.WriteValueAsync(string symbolPath, object value, CancellationToken ct, TimeSpan? timeout)
+        => WriteValueAsync(symbolPath, value, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyDictionary<string, AdsValueResult>> IManagedConnection.ReadValuesAsync(
+        IEnumerable<string> symbolPaths, CancellationToken ct, TimeSpan? timeout)
+        => ReadValuesAsync(symbolPaths, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyDictionary<string, AdsValueResult>> IManagedConnection.WriteValuesAsync(
+        IReadOnlyDictionary<string, object?> values, CancellationToken ct, TimeSpan? timeout)
+        => WriteValuesAsync(values, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<AdsRpcResult> IManagedConnection.InvokeRpcMethodAsync(
+        string symbolPath, string methodName, object?[] parameters, CancellationToken ct, TimeSpan? timeout)
+        => InvokeRpcMethodAsync(symbolPath, methodName, parameters, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyList<AdsEnumMember>> IManagedConnection.GetEnumMembersAsync(
+        string typeName, CancellationToken ct, TimeSpan? timeout)
+        => GetEnumMembersAsync(typeName, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<AdsState> IManagedConnection.GetAdsStateAsync(CancellationToken ct, TimeSpan? timeout)
+        => GetAdsStateAsync(ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<AdsDeviceInfo> IManagedConnection.GetDeviceInfoAsync(CancellationToken ct, TimeSpan? timeout)
+        => GetDeviceInfoAsync(ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task IManagedConnection.WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct, TimeSpan? timeout)
+        => WriteControlAsync(state, deviceState, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IDisposable> IManagedConnection.SubscribeAsync(
+        string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct, TimeSpan? timeout)
+        => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IDisposable> IManagedConnection.SubscribeAsync<T>(
+        string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct, TimeSpan? timeout)
+        where T : default
+        => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IDisposable> IManagedConnection.SubscribeAsync(
+        string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct, TimeSpan? timeout)
+        => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyList<AdsSymbolInfo>> IManagedConnection.GetSymbolsAsync(
+        string? parentPath, CancellationToken ct, TimeSpan? timeout)
+        => GetSymbolsAsync(parentPath, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyList<AdsSymbolInfo>> IManagedConnection.GetSymbolsAsync(
+        string? parentPath, bool includeChildren, CancellationToken ct, TimeSpan? timeout)
+        => GetSymbolsAsync(parentPath, includeChildren, ct);
+
+    /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
+    Task<IReadOnlyList<AdsSymbolInfo>> IManagedConnection.SearchSymbolsAsync(
+        string pattern, bool includeChildren, CancellationToken ct, TimeSpan? timeout)
+        => SearchSymbolsAsync(pattern, includeChildren, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A simulated operation has no bound to shorten or lengthen — it completes against an
+    /// in-memory store without I/O — so a scope would change nothing observable here and this
+    /// returns the same instance. A simulated TARGET reached through the pool is a different
+    /// matter: there the consumer holds a facade, whose own <c>WithTimeout</c> returns a real
+    /// scope and does bound the wait for a connection.
+    /// </remarks>
+    public IAdsConnection WithTimeout(TimeSpan timeout)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+        return this;
+    }
+
     /// <summary>
     /// Disposes the simulated connection. A no-op: the in-memory store and subscriber
     /// lists hold no unmanaged resources.

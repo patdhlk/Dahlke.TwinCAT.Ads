@@ -469,6 +469,9 @@ public class PlcAlarmMonitorConcurrencyTests
 
         public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
+        /// <summary>Not exercised here: this double tests behaviour no timeout scope changes.</summary>
+        public IAdsConnection WithTimeout(TimeSpan timeout) => this;
+
         public void RaiseConnected() => ConnectionStateChanged?.Invoke(
             this,
             new ConnectionStateChangedEventArgs(

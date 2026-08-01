@@ -89,7 +89,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
 
     // ---- Reads -----------------------------------------------------------
 
-    public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct)
+    public Task<T> ReadValueAsync<T>(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -101,7 +101,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
         return Task.FromResult(AdsValueConverter.ConvertForRead<T>(stored, symbolPath));
     }
 
-    public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct)
+    public Task<object?> ReadValueAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
         _store.TryRead(symbolPath, out var value);
@@ -116,7 +116,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// directly (like <see cref="AdsValueConverter"/> above) because it IS the documented mapping
     /// spec, not something to re-implement and risk drifting from.
     /// </summary>
-    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct)
+    public Task<AdsValueResult> ReadValueWithMetadataAsync(string symbolPath, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -131,10 +131,10 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
 
     // ---- Writes ----------------------------------------------------------
 
-    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct)
+    public Task WriteValueAsync<T>(string symbolPath, T value, CancellationToken ct, TimeSpan? timeout = null)
         => WriteValueAsync(symbolPath, (object)value!, ct);
 
-    public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct)
+    public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
         if (_store.Write(symbolPath, value))
@@ -144,7 +144,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
 
     // ---- Batch -----------------------------------------------------------
 
-    public Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct)
+    public Task<IReadOnlyDictionary<string, AdsValueResult>> ReadValuesAsync(IEnumerable<string> symbolPaths, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
         var results = new Dictionary<string, AdsValueResult>();
@@ -164,7 +164,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
         return Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(results);
     }
 
-    public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct)
+    public Task<IReadOnlyDictionary<string, AdsValueResult>> WriteValuesAsync(IReadOnlyDictionary<string, object?> values, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
         var results = new Dictionary<string, AdsValueResult>();
@@ -186,7 +186,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
         return Task.FromResult<IReadOnlyDictionary<string, AdsValueResult>>(results);
     }
 
-    public Task<AdsState> GetAdsStateAsync(CancellationToken ct)
+    public Task<AdsState> GetAdsStateAsync(CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(_adsState);
@@ -199,7 +199,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// nothing is the exact defect the RPC surface exists to prevent, so the refusal is loud and
     /// names the path and method rather than returning an empty result.
     /// </summary>
-    public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct)
+    public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct, TimeSpan? timeout = null)
     {
         ArgumentNullException.ThrowIfNull(symbolPath);
         ArgumentNullException.ThrowIfNull(methodName);
@@ -217,7 +217,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// this double has no PLC type system and no seedable enum-metadata table, so it refuses
     /// rather than returning a plausible-looking empty list.
     /// </summary>
-    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct)
+    public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct, TimeSpan? timeout = null)
     {
         ArgumentNullException.ThrowIfNull(typeName);
         ct.ThrowIfCancellationRequested();
@@ -234,7 +234,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// suite exercises this double's <c>WriteControlAsync</c>-then-<c>GetAdsStateAsync</c>
     /// round-trip via <see cref="AdsConnectionFacade"/>.
     /// </summary>
-    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct)
+    public Task WriteControlAsync(AdsState state, ushort deviceState, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
         _adsState = state;
@@ -246,7 +246,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// identity semantics — a well-formed, recognisably-not-real name and version, since this
     /// double has no PLC runtime to read from.
     /// </summary>
-    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct)
+    public Task<AdsDeviceInfo> GetDeviceInfoAsync(CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(new AdsDeviceInfo("In-Memory ADS Device", "0.0.0"));
@@ -254,13 +254,13 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
 
     // ---- Subscriptions ---------------------------------------------------
 
-    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct)
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(_subscribers.Subscribe(symbolPath, callback));
     }
 
-    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct = default)
+    public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct, TimeSpan? timeout = null)
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, logger: null), ct);
 
     /// <summary>
@@ -271,7 +271,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// this double has no PLC clock. Genuinely implemented — the shared contract suite subscribes
     /// through the facade to THIS overload and asserts all four fields.
     /// </summary>
-    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct)
+    public Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct, TimeSpan? timeout = null)
         => SubscribeAsync(
             symbolPath,
             cycleTimeMs,
@@ -291,18 +291,18 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// <see cref="SimulatedAdsConnection.InferPlcType"/>, which is reused directly as the
     /// documented mapping spec.
     /// </summary>
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
         => GetSymbolsAsync(parentPath, includeChildren: true, ct);
 
     /// <inheritdoc cref="GetSymbolsAsync(string?, CancellationToken)"/>
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(SimulatedSymbolTree.GetSymbols(_store, parentPath, includeChildren));
     }
 
     /// <inheritdoc cref="GetSymbolsAsync"/>
-    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct)
+    public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(SimulatedSymbolTree.Search(_store, pattern, includeChildren));

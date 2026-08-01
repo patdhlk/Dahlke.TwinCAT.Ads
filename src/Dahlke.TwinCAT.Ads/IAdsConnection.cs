@@ -87,6 +87,67 @@ public interface IAdsConnection
     event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
     /// <summary>
+    /// Returns a view of this connection whose operations are bounded by
+    /// <paramref name="timeout"/> instead of the target's configured
+    /// <see cref="PlcTargetOptions.TimeoutMs"/>.
+    /// </summary>
+    /// <param name="timeout">
+    /// The bound for each operation performed through the returned view. Must be greater than
+    /// <see cref="TimeSpan.Zero"/>.
+    /// </param>
+    /// <returns>
+    /// A scoped connection sharing this one's identity, state, event and underlying transport.
+    /// It is a lightweight view, not a second connection: nothing is opened, nothing needs
+    /// disposing, and it is cheap enough to build inline at a call site.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="timeout"/> is zero or negative.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this exists.</b> <see cref="PlcTargetOptions.TimeoutMs"/> is per TARGET, so a single
+    /// slow symbol, a long-running RPC or a large struct decode could only be accommodated by
+    /// raising the bound for every operation on that PLC. This scopes the change to the calls
+    /// that need it:
+    /// <code>
+    /// var slow = conn.WithTimeout(TimeSpan.FromSeconds(30));
+    /// var value = await slow.ReadValueAsync&lt;float&gt;("GVL.BigStruct");
+    /// </code>
+    /// </para>
+    /// <para>
+    /// <b>It replaces BOTH configured bounds.</b> Operations that would otherwise use
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> and browses that would otherwise use
+    /// <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/> both use <paramref name="timeout"/>.
+    /// One scope therefore covers every operation the view performs rather than silently
+    /// exempting the slowest one — but note that a scope built for a quick read and then reused
+    /// for a browse SHORTENS the browse, which by default is allowed six times longer.
+    /// </para>
+    /// <para>
+    /// <b>It bounds the wait for a connection too.</b> The wait-then-throw contract is unchanged
+    /// in shape: an operation on a scoped view waits up to <paramref name="timeout"/> — not
+    /// <see cref="PlcTargetOptions.TimeoutMs"/> — for a connection before throwing
+    /// <see cref="AdsConnectionUnavailableException"/>. A long scope therefore also lengthens how
+    /// long that one call parks during an outage.
+    /// </para>
+    /// <para>
+    /// <b>Subscriptions.</b> The scope bounds the REGISTRATION call, which is the only part that
+    /// waits. A subscription registered through a scoped view is owned by the target exactly as
+    /// one registered through the unscoped connection is: it is equally durable across
+    /// reconnects, and the timeout does not follow it into the callbacks.
+    /// </para>
+    /// <para>
+    /// <b>Scopes compose by replacement, not by nesting.</b> Calling this on an already-scoped
+    /// view returns a view bounded by the NEW value; the previous one does not constrain it.
+    /// </para>
+    /// <para>
+    /// <b>Simulated targets.</b> A simulated operation has no bound to change — it completes
+    /// against an in-memory store without I/O — so only the wait-for-connection half is
+    /// observable there.
+    /// </para>
+    /// </remarks>
+    IAdsConnection WithTimeout(TimeSpan timeout);
+
+    /// <summary>
     /// Reads the current value of a PLC symbol and returns it as <typeparamref name="T"/>.
     /// </summary>
     /// <typeparam name="T">
