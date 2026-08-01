@@ -9,7 +9,11 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>Dahlke.TwinCAT.Ads</PackageId>
-    <Version>0.7.0</Version>
+    <!-- Placeholder. The release workflow packs with -p:Version from the git tag, so this
+         value only ever reaches a local `dotnet pack`. Holding a real version here just
+         let it drift: it still read 0.7.0 the day 0.8.0 shipped. Matches the Reactive and
+         Alarms packages, which have always carried the placeholder. -->
+    <Version>0.0.0-dev</Version>
     <Authors>Patrick Dahlke</Authors>
     <Description>Reusable TwinCAT ADS connection pool with health checks, reconnection, simulation mode, and ASP.NET Core integration.</Description>
     <PackageTags>TwinCAT;ADS;Beckhoff;PLC;Automation;IPC</PackageTags>
