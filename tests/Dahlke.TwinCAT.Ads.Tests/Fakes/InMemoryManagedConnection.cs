@@ -291,7 +291,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// <see cref="SimulatedAdsConnection.InferPlcType"/>, which is reused directly as the
     /// documented mapping spec.
     /// </summary>
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
         => GetSymbolsAsync(parentPath, includeChildren: true, ct);
 
     /// <inheritdoc cref="GetSymbolsAsync(string?, CancellationToken)"/>

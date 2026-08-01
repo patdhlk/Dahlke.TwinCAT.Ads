@@ -646,7 +646,7 @@ public class AdsConnectionFacadeTests
 
         // Never exercised: these routing tests assert read/write delegation only (see the strict
         // stub policy — real only where genuinely read).
-        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
         public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)

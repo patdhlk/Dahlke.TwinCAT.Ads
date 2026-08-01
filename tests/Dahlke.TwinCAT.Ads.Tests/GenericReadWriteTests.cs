@@ -494,7 +494,7 @@ public class GenericReadWriteTests
 
         // Never exercised: these facade-routing tests only assert typed/untyped read-write
         // delegation, not symbol browsing (see the strict stub policy — real only where read).
-        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
             => throw new NotSupportedException();
 
         public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)

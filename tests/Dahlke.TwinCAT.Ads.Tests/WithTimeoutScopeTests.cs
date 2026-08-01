@@ -86,7 +86,7 @@ public class WithTimeoutScopeTests
             ("SubscribeAsync", () => scoped.SubscribeAsync("MAIN.X", 100, (_, _) => { })),
             ("SubscribeAsync<T>", () => scoped.SubscribeAsync<int>("MAIN.X", 100, (_, _) => { })),
             ("SubscribeAsync(notification)", () => scoped.SubscribeAsync("MAIN.X", 100, (AdsNotification _) => { })),
-            ("GetSymbolsAsync", () => scoped.GetSymbolsAsync(null)),
+            ("GetSymbolTreeAsync", () => scoped.GetSymbolTreeAsync(null)),
             ("GetSymbolsAsync(includeChildren)", () => scoped.GetSymbolsAsync(null, false)),
             ("SearchSymbolsAsync", () => scoped.SearchSymbolsAsync("X", false)),
         };
@@ -317,7 +317,7 @@ public class WithTimeoutScopeTests
             string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct, TimeSpan? timeout = null)
             => Task.FromResult(Record(timeout, (IDisposable)new NoopDisposable()));
 
-        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
+        public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
             => Task.FromResult(Record(timeout, (IReadOnlyList<AdsSymbolInfo>)[]));
 
         public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(

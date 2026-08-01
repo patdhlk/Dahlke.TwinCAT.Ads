@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.0] - 2026-08-01
 
+### Deprecated
+
+- **`GetSymbolsAsync(parentPath, ct)` is deprecated in favour of `GetSymbolTreeAsync`.**
+  ([#41](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/41)) The two-argument overload has
+  always meant `includeChildren: true`, so the terse call projected the ENTIRE subtree — every
+  symbol on the PLC for a `null` parent, tens of thousands of `AdsSymbolInfo` objects on a large
+  program — while the cheap one-level browse needed the longer three-argument signature. That is
+  backwards: the call a consumer reaches for first, and writes while exploring, was the expensive
+  one. Making the token optional in this same release lowered the bar further, since
+  `GetSymbolsAsync(null)` now compiles.
+
+  Replace it with whichever was meant. Both are exact and neither is a silent change:
+
+  ```csharp
+  await conn.GetSymbolTreeAsync(parentPath);                          // same full-subtree result
+  await conn.GetSymbolsAsync(parentPath, includeChildren: false);     // one level, the cheap shape
+  ```
+
+  **The deprecated overload still behaves exactly as it always did** and will keep doing so until
+  it is removed — it warns, it does not change. That is the point of deprecating rather than
+  flipping the default: a flip would have left every call site compiling while silently changing
+  what it did, which is the failure mode with no compile error and no test failure. For the same
+  reason **no future version will reintroduce `GetSymbolsAsync(parentPath, ct)` as a one-level
+  browse**; the shape is being retired, not repurposed.
+
+  The internal `IManagedConnection` seam member was renamed alongside it, so the same misleading
+  name does not survive one layer down.
+
 ### Added
 
 - **The `CancellationToken` is optional on every async member.** `IAdsConnection`,

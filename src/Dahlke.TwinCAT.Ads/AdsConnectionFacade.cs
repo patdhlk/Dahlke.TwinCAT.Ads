@@ -560,14 +560,19 @@ internal sealed class AdsConnectionFacade : IAdsConnection
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct, timeout);
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
-        => GetSymbolsAsync(parentPath, ct, null);
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct)
+        => GetSymbolTreeAsync(parentPath, ct, null);
 
-    internal async Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout)
+    internal async Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout)
     {
         var conn = await SnapshotAsync(ct, timeout).ConfigureAwait(false);
-        return await conn.GetSymbolsAsync(parentPath, ct, timeout).ConfigureAwait(false);
+        return await conn.GetSymbolTreeAsync(parentPath, ct, timeout).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    [Obsolete("Use GetSymbolTreeAsync for the same behaviour, or GetSymbolsAsync(parentPath, includeChildren: false, ct) for one level.")]
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct)
+        => GetSymbolTreeAsync(parentPath, ct, null);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct)

@@ -643,7 +643,7 @@ public abstract class AdsConnectionContractTests
         await cts.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => h.Connection.GetSymbolsAsync(null, cts.Token));
+            () => h.Connection.GetSymbolTreeAsync(null, cts.Token));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => h.Connection.GetSymbolsAsync(null, includeChildren: false, cts.Token));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
@@ -672,7 +672,7 @@ public abstract class AdsConnectionContractTests
         await h.WriteRawAsync("MAIN.Speed", 1500);
         await h.WriteRawAsync("MAIN.Running", true);
 
-        var symbols = await h.Connection.GetSymbolsAsync(null, CancellationToken.None);
+        var symbols = await h.Connection.GetSymbolTreeAsync(null, CancellationToken.None);
 
         Assert.NotEmpty(symbols);
     }
@@ -692,7 +692,7 @@ public abstract class AdsConnectionContractTests
 
         var withChildren = await h.Connection.GetSymbolsAsync(null, includeChildren: true, CancellationToken.None);
         var withoutChildren = await h.Connection.GetSymbolsAsync(null, includeChildren: false, CancellationToken.None);
-        var byDefault = await h.Connection.GetSymbolsAsync(null, CancellationToken.None);
+        var byDefault = await h.Connection.GetSymbolTreeAsync(null, CancellationToken.None);
 
         // Same nodes at this level regardless of the flag.
         Assert.Equal(
@@ -716,7 +716,7 @@ public abstract class AdsConnectionContractTests
         await using var h = await CreateHarnessAsync();
 
         var ex = await Assert.ThrowsAsync<AdsErrorException>(
-            () => h.Connection.GetSymbolsAsync("MAIN.NoSuchParent", CancellationToken.None));
+            () => h.Connection.GetSymbolTreeAsync("MAIN.NoSuchParent", CancellationToken.None));
 
         Assert.Equal(AdsErrorCode.DeviceSymbolNotFound, ex.ErrorCode);
     }
@@ -732,7 +732,7 @@ public abstract class AdsConnectionContractTests
         await using var h = await CreateHarnessAsync();
         await h.WriteRawAsync("MAIN.Motor.Speed", 1500);
 
-        var rootSymbols = await h.Connection.GetSymbolsAsync(null, CancellationToken.None);
+        var rootSymbols = await h.Connection.GetSymbolTreeAsync(null, CancellationToken.None);
         var main = Assert.Single(rootSymbols, s => s.InstancePath.Equals("MAIN", StringComparison.OrdinalIgnoreCase));
         Assert.Equal("MAIN", main.InstancePath);
         Assert.Equal("STRUCT", main.TypeName);
@@ -740,14 +740,14 @@ public abstract class AdsConnectionContractTests
         Assert.Equal(0, main.ByteSize);
 
         // Mis-cased parent lookup for a synthetic container that is never itself a stored key.
-        var motorSymbols = await h.Connection.GetSymbolsAsync("main", CancellationToken.None);
+        var motorSymbols = await h.Connection.GetSymbolTreeAsync("main", CancellationToken.None);
         var motor = Assert.Single(motorSymbols);
         Assert.Equal("MAIN.Motor", motor.InstancePath); // stored casing, not the caller's "main"
         Assert.Equal("STRUCT", motor.TypeName);
         Assert.Equal("Struct", motor.Category);
 
         // Mis-cased multi-segment parent lookup down to the leaf.
-        var leafSymbols = await h.Connection.GetSymbolsAsync("MAIN.MOTOR", CancellationToken.None);
+        var leafSymbols = await h.Connection.GetSymbolTreeAsync("MAIN.MOTOR", CancellationToken.None);
         var leaf = Assert.Single(leafSymbols);
         Assert.Equal("MAIN.Motor.Speed", leaf.InstancePath); // stored casing throughout
         Assert.Equal("Primitive", leaf.Category);

@@ -44,7 +44,7 @@ public class AdsConnectionSymbolBrowsingTests
         };
         using var connection = CreateConnection(30_000, speed);
 
-        var symbols = await connection.GetSymbolsAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        var symbols = await connection.GetSymbolTreeAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
         var info = Assert.Single(symbols);
         Assert.Equal("MAIN.Speed", info.InstancePath);
@@ -61,7 +61,7 @@ public class AdsConnectionSymbolBrowsingTests
         var speed = new StubValueSymbol("MAIN.Speed", DataTypeCategory.Primitive, "INT", 1500);
         using var connection = CreateConnection(30_000, speed);
 
-        var symbols = await connection.GetSymbolsAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        var symbols = await connection.GetSymbolTreeAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Null(Assert.Single(symbols).Comment);
     }
@@ -74,7 +74,7 @@ public class AdsConnectionSymbolBrowsingTests
         var main = new StubSymbol(DataTypeCategory.Struct, "MAIN_PRG", speed, running) { InstanceName = "MAIN" };
         using var connection = CreateConnection(30_000, main);
 
-        var symbols = await connection.GetSymbolsAsync("MAIN", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        var symbols = await connection.GetSymbolTreeAsync("MAIN", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(2, symbols.Count);
         Assert.Contains(symbols, s => s.InstancePath == "MAIN.Speed");
@@ -87,7 +87,7 @@ public class AdsConnectionSymbolBrowsingTests
         var speed = new StubValueSymbol("MAIN.Speed", DataTypeCategory.Primitive, "INT", 1500);
         using var connection = CreateConnection(30_000, speed);
 
-        var symbols = await connection.GetSymbolsAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        var symbols = await connection.GetSymbolTreeAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Null(Assert.Single(symbols).Children);
     }
@@ -101,7 +101,7 @@ public class AdsConnectionSymbolBrowsingTests
         var main = new StubSymbol(DataTypeCategory.Struct, "MAIN_PRG", motor) { InstanceName = "MAIN" };
         using var connection = CreateConnection(30_000, main);
 
-        var symbols = await connection.GetSymbolsAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        var symbols = await connection.GetSymbolTreeAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
         var mainInfo = Assert.Single(symbols);
         Assert.Equal("MAIN", mainInfo.InstancePath);
@@ -145,7 +145,7 @@ public class AdsConnectionSymbolBrowsingTests
 
         var explicitly = await connection.GetSymbolsAsync(null, includeChildren: true, CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
-        var byDefault = await connection.GetSymbolsAsync(null, CancellationToken.None)
+        var byDefault = await connection.GetSymbolTreeAsync(null, CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(byDefault.Count, explicitly.Count);
@@ -179,7 +179,7 @@ public class AdsConnectionSymbolBrowsingTests
         var main = new StubSymbol(DataTypeCategory.Struct, "MAIN_PRG", node) { InstanceName = "MAIN" };
         using var connection = CreateConnection(30_000, main);
 
-        var symbols = await connection.GetSymbolsAsync(null, CancellationToken.None)
+        var symbols = await connection.GetSymbolTreeAsync(null, CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
 
         // MAIN itself is walked; the recursive node below it becomes a leaf.
@@ -196,7 +196,7 @@ public class AdsConnectionSymbolBrowsingTests
         var root = BuildChain(AdsConnection.MaxSymbolWalkDepth + 5);
         using var connection = CreateConnection(30_000, root);
 
-        var symbols = await connection.GetSymbolsAsync(null, CancellationToken.None)
+        var symbols = await connection.GetSymbolTreeAsync(null, CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
 
         var depth = 0;
@@ -260,7 +260,7 @@ public class AdsConnectionSymbolBrowsingTests
         using var connection = CreateConnection(30_000); // no symbols registered
 
         var ex = await Assert.ThrowsAsync<AdsErrorException>(
-            () => connection.GetSymbolsAsync("MAIN.NoSuchParent", CancellationToken.None));
+            () => connection.GetSymbolTreeAsync("MAIN.NoSuchParent", CancellationToken.None));
 
         Assert.Equal(AdsErrorCode.DeviceSymbolNotFound, ex.ErrorCode);
     }
@@ -273,7 +273,7 @@ public class AdsConnectionSymbolBrowsingTests
         await cts.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => connection.GetSymbolsAsync(null, cts.Token));
+            () => connection.GetSymbolTreeAsync(null, cts.Token));
     }
 
     [Fact]

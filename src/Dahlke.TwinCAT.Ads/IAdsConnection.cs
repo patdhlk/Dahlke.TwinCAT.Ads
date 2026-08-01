@@ -726,12 +726,12 @@ public interface IAdsConnection
     /// </exception>
     /// <remarks>
     /// <para>
-    /// <b>This is NOT a one-level browse.</b> Children are populated recursively all the way down,
-    /// so a call with a <see langword="null"/> parent projects EVERY symbol on the PLC into
-    /// <see cref="AdsSymbolInfo"/> objects — on a large program, tens of thousands of them. For
-    /// interactive drill-down, pass <c>includeChildren: false</c> to
-    /// <see cref="GetSymbolsAsync(string?, bool, CancellationToken)"/> and call again per level;
-    /// that is the cheap shape this overload is not.
+    /// <b>This projects the whole subtree, and the name now says so.</b> Children are populated
+    /// recursively all the way down, so a call with a <see langword="null"/> parent projects EVERY
+    /// symbol on the PLC into <see cref="AdsSymbolInfo"/> objects — on a large program, tens of
+    /// thousands of them. For interactive drill-down use
+    /// <see cref="GetSymbolsAsync(string?, bool, CancellationToken)"/> with
+    /// <c>includeChildren: false</c> and call again per level.
     /// </para>
     /// <para>
     /// Browsing uploads the PLC's symbol table, a blocking call with no cancellable overload. The
@@ -743,6 +743,55 @@ public interface IAdsConnection
     /// allocating the projection above on a thread-pool thread after the caller has given up.
     /// </para>
     /// </remarks>
+    Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct = default);
+
+    /// <summary>
+    /// Enumerates the symbols directly under <paramref name="parentPath"/>, each with its ENTIRE
+    /// nested subtree populated.
+    /// </summary>
+    /// <param name="parentPath">
+    /// The container to enumerate, or <see langword="null"/>/empty for the root symbols.
+    /// </param>
+    /// <param name="ct">Cancels the wait for the browse — it cannot interrupt the browse itself.</param>
+    /// <returns>
+    /// The immediate symbols under <paramref name="parentPath"/>, each carrying its full recursive
+    /// subtree in <see cref="AdsSymbolInfo.Children"/>.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Deprecated because the terse call was the expensive one.</b> This overload has always
+    /// meant <c>includeChildren: true</c>, so <c>GetSymbolsAsync(null)</c> projects every symbol on
+    /// the PLC while the CHEAP one-level browse needed the longer three-argument signature. That is
+    /// backwards: the call a consumer reaches for first, and writes while exploring, was the one
+    /// that walks the whole symbol table.
+    /// </para>
+    /// <para>
+    /// Replace it with whichever you actually meant — both are exact, and neither is a silent
+    /// behaviour change:
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <see cref="GetSymbolTreeAsync"/> — the same full-subtree projection, under a name that
+    ///     admits what it does.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <see cref="GetSymbolsAsync(string?, bool, CancellationToken)"/> with
+    ///     <c>includeChildren: false</c> — one level, which is what interactive drill-down wants.
+    ///   </description></item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <b>The two-argument shape will not return with different semantics.</b> Flipping this
+    /// overload to mean one level would have kept every call site compiling while changing what it
+    /// did — the failure mode a deprecation exists to avoid — so it is being retired rather than
+    /// repurposed, and no future version will reintroduce
+    /// <c>GetSymbolsAsync(parentPath, ct)</c> as a one-level browse.
+    /// </para>
+    /// </remarks>
+    [Obsolete(
+        "This overload means includeChildren: true and projects the entire subtree — a root browse " +
+        "walks every symbol on the PLC. Use GetSymbolTreeAsync(parentPath, ct) for that same " +
+        "behaviour, or GetSymbolsAsync(parentPath, includeChildren: false, ct) for a one-level " +
+        "browse. It will be removed, and will NOT return as a one-level browse.")]
     Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct = default);
 
     /// <summary>

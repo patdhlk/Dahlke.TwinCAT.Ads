@@ -1326,7 +1326,7 @@ internal sealed class AdsConnection : IManagedConnection
         => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct, timeout);
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)
         => GetSymbolsAsync(parentPath, includeChildren: true, ct, timeout);
 
     /// <inheritdoc />
