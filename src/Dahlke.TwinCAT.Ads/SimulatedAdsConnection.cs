@@ -649,13 +649,18 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// browse to bound, so — unlike <see cref="AdsConnection"/> — this completes synchronously and
     /// never consults <see cref="PlcTargetOptions.SymbolBrowseTimeoutMs"/>.
     /// </remarks>
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct = default)
+        => GetSymbolsAsync(parentPath, includeChildren: true, ct);
+
+    /// <inheritdoc />
+    [Obsolete("Use GetSymbolTreeAsync for the same behaviour, or GetSymbolsAsync(parentPath, includeChildren: false, ct) for one level.")]
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct = default)
         => GetSymbolsAsync(parentPath, includeChildren: true, ct);
 
     /// <inheritdoc />
     /// <remarks>
     /// Same synthetic-container derivation as
-    /// <see cref="GetSymbolsAsync(string?, CancellationToken)"/>; <paramref name="includeChildren"/>
+    /// <see cref="GetSymbolTreeAsync"/>; <paramref name="includeChildren"/>
     /// selects whether each returned node carries its nested subtree, matching a real connection.
     /// </remarks>
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct = default)
@@ -774,9 +779,9 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
         => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct);
 
     /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
-    Task<IReadOnlyList<AdsSymbolInfo>> IManagedConnection.GetSymbolsAsync(
+    Task<IReadOnlyList<AdsSymbolInfo>> IManagedConnection.GetSymbolTreeAsync(
         string? parentPath, CancellationToken ct, TimeSpan? timeout)
-        => GetSymbolsAsync(parentPath, ct);
+        => GetSymbolTreeAsync(parentPath, ct);
 
     /// <inheritdoc cref="IManagedConnection.ReadValueAsync{T}(string, CancellationToken, TimeSpan?)"/>
     Task<IReadOnlyList<AdsSymbolInfo>> IManagedConnection.GetSymbolsAsync(

@@ -210,19 +210,25 @@ A per-symbol failure is captured in `AdsValueResult.Error` and does not abort th
 ## Symbol Browsing and Metadata
 
 ```csharp
-// Browse one level — pass includeChildren: false for interactive drill-down.
-// The two-argument overload defaults to true, which projects the ENTIRE subtree.
-var roots = await conn.GetSymbolsAsync(null, includeChildren: false, ct);
+// One level — what interactive drill-down wants. Call again per level as the user expands.
+var roots = await conn.GetSymbolsAsync(null, includeChildren: false);
 foreach (var s in roots)
     Console.WriteLine($"{s.InstancePath} : {s.TypeName} ({s.Category}, {s.ByteSize}B)");
 
+// The entire subtree, in one call. With a null parent that is EVERY symbol on the PLC.
+var tree = await conn.GetSymbolTreeAsync("MAIN");
+
 // Search across the whole tree by substring
-var motors = await conn.SearchSymbolsAsync("Motor", includeChildren: false, ct);
+var motors = await conn.SearchSymbolsAsync("Motor", includeChildren: false);
 
 // Read a value together with its PLC type
-var result = await conn.ReadValueWithMetadataAsync("MAIN.Motor", ct);
+var result = await conn.ReadValueWithMetadataAsync("MAIN.Motor");
 Console.WriteLine($"{result.TypeName} = {result.Value}");   // ST_Motor = Dictionary<string, object?>
 ```
+
+**Pick the shape deliberately.** `GetSymbolTreeAsync` populates `Children` recursively all the way down, so a root call projects every symbol on the PLC — tens of thousands of `AdsSymbolInfo` objects on a large program. `GetSymbolsAsync(parentPath, includeChildren: false)` returns one level with `Children` null, which is the cheap shape.
+
+> **Deprecated:** `GetSymbolsAsync(parentPath)` — the two-argument overload — has always meant `includeChildren: true`, so the terse call was the expensive one while the cheap browse needed the longer signature. It still behaves exactly as before and now warns. Replace it with `GetSymbolTreeAsync(parentPath)` for the same result, or `GetSymbolsAsync(parentPath, includeChildren: false)` if one level is what you meant. It is being retired rather than repurposed: flipping it to mean one level would have left every call site compiling while silently changing what it did, so **no future version will reintroduce that shape as a one-level browse**.
 
 Browsing is bounded by `PlcTargetOptions.SymbolBrowseTimeoutMs` (default 30 s) rather than `TimeoutMs`, since uploading the symbol table can take longer than a typical read or write. That timeout bounds how long the *caller* waits — the underlying upload is a blocking Beckhoff call and continues in the background if abandoned.
 
@@ -674,7 +680,7 @@ Each key is a PLC identifier used with `GetConnection(plcId)`.
 | `Port` | `int` | `851` | ADS port number |
 | `DisplayName` | `string` | `""` | Human-readable name for logging |
 | `TimeoutMs` | `int` | `5000` | Per-operation timeout in milliseconds. Must be greater than zero. Override it for individual calls with [`WithTimeout`](#per-call-timeouts--withtimeout) rather than raising it for the whole target |
-| `SymbolBrowseTimeoutMs` | `int` | `30000` | Timeout for `GetSymbolsAsync` / `SearchSymbolsAsync`, which upload the PLC's symbol table and take far longer than a single read. Must be greater than zero. Also overridden by `WithTimeout` |
+| `SymbolBrowseTimeoutMs` | `int` | `30000` | Timeout for `GetSymbolsAsync` / `GetSymbolTreeAsync` / `SearchSymbolsAsync`, which upload the PLC's symbol table and take far longer than a single read. Must be greater than zero. Also overridden by `WithTimeout` |
 | `Mode` | `ConnectionMode` | `Real` | `Real` or `Simulated` |
 | `InitialValues` | `Dictionary<string, object?>` | `{}` | Symbol seed values for simulated targets. A bare scalar seeds a `string`; `{ "value": …, "type": "DINT" }` seeds the declared PLC type — see [Seeding initial values](#seeding-initial-values) |
 

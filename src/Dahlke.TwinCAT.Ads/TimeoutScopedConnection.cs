@@ -108,8 +108,12 @@ internal sealed class TimeoutScopedConnection(AdsConnectionFacade inner, TimeSpa
         string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct = default)
         => _inner.SubscribeAsync(symbolPath, cycleTimeMs, callback, ct, _timeout);
 
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct = default)
+        => _inner.GetSymbolTreeAsync(parentPath, ct, _timeout);
+
+    [Obsolete("Use GetSymbolTreeAsync for the same behaviour, or GetSymbolsAsync(parentPath, includeChildren: false, ct) for one level.")]
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct = default)
-        => _inner.GetSymbolsAsync(parentPath, ct, _timeout);
+        => _inner.GetSymbolTreeAsync(parentPath, ct, _timeout);
 
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(
         string? parentPath, bool includeChildren, CancellationToken ct = default)

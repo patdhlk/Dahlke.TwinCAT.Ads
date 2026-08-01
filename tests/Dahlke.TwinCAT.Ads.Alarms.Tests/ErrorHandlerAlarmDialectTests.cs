@@ -361,6 +361,10 @@ internal sealed class FakeRpcConnection(IReadOnlyList<AdsEnumMember> members, ob
     public Task<IDisposable> SubscribeAsync(
         string symbolPath, int cycleTimeMs, Action<AdsNotification> callback, CancellationToken ct) =>
         throw new NotSupportedException();
+    /// <summary>Not exercised here — this double answers browses with an empty list.</summary>
+    public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<AdsSymbolInfo>>([]);
+
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, CancellationToken ct) =>
         throw new NotSupportedException();
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(
