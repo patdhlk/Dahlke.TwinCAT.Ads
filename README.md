@@ -9,6 +9,7 @@ A .NET library for TwinCAT ADS with durable connections, typed symbol access, si
 ## Features
 
 - **Typed reads and writes** — `ReadValueAsync<T>` / `WriteValueAsync<T>` with automatic widening conversions and invariant-culture string parsing; `object?` overloads as a dynamic escape hatch. The `CancellationToken` is optional on every async member
+- **PLC structs bind to .NET types** — a struct, function block, union or array decodes to a member tree that binds onto a record, class or struct by name, on real and simulated targets alike; a missing member fails naming it rather than defaulting
 - **Typed symbol handles** — `PlcSymbol<T>` declares a symbol's path and .NET type once, so neither is repeated (or mistyped) at the call site; works with reads, writes, subscriptions, batch results and the Rx companion
 - **Per-call timeouts** — `WithTimeout(TimeSpan)` returns a lightweight scoped view so one slow symbol, RPC or browse does not require raising the bound for the whole target
 - **Stable connection facades** — `GetConnection` returns one object per target whose identity never changes; reconnects are invisible; cached references never go stale
@@ -126,6 +127,27 @@ public class TempService(IAdsConnectionPool pool)
 ```
 
 Supported conversions: widening numeric casts (e.g. PLC `INT` stored as `int` readable as `double`), and string-seeded simulation values via `Convert.ChangeType` with `CultureInfo.InvariantCulture` (e.g. `"42"` → `int`, `"true"` → `bool`).
+
+### Reading a PLC struct into a .NET type
+
+A struct, function block or union decodes to a member tree, and that tree binds onto a .NET type by member name:
+
+```csharp
+public record MotorState(int Speed, bool Running);
+
+// From a metadata or batch read — the tree a real connection already produces:
+var result = await conn.ReadValueWithMetadataAsync("MAIN.Motor");
+MotorState motor = result.GetValue<MotorState>();
+
+// Or on a simulated target, straight through the typed read:
+MotorState simulated = await conn.ReadValueAsync<MotorState>("MAIN.Motor");
+```
+
+Positional records, mutable classes, structs, nested structs and arrays all bind; member names match case-insensitively, and each member gets the same widening a scalar read would.
+
+**Every member of the target type must be present in the tree.** A member the PLC does not supply fails with a message naming it, rather than being left at its default — a type that disagrees with the PLC is what you want to hear about. Extra members in the PLC's struct are ignored, so the target type drives; to read a subset, read the symbol as `IReadOnlyDictionary<string, object?>` instead.
+
+> **What simulation can and cannot prove here.** Binding matches by **name**, because a decoded tree has no memory layout. `ReadValueAsync<T>` against real hardware hands `T` to Beckhoff's marshaller, which maps PLC memory by **declaration order**. So a simulated target catches a misspelled or mistyped member — and cannot catch a mis-ordered one. Verify field order against hardware.
 
 ### Dynamic (untyped) reads
 
@@ -470,6 +492,19 @@ builder.Services.AddTwinCatAds(o =>
 ### Seeding initial values
 
 `InitialValues` are applied at connection creation. Writes fire subscriptions on changed values; `SetInitialValues` seeds the store silently without triggering callbacks.
+
+Seed a struct-shaped symbol in code by seeding a member tree (or an instance of the type itself); it then reads back as a .NET type — see [Reading a PLC struct into a .NET type](#reading-a-plc-struct-into-a-net-type):
+
+```csharp
+sim.SetInitialValues(new Dictionary<string, object?>
+{
+    ["MAIN.Motor"] = new Dictionary<string, object?> { ["Speed"] = 1500, ["Running"] = true },
+});
+
+MotorState motor = await sim.ReadValueAsync<MotorState>("MAIN.Motor");
+```
+
+**JSON `InitialValues` cannot seed a struct** — a config entry seeds one scalar symbol, so a struct-shaped symbol has to be seeded in code.
 
 In code-first configuration values keep their CLR types and are seeded verbatim. JSON configuration is string-typed, so a bare scalar entry is seeded as a `string` — a metadata read reports it as `STRING` where a real PLC would report `DINT`. Declare the PLC type to get a faithful stand-in:
 
