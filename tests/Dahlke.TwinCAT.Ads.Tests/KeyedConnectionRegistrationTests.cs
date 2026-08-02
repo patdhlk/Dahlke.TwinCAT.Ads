@@ -112,6 +112,14 @@ public class KeyedConnectionRegistrationTests
         // .NET 10 skips AnyKey descriptors when enumerating, so the factory is never
         // reached and the caller simply gets nothing back.
         Assert.Empty(sp.GetKeyedServices<IAdsConnection>(KeyedService.AnyKey));
+
+        // ...and resolving a SINGLE service with the sentinel is rejected by the container
+        // before the factory runs, so the library's own guard is dead code here. It is kept
+        // for net8.0/net9.0, where both paths do reach it.
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => sp.GetRequiredKeyedService<IAdsConnection>(KeyedService.AnyKey));
+
+        Assert.DoesNotContain("GetAllConnections", ex.Message);
     }
 #else
     [Fact]
@@ -127,6 +135,13 @@ public class KeyedConnectionRegistrationTests
 
         Assert.Contains("GetAllConnections", ex.Message);
         Assert.DoesNotContain("AnyKeyObj", ex.Message);
+
+        // Direct single-service resolution with the sentinel reaches the factory here too —
+        // unlike .NET 10, which rejects it in the container first.
+        var direct = Assert.Throws<InvalidOperationException>(
+            () => sp.GetRequiredKeyedService<IAdsConnection>(KeyedService.AnyKey));
+
+        Assert.Contains("GetAllConnections", direct.Message);
     }
 #endif
 

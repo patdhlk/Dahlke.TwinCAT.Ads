@@ -557,10 +557,12 @@ public static class ServiceCollectionExtensions
     /// key" — so it fails, but it fails naming the API that CAN serve it.
     /// </para>
     /// <para>
-    /// .NET 10 changed that: it skips AnyKey descriptors while enumerating, so the caller gets an
-    /// empty sequence and this branch is never reached. The branch stays because the library
-    /// targets net8.0 and net9.0 as well, and because it still fires on every framework when the
-    /// sentinel is passed to <c>GetRequiredKeyedService</c> directly.
+    /// .NET 10 changed that, and the sentinel branch is DEAD there: enumeration skips AnyKey
+    /// descriptors (the caller gets an empty sequence), and passing the sentinel to
+    /// <c>GetRequiredKeyedService</c> is rejected by the container itself with
+    /// "KeyedService.AnyKey cannot be used to resolve a single service" before this factory runs.
+    /// The branch stays because net8.0 and net9.0 are supported target frameworks and reach it on
+    /// both paths.
     /// </para>
     /// </remarks>
     private static string AsPlcId(object? key)
