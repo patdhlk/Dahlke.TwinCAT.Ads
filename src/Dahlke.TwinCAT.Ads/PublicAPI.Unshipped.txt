@@ -101,3 +101,5 @@ Dahlke.TwinCAT.Ads.SimulatedWriteEventArgs.PreviousValue.get -> object?
 Dahlke.TwinCAT.Ads.SimulatedWriteEventArgs.SimulatedWriteEventArgs(string! symbolPath, object? value, object? previousValue, bool changed) -> void
 Dahlke.TwinCAT.Ads.SimulatedWriteEventArgs.SymbolPath.get -> string!
 Dahlke.TwinCAT.Ads.SimulatedWriteEventArgs.Value.get -> object?
+Dahlke.TwinCAT.Ads.AdsConnectionExtensions
+static Dahlke.TwinCAT.Ads.AdsConnectionExtensions.WaitForConnectedAsync(this Dahlke.TwinCAT.Ads.IAdsConnection! connection, System.TimeSpan timeout, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
