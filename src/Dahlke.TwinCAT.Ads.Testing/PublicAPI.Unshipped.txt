@@ -26,7 +26,6 @@ Dahlke.TwinCAT.Ads.Testing.PlcWrite.Value.init -> void
 Dahlke.TwinCAT.Ads.Testing.TestPlc.Target(string! plcId) -> Dahlke.TwinCAT.Ads.Testing.TestPlcTarget!
 Dahlke.TwinCAT.Ads.Testing.TestPlcTarget
 Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.ClearWrites() -> void
-Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Dispose() -> void
 Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.PlcId.get -> string!
 Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Read(string! symbolPath) -> object?
 Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Read<T>(string! symbolPath) -> T

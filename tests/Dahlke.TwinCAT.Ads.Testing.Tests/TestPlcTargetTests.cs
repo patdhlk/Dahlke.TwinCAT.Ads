@@ -324,13 +324,17 @@ public class TestPlcTargetTests
     }
 
     [Fact]
-    public async Task Dispose_IsIdempotent()
+    public async Task Detach_IsIdempotent()
     {
+        // Detach is internal, not IDisposable: a cached target that a consumer could
+        // `using` would stop recording while every assertion kept passing. Idempotency
+        // still matters — TestPlc.DisposeAsync detaches every target, and the constructor
+        // unwind path may already have detached some of them.
         await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
         var target = plc.Target("plc1");
 
-        target.Dispose();
-        target.Dispose();
+        target.Detach();
+        target.Detach();
     }
 
     [Fact]

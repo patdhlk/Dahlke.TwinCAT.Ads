@@ -25,7 +25,7 @@ namespace Dahlke.TwinCAT.Ads.Testing;
 /// test wrote it would pass while testing nothing.
 /// </para>
 /// </remarks>
-public sealed class TestPlcTarget : IDisposable
+public sealed class TestPlcTarget
 {
     // Installed only for the duration of a harness Write call — NOT a boolean flag.
     // SimulatedAdsConnection fires subscription callbacks BEFORE ValueWritten,
@@ -119,7 +119,7 @@ public sealed class TestPlcTarget : IDisposable
     private readonly List<PlcWrite> _writes = [];
     private readonly object _gate = new();
     private readonly SimulatedAdsConnection _simulated;
-    private bool _disposed;
+    private bool _detached;
 
     internal TestPlcTarget(string plcId, SimulatedAdsConnection simulated)
     {
@@ -321,11 +321,12 @@ public sealed class TestPlcTarget : IDisposable
     {
         ArgumentNullException.ThrowIfNull(symbolPath);
 
-        if (WritesTo(symbolPath).Count > 0)
+        var writes = WritesTo(symbolPath);
+        if (writes.Count > 0)
             return;
 
         throw new PlcAssertionException(
-            $"Expected a write to \"{symbolPath}\" on {PlcId}, but {DescribeRecorded(symbolPath)}");
+            $"Expected a write to \"{symbolPath}\" on {PlcId}, but {DescribeRecorded(writes)}");
     }
 
     /// <summary>
@@ -351,7 +352,7 @@ public sealed class TestPlcTarget : IDisposable
 
         throw new PlcAssertionException(
             $"Expected a write of {Describe(expected)} to \"{symbolPath}\" on {PlcId}, "
-            + $"but {DescribeRecorded(symbolPath)}");
+            + $"but {DescribeRecorded(writes)}");
     }
 
     /// <summary>
@@ -368,7 +369,7 @@ public sealed class TestPlcTarget : IDisposable
             return;
 
         throw new PlcAssertionException(
-            $"Expected no write to \"{symbolPath}\" on {PlcId}, but {DescribeRecorded(symbolPath)}");
+            $"Expected no write to \"{symbolPath}\" on {PlcId}, but {DescribeRecorded(writes)}");
     }
 
     /// <summary>
@@ -390,7 +391,7 @@ public sealed class TestPlcTarget : IDisposable
 
         throw new PlcAssertionException(
             $"Expected exactly {expected} write(s) to \"{symbolPath}\" on {PlcId}, "
-            + $"but {DescribeRecorded(symbolPath)}");
+            + $"but {DescribeRecorded(writes)}");
     }
 
     /// <summary>
@@ -411,9 +412,16 @@ public sealed class TestPlcTarget : IDisposable
     /// Harness writes are excluded from the log, so this reports only what the code under
     /// test did — which is exactly what the assertion is about.
     /// </summary>
-    private string DescribeRecorded(string symbolPath)
+    /// <param name="writes">
+    /// The very snapshot the caller decided to fail on, NOT a fresh <see cref="WritesTo"/>
+    /// query. Re-querying would take an independent snapshot: under a concurrently mutating
+    /// log, <see cref="AssertNotWritten"/> could fail BECAUSE writes exist and then print
+    /// "no writes to that path were recorded" — a message that does not merely go stale, it
+    /// names the wrong cause and sends the reader hunting the harness-writes-are-excluded
+    /// rule for a failure that has nothing to do with it.
+    /// </param>
+    private static string DescribeRecorded(IReadOnlyList<PlcWrite> writes)
     {
-        var writes = WritesTo(symbolPath);
         if (writes.Count == 0)
             return "no writes to that path were recorded. Note that writes made through "
                 + "TestPlcTarget.Write drive the PLC side and are deliberately not recorded — "
@@ -455,16 +463,26 @@ public sealed class TestPlcTarget : IDisposable
             _writes.Add(write);
     }
 
-    /// <summary>
-    /// Detaches from the simulated connection. Called by <see cref="TestPlc.DisposeAsync"/>;
-    /// a test does not normally call it.
-    /// </summary>
-    public void Dispose()
+    // Detaches from the simulated connection. Idempotent. Called by TestPlc.DisposeAsync
+    // and by TestPlc's constructor unwind path — never by a test.
+    //
+    // Deliberately internal, and deliberately NOT an IDisposable implementation. A target
+    // is cached: TestPlc.Target(plcId) hands back the same instance every time, for the
+    // harness's whole lifetime. So a consumer who wrote `using (var t = plc.Target("plc1"))`
+    // — the shape an IDisposable invites, and the one CA2000 actively nudges toward —
+    // would detach the recorder permanently while Write, Seed and Read all kept working.
+    // Every subsequent assertion would then run against an empty log and PASS:
+    // AssertNotWritten and AssertWriteCount(path, 0) would confirm a write that really
+    // landed never happened. That silent false pass is precisely the failure this type
+    // exists to prevent, so the operation that causes it is not on the public surface at
+    // all. Its absence from PublicAPI.Unshipped.txt is the guard — re-adding a public
+    // Dispose trips RS0016.
+    internal void Detach()
     {
-        if (_disposed)
+        if (_detached)
             return;
 
-        _disposed = true;
+        _detached = true;
         _simulated.ValueWritten -= OnValueWritten;
     }
 }

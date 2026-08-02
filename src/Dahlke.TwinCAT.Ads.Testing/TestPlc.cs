@@ -52,7 +52,7 @@ public sealed class TestPlc : IAsyncDisposable
             // .GetResult() is the pattern AdsConnectionPoolHandle.DisposeAsync's own
             // remarks name for exactly this — a synchronous context with no way to await.
             foreach (var target in _targets.Values)
-                target.Dispose();
+                target.Detach();
 
             handle.DisposeAsync().AsTask().GetAwaiter().GetResult();
             throw;
@@ -103,7 +103,7 @@ public sealed class TestPlc : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         foreach (var target in _targets.Values)
-            target.Dispose();
+            target.Detach();
 
         await _handle.DisposeAsync().ConfigureAwait(false);
     }
