@@ -15,7 +15,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// <typeparam name="TValue">Slot content — a boxed CLR value, a byte array.</typeparam>
 /// <remarks>
 /// <para>
-/// <b>The fire rule.</b> <see cref="Write"/> returns <see langword="true"/> —
+/// <b>The fire rule.</b> <see cref="Write(TKey, TValue)"/> returns <see langword="true"/> —
 /// "this write is a change, deliver it" — for the FIRST write to a key and for
 /// any write whose value differs from the stored one per the change comparer.
 /// A same-value write returns <see langword="false"/>. This is on-change
@@ -87,6 +87,8 @@ internal sealed class InMemoryPlcStore<TKey, TValue>
     /// As <see cref="Write(TKey, TValue)"/>, and additionally hands back the value this
     /// write displaced.
     /// </summary>
+    /// <param name="key">The slot to write.</param>
+    /// <param name="value">The value to store.</param>
     /// <param name="previous">
     /// The value the slot held before this write, or <see langword="default"/> when the
     /// slot was empty. The two cases are not distinguished: a caller that needs to tell
