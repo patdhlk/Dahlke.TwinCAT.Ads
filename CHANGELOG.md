@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Keyed `IAdsConnection` — the target id appears once, not in every service that touches a PLC.**
+  ([#43](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/43)) A service bound to one PLC
+  repeated a magic string at every pool lookup:
+
+  ```csharp
+  public class TempService(IAdsConnectionPool pool)
+  {
+      private readonly IAdsConnection _conn = pool.GetConnection("plc1");   // "plc1" everywhere
+  }
+  ```
+
+  Every configured target is now also registered as a keyed `IAdsConnection`:
+
+  ```csharp
+  public class TempService([FromKeyedServices("plc1")] IAdsConnection conn) { }
+  ```
+
+  The keyed connection **is** the pool's facade rather than a copy, so a subscription taken through
+  one is visible to the other. Keys are case-insensitive, exactly as `GetConnection` is, and an
+  unknown id fails at container resolution with `UnknownPlcTargetException` listing the configured
+  ids instead of at the first PLC call. One caveat worth knowing: because the registration is a
+  factory, `GetKeyedService` **throws** for an unknown id rather than returning `null` — reach for
+  `pool.TryGetConnection` when the id may legitimately be absent.
+
+  Registration is a single `KeyedService.AnyKey` descriptor, not a loop over configured targets, and
+  that is deliberate. Options are not bound when `AddTwinCatAds` runs — they are bound in
+  `AdsConnectionPool`'s constructor — so a loop would have to run a code-first caller's lambda a
+  second time against a throwaway instance, and would still silently miss any target added by a
+  `Configure` delegate registered afterwards. Deferring the key to resolution time costs nothing and
+  covers all six overloads at once.
+
+  `IAdsConnectionPool` is untouched and stays the answer for code that works across targets — and
+  the only way to enumerate them. `GetKeyedServices<IAdsConnection>(KeyedService.AnyKey)` is not
+  that way: on net8.0/net9.0 the container hands the factory its own `AnyKey` sentinel, which names
+  no target, and on net10.0 it returns empty. Use `GetAllConnections()`.
+
 - **`AdsConnectionBase` — a hand-written connection double costs two overrides, not twenty-five.**
   ([#48](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/48)) `IAdsConnection` has twenty-five
   members. A consumer faking only reads — the common case in a unit test for their own service —

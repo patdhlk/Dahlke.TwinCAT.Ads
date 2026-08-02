@@ -481,7 +481,8 @@ public static class ServiceCollectionExtensions
     /// <c>AddTwinCatAds</c> overloads: <see cref="TimeProvider"/>, the router
     /// ready signal, <see cref="AdsRouterService"/>, the connection factory, and
     /// the connection pool (both as <see cref="AdsConnectionPool"/> and as
-    /// <see cref="IAdsConnectionPool"/>), and the raw channel factory (both as
+    /// <see cref="IAdsConnectionPool"/>), a keyed <see cref="IAdsConnection"/> resolvable
+    /// by target identifier, and the raw channel factory (both as
     /// <see cref="AdsRawChannelFactory"/> and as <see cref="IAdsRawChannelFactory"/>).
     /// </summary>
     private static void RegisterCoreServices(IServiceCollection services)
@@ -508,9 +509,79 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AdsConnectionPool>();
         services.AddSingleton<IAdsConnectionPool>(sp => sp.GetRequiredService<AdsConnectionPool>());
         services.AddHostedService(sp => sp.GetRequiredService<AdsConnectionPool>());
+
+        // Keyed IAdsConnection, so a service that talks to ONE target names it at the
+        // injection point — [FromKeyedServices("plc1")] IAdsConnection — instead of
+        // repeating the id at every pool lookup.
+        //
+        // AnyKey rather than a descriptor per configured target, because there are no
+        // configured targets to loop over HERE. TwinCatAdsOptions is bound when
+        // IOptions<T> is first resolved — which is AdsConnectionPool's constructor, long
+        // after this method returns. Materializing options early would mean running a
+        // code-first caller's Action<TwinCatAdsOptions> a second time against a throwaway
+        // instance (side effects twice), and would still miss any target added by a
+        // Configure delegate registered after AddTwinCatAds returns — silently, as an
+        // unresolvable service rather than a startup error.
+        //
+        // Singleton is safe ONLY because AdsConnectionFacade is not IDisposable: the
+        // container caches what this factory returns and would dispose it at shutdown,
+        // racing the pool, which is the facade's real owner. If the facade ever becomes
+        // disposable, this registration has to change with it.
+        services.AddKeyedSingleton<IAdsConnection>(KeyedService.AnyKey, static (sp, key) =>
+            sp.GetRequiredService<IAdsConnectionPool>().GetConnection(AsPlcId(key)));
+
         services.AddSingleton<AdsRawChannelFactory>();
         services.AddSingleton<IAdsRawChannelFactory>(sp => sp.GetRequiredService<AdsRawChannelFactory>());
         services.AddHostedService(sp => sp.GetRequiredService<AdsRawChannelFactory>());
+    }
+
+    /// <summary>
+    /// Converts a keyed-service key into a PLC target id, rejecting the keys
+    /// <see cref="KeyedService.AnyKey"/> lets through that the pool cannot take.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// AnyKey matches ANY non-null key, so <c>GetRequiredKeyedService&lt;IAdsConnection&gt;(42)</c>
+    /// reaches the factory. Casting there would surface as an
+    /// <see cref="InvalidCastException"/> naming neither the library nor what was wrong;
+    /// this reuses <see cref="UnknownPlcTargetException"/> so that both ways of LOOKING UP a
+    /// connection that is not there fail with one exception type.
+    /// </para>
+    /// <para>
+    /// <b>On .NET 8 and 9 the sentinel itself arrives here too.</b>
+    /// <c>GetKeyedServices&lt;IAdsConnection&gt;(KeyedService.AnyKey)</c> does not skip AnyKey
+    /// descriptors as one might expect — it invokes this factory passing
+    /// <see cref="KeyedService.AnyKey"/> as the key. Left to the general path that produces a
+    /// message naming <c>AnyKeyObj</c>, an internal type of the DI container that tells the
+    /// caller nothing. Enumeration cannot be served — there is no single connection for "any
+    /// key" — so it fails, but it fails naming the API that CAN serve it.
+    /// </para>
+    /// <para>
+    /// .NET 10 changed that, and the sentinel branch is DEAD there: enumeration skips AnyKey
+    /// descriptors (the caller gets an empty sequence), and passing the sentinel to
+    /// <c>GetRequiredKeyedService</c> is rejected by the container itself with
+    /// "KeyedService.AnyKey cannot be used to resolve a single service" before this factory runs.
+    /// The branch stays because net8.0 and net9.0 are supported target frameworks and reach it on
+    /// both paths.
+    /// </para>
+    /// </remarks>
+    private static string AsPlcId(object? key)
+    {
+        if (key is string plcId)
+            return plcId;
+
+        if (ReferenceEquals(key, KeyedService.AnyKey))
+            throw new InvalidOperationException(
+                "Keyed IAdsConnection registrations cannot be enumerated: "
+                + "GetKeyedServices<IAdsConnection>(KeyedService.AnyKey) reaches the factory with the "
+                + "AnyKey sentinel itself, which names no PLC target. Use "
+                + "IAdsConnectionPool.GetAllConnections() to walk every configured target, or "
+                + "GetRequiredKeyedService<IAdsConnection>(\"plc1\") to resolve one by id.");
+
+        throw new UnknownPlcTargetException(
+            key?.ToString() ?? "(null)",
+            $"A keyed IAdsConnection must be resolved with a string service key naming a configured "
+            + $"PLC target; the key supplied was {key?.GetType().Name ?? "null"}.", null);
     }
 
     /// <summary>
