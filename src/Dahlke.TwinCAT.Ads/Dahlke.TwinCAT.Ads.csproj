@@ -37,6 +37,7 @@
     -->
     <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="[7.0.292,8.0.0)" />
     <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="[7.0.292,8.0.0)" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="$(MicrosoftExtensionsVersion)" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="$(MicrosoftExtensionsVersion)" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="$(MicrosoftExtensionsVersion)" />

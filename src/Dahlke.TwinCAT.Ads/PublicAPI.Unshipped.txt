@@ -103,3 +103,22 @@ Dahlke.TwinCAT.Ads.SimulatedWriteEventArgs.SymbolPath.get -> string!
 Dahlke.TwinCAT.Ads.SimulatedWriteEventArgs.Value.get -> object?
 Dahlke.TwinCAT.Ads.AdsConnectionExtensions
 static Dahlke.TwinCAT.Ads.AdsConnectionExtensions.WaitForConnectedAsync(this Dahlke.TwinCAT.Ads.IAdsConnection! connection, System.TimeSpan timeout, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder
+Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.AddTarget(string! plcId, System.Action<Dahlke.TwinCAT.Ads.PlcTargetOptions!>! configure) -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.BuildAndStartAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle!>!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.Configure(System.Action<Dahlke.TwinCAT.Ads.TwinCatAdsOptions!>! configure) -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.ConfigureServices(System.Action<Microsoft.Extensions.DependencyInjection.IServiceCollection!>! configure) -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.UseConfiguration(Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.UseLoggerFactory(Microsoft.Extensions.Logging.ILoggerFactory! loggerFactory) -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle
+Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.ForceReconnect(string! plcId) -> void
+Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.GetAllConnections() -> System.Collections.Generic.IReadOnlyDictionary<string!, Dahlke.TwinCAT.Ads.IAdsConnection!>!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.GetConnection(string! plcId) -> Dahlke.TwinCAT.Ads.IAdsConnection!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.GetTargetStates() -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.PlcTargetStatus!>!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.RawChannels.get -> Dahlke.TwinCAT.Ads.IAdsRawChannelFactory!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.Services.get -> System.IServiceProvider!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.TryGetConnection(string! plcId, out Dahlke.TwinCAT.Ads.IAdsConnection? connection) -> bool
+Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.TryGetSimulatedConnection(string! plcId, out Dahlke.TwinCAT.Ads.SimulatedAdsConnection? simulated) -> bool
+static Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.Create() -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
+static Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.CreateSimulation() -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
