@@ -540,16 +540,41 @@ public static class ServiceCollectionExtensions
     /// <see cref="KeyedService.AnyKey"/> lets through that the pool cannot take.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// AnyKey matches ANY non-null key, so <c>GetRequiredKeyedService&lt;IAdsConnection&gt;(42)</c>
     /// reaches the factory. Casting there would surface as an
     /// <see cref="InvalidCastException"/> naming neither the library nor what was wrong;
-    /// this reuses <see cref="UnknownPlcTargetException"/> so that both ways of asking for
-    /// a connection that is not there fail with one exception type.
+    /// this reuses <see cref="UnknownPlcTargetException"/> so that both ways of LOOKING UP a
+    /// connection that is not there fail with one exception type.
+    /// </para>
+    /// <para>
+    /// <b>The sentinel itself arrives here too.</b>
+    /// <c>GetKeyedServices&lt;IAdsConnection&gt;(KeyedService.AnyKey)</c> does not skip AnyKey
+    /// descriptors as one might expect — it invokes this factory passing
+    /// <see cref="KeyedService.AnyKey"/> as the key. Left to the general path that produces a
+    /// message naming <c>AnyKeyObj</c>, an internal type of the DI container that tells the
+    /// caller nothing. Enumeration cannot be served — there is no single connection for "any
+    /// key" — so it fails, but it fails naming the API that CAN serve it.
+    /// </para>
     /// </remarks>
-    private static string AsPlcId(object? key) => key as string ?? throw new UnknownPlcTargetException(
-        key?.ToString() ?? "(null)",
-        $"A keyed IAdsConnection must be resolved with a string service key naming a configured "
-        + $"PLC target; the key supplied was {key?.GetType().Name ?? "null"}.", null);
+    private static string AsPlcId(object? key)
+    {
+        if (key is string plcId)
+            return plcId;
+
+        if (ReferenceEquals(key, KeyedService.AnyKey))
+            throw new InvalidOperationException(
+                "Keyed IAdsConnection registrations cannot be enumerated: "
+                + "GetKeyedServices<IAdsConnection>(KeyedService.AnyKey) reaches the factory with the "
+                + "AnyKey sentinel itself, which names no PLC target. Use "
+                + "IAdsConnectionPool.GetAllConnections() to walk every configured target, or "
+                + "GetRequiredKeyedService<IAdsConnection>(\"plc1\") to resolve one by id.");
+
+        throw new UnknownPlcTargetException(
+            key?.ToString() ?? "(null)",
+            $"A keyed IAdsConnection must be resolved with a string service key naming a configured "
+            + $"PLC target; the key supplied was {key?.GetType().Name ?? "null"}.", null);
+    }
 
     /// <summary>
     /// Registers the PostConfigure delegate used by all

@@ -73,6 +73,97 @@ public class KeyedConnectionRegistrationTests
         Assert.Contains("Int32", ex.Message);
     }
 
+    [Fact]
+    public void KeyedConnection_ExplicitKeyedRegistration_BeatsAnyKey()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAdsSimulation(o =>
+        {
+            o.Targets["plc1"] = new PlcTargetOptions { AmsNetId = "1.2.3.4.5.6" };
+            o.Targets["plc2"] = new PlcTargetOptions { AmsNetId = "1.2.3.4.5.7" };
+        });
+
+        // Substituting ONE target in a test is the reason this has to work.
+        var stub = new StubConnection();
+        services.AddKeyedSingleton<IAdsConnection>("plc1", stub);
+
+        using var sp = services.BuildServiceProvider();
+
+        Assert.Same(stub, sp.GetRequiredKeyedService<IAdsConnection>("plc1"));
+
+        // ...and the substitution is surgical: plc2 still comes from the pool.
+        Assert.Same(
+            sp.GetRequiredService<IAdsConnectionPool>().GetConnection("plc2"),
+            sp.GetRequiredKeyedService<IAdsConnection>("plc2"));
+    }
+
+    [Fact]
+    public void KeyedConnection_EnumeratingWithAnyKey_ThrowsPointingAtTheEnumerationApi()
+    {
+        using var sp = BuildProvider();
+
+        // GetKeyedServices(AnyKey) does NOT skip AnyKey descriptors — it invokes the
+        // factory passing the sentinel itself. Enumeration cannot be served, so this
+        // throws; what it must not do is throw naming AnyKeyObj, an internal DI type.
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => sp.GetKeyedServices<IAdsConnection>(KeyedService.AnyKey).ToList());
+
+        Assert.Contains("GetAllConnections", ex.Message);
+        Assert.DoesNotContain("AnyKeyObj", ex.Message);
+    }
+
+    [Fact]
+    public void UnkeyedIAdsConnection_IsStillNotRegistered()
+    {
+        using var sp = BuildProvider();
+
+        // Deliberate: with a fleet there is no "the" connection, and a default would
+        // silently pick one.
+        Assert.Null(sp.GetService<IAdsConnection>());
+    }
+
+    [Fact]
+    public void UnkeyedIAdsConnection_EnumerationIsEmpty_NotAnExplodingKeyedFactory()
+    {
+        using var sp = BuildProvider();
+
+        // The path a consumer reaches by accident: injecting IEnumerable<IAdsConnection>.
+        // The keyed descriptor must stay out of the UNKEYED enumeration, or a plausible
+        // constructor signature would blow up on the AnyKey sentinel.
+        Assert.Empty(sp.GetServices<IAdsConnection>());
+    }
+
+    [Fact]
+    public void AddTwinCatAds_CalledTwice_RegistersOneKeyedConnectionDescriptor()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAds(o =>
+        {
+            o.Targets["plc1"] = new PlcTargetOptions { AmsNetId = "1.2.3.4.5.6" };
+        });
+        services.AddTwinCatAds(o =>
+        {
+            o.Targets["plc1"] = new PlcTargetOptions { AmsNetId = "1.2.3.4.5.6" };
+        });
+
+        var keyedCount = services.Count(d =>
+            d.ServiceType == typeof(IAdsConnection) && d.IsKeyedService);
+
+        Assert.Equal(1, keyedCount);
+    }
+
+    /// <summary>
+    /// A minimal hand-written double. Every unimplemented member of
+    /// <see cref="AdsConnectionBase"/> throws, which is what we want: this stub exists to
+    /// be compared by reference, never called.
+    /// </summary>
+    private sealed class StubConnection : AdsConnectionBase
+    {
+        public override string PlcId => "stub";
+    }
+
     private static ServiceProvider BuildProvider()
     {
         var services = new ServiceCollection();
