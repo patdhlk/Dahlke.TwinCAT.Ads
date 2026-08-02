@@ -117,27 +117,33 @@ public class AdsConnectionPoolBuilderParityTests
     public async Task Configuration_BindsBeforeTheLambda()
     {
         // The combo overload's documented ordering, inherited by delegating to it rather
-        // than by re-deriving it: binding first, so a lambda sees fully-bound state and a
-        // dictionary mutation is not cleared by a later Bind.
+        // than by re-deriving it: binding first, so a lambda sees fully-bound state.
+        //
+        // A config target and a code target (as an earlier version of this test used) never
+        // touch the SAME state, so that shape cannot distinguish "bind first" from "lambda
+        // first" — it only proves the two mechanisms can coexist. Binding a List<string>
+        // property, by contrast, gives directly observable order: symbolDumpSection.Bind
+        // (ServiceCollectionExtensions.cs) binds onto the EXISTING Prefixes list rather than
+        // replacing it, so whichever delegate runs first determines what index 0 ends up
+        // holding. If binding runs first, "FROM_CONFIG" claims index 0 and the lambda's Add
+        // appends "FROM_CODE" after it; see ValidateOnStart_RunsForOptionsNothingResolves's
+        // neighbour below for what happens when this is reversed.
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["PlcTargets:plc1:DisplayName"] = "From configuration",
                 ["PlcTargets:plc1:Mode"] = "Simulated",
+                ["AdsSymbolDump:Enabled"] = "true",
+                ["AdsSymbolDump:Prefixes:0"] = "FROM_CONFIG",
             })
             .Build();
 
         await using var pool = await AdsConnectionPoolBuilder.Create()
             .UseConfiguration(configuration)
-            .AddTarget("plc2", o =>
-            {
-                o.Mode = ConnectionMode.Simulated;
-                o.DisplayName = "From code";
-            })
+            .Configure(o => o.Diagnostics.SymbolDump.Prefixes.Add("FROM_CODE"))
             .BuildAndStartAsync();
 
-        Assert.Equal("From configuration", pool.GetConnection("plc1").DisplayName);
-        Assert.Equal("From code", pool.GetConnection("plc2").DisplayName);
+        var options = pool.Services.GetRequiredService<IOptions<TwinCatAdsOptions>>().Value;
+        Assert.Equal(new[] { "FROM_CONFIG", "FROM_CODE" }, options.Diagnostics.SymbolDump.Prefixes);
     }
 
     [Fact]
@@ -212,15 +218,25 @@ public class AdsConnectionPoolBuilderParityTests
     {
         var probe = new ProbeHostedService();
 
+        // Not `await using`: DisposeAsync is called explicitly below, mid-test, so the
+        // pool's disposal can be observed at a specific point rather than only at scope
+        // exit. The try/finally is what keeps this safe — without it, a failure in either
+        // assertion above the DisposeAsync call would skip disposal entirely, leaking the
+        // provider, the router and the simulated target's reconnect loop for the rest of
+        // the test process.
         var pool = await AdsConnectionPoolBuilder.CreateSimulation()
             .ConfigureServices(s => s.AddSingleton<IHostedService>(probe))
             .AddTarget("plc1", o => o.DisplayName = "Simulated PLC")
             .BuildAndStartAsync();
-
-        Assert.True(probe.Started);
-        Assert.False(probe.Stopped);
-
-        await pool.DisposeAsync();
+        try
+        {
+            Assert.True(probe.Started);
+            Assert.False(probe.Stopped);
+        }
+        finally
+        {
+            await pool.DisposeAsync();
+        }
 
         Assert.True(probe.Stopped);
     }
@@ -261,7 +277,13 @@ public class AdsConnectionPoolBuilderParityTests
     public async Task StandaloneAndHosted_ProduceTheSameTargetStates()
     {
         // The strongest parity assertion available without hardware: the same
-        // configuration through both entry points yields the same observable pool state.
+        // configuration through both entry points yields the same observable pool state —
+        // and BOTH sides now go through the same hosted-service composition to get there.
+        // Starting only AdsConnectionPool directly (an earlier version of this test did)
+        // would leave AdsRouterService and AdsRawChannelFactory — both lazy factory
+        // registrations — never even constructed, so the comparison would not exercise
+        // hosted-service startup at all; it would happen to still pass for an all-simulated
+        // config, for reasons that have nothing to do with what this test claims to cover.
         await using var standalone = await AdsConnectionPoolBuilder.CreateSimulation()
             .AddTarget("plc1", o => o.DisplayName = "A")
             .AddTarget("plc2", o => o.DisplayName = "B")
@@ -275,17 +297,25 @@ public class AdsConnectionPoolBuilderParityTests
             o.Targets["plc2"] = new PlcTargetOptions { DisplayName = "B" };
         });
         await using var provider = services.BuildServiceProvider();
-        var hostedPool = provider.GetRequiredService<AdsConnectionPool>();
-        await hostedPool.StartAsync(CancellationToken.None);
+
+        // Every IHostedService, in registration order — router, pool, raw channels —
+        // exactly what a generic host's Host.StartAsync would start.
+        var hostedServices = provider.GetServices<IHostedService>().ToList();
+        foreach (var hostedService in hostedServices)
+            await hostedService.StartAsync(CancellationToken.None);
         try
         {
+            // Resolved as IAdsConnectionPool, not the internal AdsConnectionPool type
+            // directly, so this is the same object a consumer would get from DI.
+            var hostedPool = provider.GetRequiredService<IAdsConnectionPool>();
             Assert.Equal(
                 hostedPool.GetTargetStates().Select(s => (s.PlcId, s.Mode, s.State)),
                 standalone.GetTargetStates().Select(s => (s.PlcId, s.Mode, s.State)));
         }
         finally
         {
-            await hostedPool.StopAsync(CancellationToken.None);
+            for (var i = hostedServices.Count - 1; i >= 0; i--)
+                await hostedServices[i].StopAsync(CancellationToken.None);
         }
     }
 }
