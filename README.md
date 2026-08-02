@@ -419,6 +419,29 @@ foreach (var (plcId, conn) in pool.GetAllConnections())
     Console.WriteLine($"{plcId} ({conn.DisplayName}) connected: {conn.IsConnected}");
 ```
 
+### Keyed injection — one target, named once
+
+A service that talks to a single PLC can name it at the injection point instead of at every lookup:
+
+```csharp
+public class TempService([FromKeyedServices("plc1")] IAdsConnection conn)
+{
+    public Task<double> ReadAsync() => conn.ReadValueAsync<double>("MAIN.rTemperature");
+}
+```
+
+Every configured target is resolvable this way, from all six `AddTwinCatAds` / `AddTwinCatAdsSimulation` overloads — including targets added by a `services.Configure<TwinCatAdsOptions>(...)` call made *after* registration. The keyed connection **is** the pool's facade, not a copy: `sp.GetRequiredKeyedService<IAdsConnection>("plc1")` and `pool.GetConnection("plc1")` return the same instance, so a subscription taken through one is visible to the other. Keys are case-insensitive, exactly as `GetConnection` is.
+
+An unknown id fails at container resolution with `UnknownPlcTargetException` listing every configured id, rather than at the first PLC call. **`GetKeyedService` throws too** rather than returning `null` — the registration is a factory, so it runs on the optional path as well. Use `pool.TryGetConnection` when the id may legitimately not be configured.
+
+A test can substitute a single target by registering an explicit key, which takes precedence over the keyed registration while leaving every other target real:
+
+```csharp
+services.AddKeyedSingleton<IAdsConnection>("plc1", new StubConnection());  // plc2 unaffected
+```
+
+`IAdsConnectionPool` is unchanged and remains the right answer for code that works across targets — and the only way to **enumerate** them. `GetKeyedServices<IAdsConnection>(KeyedService.AnyKey)` does not work for that: on .NET 8 and 9 it throws (the container passes the `AnyKey` sentinel to the factory, and a sentinel names no target), and on .NET 10 it returns empty. Use `pool.GetAllConnections()`. Injecting `IEnumerable<IAdsConnection>` likewise yields nothing — the keyed registration deliberately does not leak into the unkeyed enumeration.
+
 ## Connection State
 
 ```csharp
