@@ -103,6 +103,6 @@ public sealed class TestPlcBuilder
     public async Task<TestPlc> StartAsync(CancellationToken ct = default)
     {
         var handle = await _builder.BuildAndStartAsync(ct).ConfigureAwait(false);
-        return new TestPlc(handle);
+        return new TestPlc(handle, _targetIds);
     }
 }

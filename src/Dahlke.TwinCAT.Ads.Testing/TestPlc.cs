@@ -22,8 +22,26 @@ namespace Dahlke.TwinCAT.Ads.Testing;
 public sealed class TestPlc : IAsyncDisposable
 {
     private readonly AdsConnectionPoolHandle _handle;
+    private readonly Dictionary<string, TestPlcTarget> _targets =
+        new(StringComparer.OrdinalIgnoreCase);
 
-    internal TestPlc(AdsConnectionPoolHandle handle) => _handle = handle;
+    internal TestPlc(AdsConnectionPoolHandle handle, IEnumerable<string> targetIds)
+    {
+        _handle = handle;
+
+        // Built eagerly, at start, so every target is recording from the first instruction
+        // of the test. A lazily-created recorder would miss writes the system under test
+        // made before the test first asked for the handle.
+        foreach (var plcId in targetIds)
+        {
+            if (!handle.TryGetSimulatedConnection(plcId, out var simulated))
+                throw new InvalidOperationException(
+                    $"Target '{plcId}' did not start as a simulated connection. This should be "
+                    + "impossible for a TestPlc, which forces simulation for every target.");
+
+            _targets[plcId] = new TestPlcTarget(plcId, simulated);
+        }
+    }
 
     /// <summary>Starts configuring a harness.</summary>
     public static TestPlcBuilder Create() => new();
@@ -44,6 +62,33 @@ public sealed class TestPlc : IAsyncDisposable
     /// <exception cref="UnknownPlcTargetException">No such target is configured.</exception>
     public IAdsConnection Connection(string plcId) => _handle.GetConnection(plcId);
 
-    /// <summary>Stops the pool. Idempotent.</summary>
-    public ValueTask DisposeAsync() => _handle.DisposeAsync();
+    /// <summary>
+    /// The driver handle for a target: seed it, drive it, and read back what the code
+    /// under test wrote.
+    /// </summary>
+    /// <param name="plcId">The target identifier, matched case-insensitively.</param>
+    /// <returns>
+    /// The handle for that target. Its identity is stable for the harness's lifetime, so
+    /// the write log accumulates across calls.
+    /// </returns>
+    /// <exception cref="UnknownPlcTargetException">No such target is configured.</exception>
+    public TestPlcTarget Target(string plcId)
+    {
+        ArgumentNullException.ThrowIfNull(plcId);
+
+        if (_targets.TryGetValue(plcId, out var target))
+            return target;
+
+        throw new UnknownPlcTargetException(
+            plcId, _targets.Keys.OrderBy(id => id, StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Stops the pool and detaches every target recorder. Idempotent.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var target in _targets.Values)
+            target.Dispose();
+
+        await _handle.DisposeAsync().ConfigureAwait(false);
+    }
 }
