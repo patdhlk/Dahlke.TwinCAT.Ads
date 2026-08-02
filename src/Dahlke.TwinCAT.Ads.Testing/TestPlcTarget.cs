@@ -58,8 +58,7 @@ public sealed class TestPlcTarget : IDisposable
     // data race, and liable to invert the discard if it lands last). Checking the
     // thread ID routes both cases straight to `_writes` instead — correct, because a
     // write from any other thread was never part of the synchronous chain the
-    // discard-last rule depends on — and removes the data race for free, since only
-    // the installing thread is ever allowed to touch a scope's buffer.
+    // discard-last rule depends on.
     //
     // A prior version of this field cleared the AsyncLocal unconditionally in `finally`
     // rather than restoring the previous value, which broke a re-entrant Write (a
@@ -70,16 +69,43 @@ public sealed class TestPlcTarget : IDisposable
     // the SAME thread composes correctly because each inner Write hands its own
     // (already discard-last'd) remainder up into the scope it displaced, rather than
     // into `_writes` directly.
+    //
+    // The thread-ID check alone is still not enough: it asks "same thread?" but never
+    // "is this scope still live?". AsyncLocal keeps a scope reachable from ANY
+    // continuation whose ExecutionContext was captured while that scope was installed —
+    // and the thread pool can later resume such a continuation on the very thread that
+    // installed the scope, after that scope's OWN Write call already returned and
+    // drained it. A thread-only check matches that stale scope and appends into a
+    // buffer nobody will ever read again — the same orphaning the thread check was
+    // meant to prevent, reached through a different door. HarnessWriteScope.Closed
+    // closes that gap: set as the very first action in Write's finally (before the
+    // AsyncLocal is even restored), and required — alongside the thread-ID check, not
+    // instead of it — everywhere a scope's buffer might be touched.
     private readonly AsyncLocal<HarnessWriteScope?> _harnessWrite = new();
 
-    // One per in-flight (possibly nested) Write call on one thread. Buffered is
-    // touched ONLY by the thread recorded in ThreadId — see the field comment on
-    // _harnessWrite — so it needs no lock of its own.
+    // One per in-flight (possibly nested) Write call on one thread.
     private sealed class HarnessWriteScope
     {
         internal HarnessWriteScope(int threadId) => ThreadId = threadId;
         internal int ThreadId { get; }
         internal List<PlcWrite> Buffered { get; } = [];
+
+        // Set as the first action in Write's finally — see the field comment on
+        // _harnessWrite. A plain bool, not volatile and not Interlocked, which is
+        // deliberate: Buffered is touched only where BOTH this flag and ThreadId are
+        // checked together (OnValueWritten's append, and the nested-commit AddRange in
+        // Write below), never on ThreadId alone, and a matching ThreadId with Closed
+        // still false can only mean the literal same physical thread reading its own
+        // scope back — always safe, a thread's own prior writes are visible to its own
+        // later reads in program order without a barrier. The only way a DIFFERENT
+        // physical thread could ever see a matching ThreadId is the runtime reusing a
+        // terminated thread's numeric ManagedThreadId, which requires that original
+        // thread to have already exited — and a thread cannot exit mid-Write, so by the
+        // time its ID is up for reuse, Closed is already true and thread termination
+        // itself is a safe publication point for that write. Every mismatched-thread
+        // case routes to `_writes` directly regardless of what `Closed` reads as, so a
+        // hypothetically stale read here can never change the outcome.
+        internal bool Closed { get; set; }
     }
 
     private readonly List<PlcWrite> _writes = [];
@@ -198,6 +224,10 @@ public sealed class TestPlcTarget : IDisposable
         }
         finally
         {
+            // Closed FIRST, before the AsyncLocal is even restored — see
+            // HarnessWriteScope.Closed for why the order matters and why a plain bool
+            // is safe here without volatile or Interlocked.
+            scope.Closed = true;
             _harnessWrite.Value = previous;
 
             // The harness's own ValueWritten is guaranteed to be the scope's LAST
@@ -211,15 +241,27 @@ public sealed class TestPlcTarget : IDisposable
             {
                 var reactive = scope.Buffered.GetRange(0, scope.Buffered.Count - 1);
 
-                // Nested inside an outer Write on the same thread: hand the remainder
-                // up into the outer scope rather than `_writes` directly — it is still
-                // the outer call's dynamic extent, and the outer call's own finally
-                // will discard-last again once IT completes.
-                if (previous is not null)
+                // Nested inside an outer Write, on the same thread, and that outer
+                // call's own finally has not yet run: hand the remainder up into the
+                // outer scope rather than `_writes` directly — it is still the outer
+                // call's dynamic extent, and the outer call's own finally will
+                // discard-last again once IT completes. Both conjuncts are required: a
+                // Task.Run spawned from a callback can flow `previous` in from an
+                // ALREADY-closed outer scope (previous.Closed) or from a DIFFERENT
+                // thread than the one that installed it (previous.ThreadId) — either
+                // one means the outer scope's own buffer is not a safe place to write
+                // into, and this write belongs in `_writes` directly instead, same as
+                // any other cross-thread write.
+                if (previous is not null && !previous.Closed
+                    && previous.ThreadId == Environment.CurrentManagedThreadId)
+                {
                     previous.Buffered.AddRange(reactive);
+                }
                 else
+                {
                     lock (_gate)
                         _writes.AddRange(reactive);
+                }
             }
         }
     }
@@ -265,19 +307,25 @@ public sealed class TestPlcTarget : IDisposable
     {
         var write = new PlcWrite(e.SymbolPath, e.Value, e.PreviousValue, e.Changed);
 
-        // A scope installed on THIS instance's AsyncLocal, AND whose installing thread
-        // is the one raising this event, means the event fired inside THIS target's own
-        // Write call, synchronously, on the thread the discard-last guarantee actually
-        // covers — either the harness's own write or a reaction it triggered. Buffer
-        // it; Write sorts out which is which once the call completes.
+        // A scope installed on THIS instance's AsyncLocal, NOT YET Closed, AND whose
+        // installing thread is the one raising this event, means the event fired
+        // inside THIS target's own Write call, synchronously, on the thread the
+        // discard-last guarantee actually covers — either the harness's own write or a
+        // reaction it triggered. Buffer it; Write sorts out which is which once the
+        // call completes.
         //
         // A scope with a DIFFERENT ThreadId means the AsyncLocal flowed here from a
         // Task.Run spawned inside a callback — a genuinely different thread, outside
-        // the guarantee the buffer depends on. That write goes straight to the log, the
-        // same as one with no scope at all (the code under test, or a reaction driven
-        // on a different target's Write).
+        // the guarantee the buffer depends on. A scope that IS Closed means the
+        // AsyncLocal flowed here from a continuation whose context was captured while
+        // the scope was live but is resuming — possibly on the very thread that
+        // installed it — after that scope's own Write call already drained and
+        // abandoned it; ThreadId alone cannot tell that case apart from a still-live
+        // scope, which is exactly why Closed exists. Either way this write goes
+        // straight to the log, the same as one with no scope at all (the code under
+        // test, or a reaction driven on a different target's Write).
         var scope = _harnessWrite.Value;
-        if (scope is not null && scope.ThreadId == Environment.CurrentManagedThreadId)
+        if (scope is { Closed: false } && scope.ThreadId == Environment.CurrentManagedThreadId)
         {
             scope.Buffered.Add(write);
             return;

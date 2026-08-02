@@ -396,17 +396,18 @@ public class TestPlcTargetTests
         var conn = plc.Connection("plc1");
         var target = plc.Target("plc1");
 
+        // A timer-based delay (Task.Delay) yields a continuation the scheduler tends to
+        // resume on a DIFFERENT pool thread, which passed even against the pre-fix
+        // thread-only check for reasons that had nothing to do with correctness — the
+        // test discriminated by scheduler luck, not by the property it claimed to pin.
+        // Task.Yield's continuation is far more likely to resume on the SAME thread
+        // that queued it, which is the scenario that actually matters here.
         Task? sutTask = null;
         await conn.SubscribeAsync("GVL.Trigger", 100, (_, _) =>
         {
             sutTask = Task.Run(async () =>
             {
-                // Gives target.Write a realistic chance to have already returned — and
-                // so, for a thread-naive implementation, to have already cleared the
-                // scope it captured — before this write lands. Not a race that might
-                // not occur: Write's own body is synchronous and returns in
-                // microseconds against this 50ms delay.
-                await Task.Delay(50);
+                await Task.Yield();
                 await conn.WriteValueAsync("GVL.Late", 1);
             });
         });
@@ -414,6 +415,43 @@ public class TestPlcTargetTests
         target.Write("GVL.Trigger", true);
         Assert.NotNull(sutTask);
         await sutTask;
+
+        var write = Assert.Single(target.WritesTo("GVL.Late"));
+        Assert.Equal(1, write.Value);
+    }
+
+    [Fact]
+    public async Task AWriteResumingOnTheInstallingThreadAfterWriteReturned_IsRecorded()
+    {
+        // The Critical this pins, reproduced deterministically rather than as a stress
+        // loop (a flaky-red test is nearly as bad as a flaky-green one). A thread-ID
+        // check alone asks "same thread?" but never "is this scope still finished?".
+        // AsyncLocal keeps a scope reachable from ANY continuation whose
+        // ExecutionContext was captured while that scope was installed, and nothing
+        // stops the thread pool from resuming such a continuation on the very thread
+        // that installed the scope — after that scope's own Write call has already
+        // returned and drained it. ExecutionContext.Run reproduces exactly that:
+        // capture the context live, during Write, then re-enter it synchronously, on
+        // this same thread, once Write has already returned.
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var conn = plc.Connection("plc1");
+        var target = plc.Target("plc1");
+
+        ExecutionContext? capturedDuringWrite = null;
+        await conn.SubscribeAsync("GVL.Trigger", 100, (_, _) =>
+            capturedDuringWrite = ExecutionContext.Capture());
+
+        target.Write("GVL.Trigger", true);
+        Assert.NotNull(capturedDuringWrite);
+
+        // Runs synchronously on THIS thread — the same thread that just ran Write()
+        // above — but with the ambient AsyncLocal state rewound to what it was
+        // mid-Write, while the scope was still installed. Write already returned, so
+        // that scope's own finally has already run: Closed is true.
+        ExecutionContext.Run(
+            capturedDuringWrite,
+            _ => conn.WriteValueAsync("GVL.Late", 1).GetAwaiter().GetResult(),
+            null);
 
         var write = Assert.Single(target.WritesTo("GVL.Late"));
         Assert.Equal(1, write.Value);
