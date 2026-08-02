@@ -85,8 +85,8 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Never throws.</b> A service that fails to stop is logged as an error — through
-    /// the logger factory supplied via
+    /// <b>A hosted service that fails to stop does not throw.</b> It is logged as an error
+    /// — through the logger factory supplied via
     /// <see cref="AdsConnectionPoolBuilder.UseLoggerFactory"/>, or silently swallowed by
     /// the null logger if none was supplied — rather than thrown; the remaining services
     /// still stop, in order, and the provider is still disposed either way.
@@ -99,6 +99,26 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     /// actually needs to see. The generic host makes the same choice for the same reason:
     /// <c>Host.StopAsync</c> may throw; <c>Host.DisposeAsync</c> does not.
     /// </para>
+    /// <para>
+    /// <b>The final provider disposal is NOT guarded</b>, so this method is not
+    /// exception-free: a singleton whose own <c>Dispose</c>/<c>DisposeAsync</c> throws
+    /// propagates out of here, and inside an <c>await using</c> it will mask a pending
+    /// exception exactly as described above. This is deliberate and matches
+    /// <c>Host.DisposeAsync</c>, which disposes its provider unguarded too — a service
+    /// that cannot even be disposed is a defect the caller should see, not one to bury in
+    /// a log line. The hosted-service stop loop is guarded because a stop failure is an
+    /// ordinary, recoverable shutdown condition; a disposal failure is not.
+    /// </para>
+    /// <para>
+    /// <b>Stopping is unbounded.</b> Each <c>StopAsync</c> is passed
+    /// <see cref="CancellationToken.None"/>, where a generic host would pass a token
+    /// cancelled after <c>HostOptions.ShutdownTimeout</c> (30 seconds by default). A
+    /// hosted service that hangs in <c>StopAsync</c> therefore hangs this call
+    /// indefinitely, with nothing to break the wait. A deliberate current limitation, and
+    /// the one an application that registers its own hosted services through
+    /// <see cref="AdsConnectionPoolBuilder.ConfigureServices"/> should know about; a
+    /// shutdown-timeout knob can be added later without a breaking change.
+    /// </para>
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
@@ -109,6 +129,8 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
         {
             try
             {
+                // CancellationToken.None, not a timeout token: unbounded on purpose, and
+                // a documented limitation — see this method's remarks.
                 await _started[i].StopAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -120,6 +142,8 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
             }
         }
 
+        // Unguarded, unlike the stop loop above — see this method's remarks for why, and
+        // for the consequence: a throwing singleton Dispose propagates out of here.
         await _provider.DisposeAsync().ConfigureAwait(false);
     }
 }

@@ -60,12 +60,24 @@ public sealed class TestPlcBuilder
     /// <see cref="PlcTargetOptions"/> carries.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Named distinctly rather than being a third <c>WithTarget</c> overload: two overloads
     /// differing only in their delegate type would make <c>WithTarget("plc1", x =&gt; …)</c>
     /// depend on how the compiler resolves an implicitly-typed lambda against two
-    /// candidates. <see cref="PlcTargetOptions.Mode"/> is forced back to
-    /// <see cref="ConnectionMode.Simulated"/> regardless of what is set here — a
-    /// <see cref="TestPlc"/> never touches hardware.
+    /// candidates.
+    /// </para>
+    /// <para>
+    /// <see cref="PlcTargetOptions.Mode"/> ends up <see cref="ConnectionMode.Simulated"/>
+    /// regardless of what is set here — a <see cref="TestPlc"/> never touches hardware —
+    /// but NOT because of the <see cref="WithTarget(string)"/> call below, whose own
+    /// delegate runs BEFORE <paramref name="configure"/> and so is overwritten by it. The
+    /// enforcer is downstream: <c>AddTwinCatAdsSimulation</c>, which this builder always
+    /// uses, registers a <c>PostConfigure&lt;TwinCatAdsOptions&gt;</c> that flips every
+    /// target's mode after every <c>Configure</c> delegate has run. <c>PostConfigure</c>
+    /// is the last word in the options pipeline, so nothing set here can survive it.
+    /// <c>EveryTargetIsSimulated_EvenIfConfiguredReal</c> in <c>TestPlcTests</c> pins the
+    /// outcome.
+    /// </para>
     /// </remarks>
     /// <param name="plcId">The target identifier, matched case-insensitively.</param>
     /// <param name="configure">Applied to that target's options.</param>

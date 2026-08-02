@@ -133,6 +133,7 @@ public sealed class AdsConnectionPoolBuilder
     /// Adds services to the private container — the seam for companion packages.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// An <see cref="IHostedService"/> registered here is started and stopped with
     /// everything else, which is what lets a console app call
     /// <c>AddTwinCatAdsAlarms</c> and resolve the monitor from
@@ -146,6 +147,46 @@ public sealed class AdsConnectionPoolBuilder
     /// <c>StartAsync</c> runs — exactly as it would calling
     /// <c>AddTwinCatAds(...).AddTwinCatAdsAlarms(...)</c> on a generic host, where the
     /// second call's hosted service naturally starts after the first's.
+    /// </para>
+    /// <para>
+    /// <b>The private container is a hosted-service runner, not a host.</b> Startup and
+    /// shutdown call <see cref="IHostedService.StartAsync"/> and
+    /// <see cref="IHostedService.StopAsync"/> and nothing else. Concretely, four things a
+    /// generic host would do are absent:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <see cref="IHostedLifecycleService"/>'s <c>StartingAsync</c>,
+    ///     <c>StartedAsync</c>, <c>StoppingAsync</c> and <c>StoppedAsync</c> are never
+    ///     invoked, even on a service that implements the interface.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <c>BackgroundServiceExceptionBehavior</c> is not honoured. A
+    ///     <see cref="BackgroundService"/> whose <c>ExecuteAsync</c> faults after startup
+    ///     faults only its own task; nothing here observes that task, so the application
+    ///     keeps running where <c>StopHost</c> — the host default — would have brought it
+    ///     down.
+    ///   </description></item>
+    ///   <item><description>
+    ///     The provider is built with neither <c>ValidateScopes</c> nor
+    ///     <c>ValidateOnBuild</c>, so a captive dependency or an unresolvable registration
+    ///     surfaces at first resolve rather than at build.
+    ///   </description></item>
+    ///   <item><description>
+    ///     Shutdown is unbounded: there is no equivalent of
+    ///     <c>HostOptions.ShutdownTimeout</c>, so a <c>StopAsync</c> that hangs hangs
+    ///     <see cref="AdsConnectionPoolHandle.DisposeAsync"/> with it.
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// The first two are unreachable through this library's own registrations: the pool
+    /// and the raw-channel factory are plain <see cref="IHostedService"/> implementations
+    /// with no lifecycle hooks, and <c>AdsRouterService</c> — the one
+    /// <see cref="BackgroundService"/> among them — wraps the whole of its
+    /// <c>ExecuteAsync</c> in a catch-all, so its task never faults. A service registered
+    /// HERE can reach all four, which is why they are stated in one place rather than
+    /// left to be discovered one at a time.
+    /// </para>
     /// </remarks>
     /// <param name="configure">Applied to the service collection, in call order.</param>
     /// <returns>The same builder, for chaining.</returns>

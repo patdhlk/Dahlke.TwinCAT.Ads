@@ -134,6 +134,15 @@ public class SimulatedWriteEventTests
     {
         // Ordering is stated in the design: the store is updated, subscribers fire,
         // then ValueWritten. A handler that reads the value back sees the written one.
+        //
+        // NOT an implementation detail, and do not delete this as one: the
+        // Dahlke.TwinCAT.Ads.Testing package's write log depends on this exact order.
+        // TestPlcTarget buffers every ValueWritten raised inside a harness Write and
+        // discards only the LAST entry as the harness's own — which is correct only
+        // because every reaction a subscriber makes is appended before the triggering
+        // write's own event fires. Reverse these two steps and the harness's own writes
+        // start leaking into the log while genuine writes by the code under test are
+        // silently dropped.
         var sim = Create();
         var order = new List<string>();
         await sim.SubscribeAsync("GVL.Temp", 100, (_, _) => order.Add("subscriber"));

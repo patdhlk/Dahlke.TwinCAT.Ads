@@ -130,7 +130,7 @@ await using var pool = await AdsConnectionPoolBuilder
 var conn = pool.GetConnection("plc1");
 ```
 
-This is a face on the DI path, not a second implementation: the builder stands up a private `ServiceCollection`, calls the very same `AddTwinCatAds`, and starts what comes out. Options validation, the embedded router, reconnection, health tracking and raw channels all behave exactly as they do in a hosted application.
+This is a face on the DI path, not a second implementation: the builder stands up a private `ServiceCollection`, calls the very same `AddTwinCatAds`, and starts what comes out. So the five things this library does — options validation, the embedded router, reconnection, health tracking and raw channels — behave here exactly as they do in a hosted application, because they are the same registrations running the same code. What the private container is *not* is a generic host; see [Companion packages](#companion-packages) for where that shows.
 
 `CreateSimulation()` is the `AddTwinCatAdsSimulation` equivalent — every target in memory, no TwinCAT installation:
 
@@ -182,6 +182,15 @@ await using var pool = await AdsConnectionPoolBuilder
 
 var monitor = pool.Services.GetRequiredService<IPlcAlarmMonitor>();
 ```
+
+**The private container is a hosted-service runner, not a host.** It calls `StartAsync` and `StopAsync` and nothing else. Four things a generic host would do are absent:
+
+- `IHostedLifecycleService`'s `StartingAsync`/`StartedAsync`/`StoppingAsync`/`StoppedAsync` are never invoked, even on a service that implements the interface.
+- `BackgroundServiceExceptionBehavior` is not honoured. A `BackgroundService` whose `ExecuteAsync` faults after startup faults only its own task, which nothing observes — so the application keeps running where the host default, `StopHost`, would have brought it down.
+- The provider is built without `ValidateScopes` or `ValidateOnBuild`, so a captive dependency or an unresolvable registration surfaces at first resolve rather than at build.
+- Shutdown is unbounded — there is no `HostOptions.ShutdownTimeout` here, so a service that hangs in `StopAsync` hangs `DisposeAsync` with it.
+
+The first two are unreachable through this library's own services or `Dahlke.TwinCAT.Ads.Alarms`: the alarm monitor, the pool and the raw-channel factory are plain `IHostedService` implementations with no lifecycle hooks, and the embedded router — the one `BackgroundService` among them — wraps the whole of its `ExecuteAsync` in a catch-all, so its task never faults. All four matter for a service *you* register through `ConfigureServices`.
 
 ### Shutting down
 
