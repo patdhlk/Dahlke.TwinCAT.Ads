@@ -1,3 +1,5 @@
+using TwinCAT.Ads;
+
 namespace Dahlke.TwinCAT.Ads.Testing;
 
 /// <summary>
@@ -24,12 +26,25 @@ namespace Dahlke.TwinCAT.Ads.Testing;
 /// </remarks>
 public sealed class TestPlcTarget : IDisposable
 {
-    // Set only for the duration of a harness write. The simulated connection raises
-    // ValueWritten synchronously on the writer's execution context, so this is exact
-    // rather than a heuristic: a concurrent write from the code under test runs on its
-    // own context, where the flag is false, and is recorded normally. A time-window
-    // suppression would drop exactly those.
-    private static readonly AsyncLocal<bool> HarnessWriting = new();
+    // Installed only for the duration of a harness Write call — NOT a boolean flag.
+    // SimulatedAdsConnection fires subscription callbacks BEFORE ValueWritten,
+    // synchronously, INSIDE the write that triggered them — see
+    // SubscriptionCallbacksRunBeforeTheEvent in
+    // tests/Dahlke.TwinCAT.Ads.Tests/SimulatedWriteEventTests.cs, which this design
+    // depends on and must keep passing. So when the code under test reacts to a driven
+    // input by writing an output, that reactive write's own ValueWritten also fires
+    // while a boolean flag would still be set — wrongly suppressing exactly the SUT
+    // write this log exists to catch. Buffering instead works because the same
+    // before-the-event guarantee orders the buffer: every reactive write (however
+    // deeply nested) is appended before the harness's own write's event fires, so the
+    // harness's own is always the buffer's LAST entry — discard only that one.
+    //
+    // Per-instance, NOT static: a static AsyncLocal would share suppression state
+    // across every TestPlcTarget in the process, including targets on unrelated
+    // TestPlc harnesses running concurrently under a parallel test runner, and across
+    // targets within the same harness — a write driven on plc1 would wrongly suppress
+    // a reactive write recorded on plc2. Each instance's buffer is independent.
+    private readonly AsyncLocal<List<PlcWrite>?> _harnessWriteBuffer = new();
 
     private readonly List<PlcWrite> _writes = [];
     private readonly object _gate = new();
@@ -120,16 +135,32 @@ public sealed class TestPlcTarget : IDisposable
         ArgumentNullException.ThrowIfNull(symbolPath);
         ArgumentNullException.ThrowIfNull(value);
 
-        HarnessWriting.Value = true;
+        var buffer = new List<PlcWrite>();
+        _harnessWriteBuffer.Value = buffer;
         try
         {
             // The simulated write completes synchronously; awaiting it would flow the
-            // AsyncLocal through a continuation for no benefit.
+            // AsyncLocal through a continuation for no benefit. Every ValueWritten this
+            // call causes — the code under test's reactions first, this write's own
+            // last — lands in `buffer` via OnValueWritten below.
             _simulated.WriteValueAsync(symbolPath, value).GetAwaiter().GetResult();
         }
         finally
         {
-            HarnessWriting.Value = false;
+            _harnessWriteBuffer.Value = null;
+
+            // The harness's own ValueWritten is guaranteed to be the buffer's LAST
+            // entry — see the field comment on _harnessWriteBuffer for why. Commit
+            // everything except that last entry; an unexpectedly empty buffer commits
+            // nothing rather than throwing. Empty should be impossible (WriteValueAsync
+            // always raises ValueWritten for its own write, changed or not), but a
+            // defensive no-op costs nothing next to an IndexOutOfRangeException off a
+            // write that already happened.
+            if (buffer.Count > 0)
+            {
+                lock (_gate)
+                    _writes.AddRange(buffer.GetRange(0, buffer.Count - 1));
+            }
         }
     }
 
@@ -145,6 +176,15 @@ public sealed class TestPlcTarget : IDisposable
     /// <summary>Reads the current value of a symbol, converted to <typeparamref name="T"/>.</summary>
     /// <typeparam name="T">The type to convert to, by the simulated connection's own rules.</typeparam>
     /// <param name="symbolPath">The symbol path to read.</param>
+    /// <returns>The stored value, converted to <typeparamref name="T"/>.</returns>
+    /// <exception cref="AdsErrorException">
+    /// The symbol was never written or seeded. Unlike <see cref="Read(string)"/>, which
+    /// returns <see langword="null"/> for a missing symbol, this overload throws — a
+    /// missing symbol has no value to convert to <typeparamref name="T"/>, and the
+    /// caller explicitly asked for a concrete type. Matches
+    /// <see cref="SimulatedAdsConnection.ReadValueAsync{T}(string, CancellationToken)"/>,
+    /// which this wraps.
+    /// </exception>
     public T Read<T>(string symbolPath)
     {
         ArgumentNullException.ThrowIfNull(symbolPath);
@@ -163,11 +203,23 @@ public sealed class TestPlcTarget : IDisposable
 
     private void OnValueWritten(object? sender, SimulatedWriteEventArgs e)
     {
-        if (HarnessWriting.Value)
+        var write = new PlcWrite(e.SymbolPath, e.Value, e.PreviousValue, e.Changed);
+
+        // A buffer installed on THIS instance's AsyncLocal means this event fired
+        // inside THIS target's own Write call — either the harness's own write or a
+        // reaction it triggered. Buffer it; Write sorts out which is which once the
+        // call completes. No buffer means this write reached the store some other way
+        // (the code under test, or a reaction driven on a different target's Write),
+        // so it goes straight to the log.
+        var buffer = _harnessWriteBuffer.Value;
+        if (buffer is not null)
+        {
+            buffer.Add(write);
             return;
+        }
 
         lock (_gate)
-            _writes.Add(new PlcWrite(e.SymbolPath, e.Value, e.PreviousValue, e.Changed));
+            _writes.Add(write);
     }
 
     /// <summary>

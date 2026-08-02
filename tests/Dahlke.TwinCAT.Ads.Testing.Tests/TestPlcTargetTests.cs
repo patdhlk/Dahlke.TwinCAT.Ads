@@ -107,13 +107,72 @@ public class TestPlcTargetTests
     {
         await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
 
+        // A null entry is rejected per-symbol by WriteValuesAsync and never stored, so it
+        // must not appear in the log either — the log records what was written, and a
+        // rejected entry was not.
         await plc.Connection("plc1").WriteValuesAsync(new Dictionary<string, object?>
         {
             ["GVL.A"] = 1,
             ["GVL.B"] = 2,
+            ["GVL.C"] = null,
         });
 
-        Assert.Equal(2, plc.Target("plc1").Writes.Count);
+        var writes = plc.Target("plc1").Writes;
+        Assert.Equal(2, writes.Count);
+        Assert.Contains(writes, w => w.SymbolPath == "GVL.A" && Equals(w.Value, 1));
+        Assert.Contains(writes, w => w.SymbolPath == "GVL.B" && Equals(w.Value, 2));
+        Assert.Empty(plc.Target("plc1").WritesTo("GVL.C"));
+    }
+
+    [Fact]
+    public async Task AReactiveWriteTriggeredByAHarnessWrite_IsRecorded()
+    {
+        // THE Critical regression guard. SimulatedAdsConnection fires subscription
+        // callbacks synchronously, INSIDE the write that triggered them — so a SUT that
+        // reacts to a driven input by writing an output does so literally inside
+        // target.Write's call stack, before Write ever returns. A suppression mechanism
+        // that covers "everything that happens during a harness Write" (a boolean flag
+        // held for the call's duration) wrongly swallows this write too. It is exactly
+        // the write this log exists to catch: without it, driving GVL.Temp and then
+        // asserting the SUT wrote GVL.Heater would find nothing, passing while testing
+        // nothing — the same false pass the whole package exists to prevent, mirrored
+        // onto the harness's own drive call.
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var conn = plc.Connection("plc1");
+        var target = plc.Target("plc1");
+
+        await conn.SubscribeAsync("GVL.Temp", 100, (_, _) =>
+            conn.WriteValueAsync("GVL.Heater", true).GetAwaiter().GetResult());
+
+        target.Write("GVL.Temp", 30f);
+
+        Assert.True(target.Read<bool>("GVL.Heater"));
+        var write = Assert.Single(target.WritesTo("GVL.Heater"));
+        Assert.Equal(true, write.Value);
+        Assert.Empty(target.WritesTo("GVL.Temp"));
+    }
+
+    [Fact]
+    public async Task AReactiveWriteToADifferentTarget_IsRecordedOnThatTargetsLog()
+    {
+        // The exclusion buffer lives on TestPlcTarget as an instance field, not a static
+        // one shared by the type: a write driven on plc1 must not suppress a reaction
+        // the code under test makes on plc2 in response.
+        await using var plc = await TestPlc.Create()
+            .WithTarget("plc1")
+            .WithTarget("plc2")
+            .StartAsync();
+        var conn1 = plc.Connection("plc1");
+        var conn2 = plc.Connection("plc2");
+
+        await conn1.SubscribeAsync("GVL.Trigger", 100, (_, _) =>
+            conn2.WriteValueAsync("GVL.Mirror", 42).GetAwaiter().GetResult());
+
+        plc.Target("plc1").Write("GVL.Trigger", true);
+
+        var write = Assert.Single(plc.Target("plc2").WritesTo("GVL.Mirror"));
+        Assert.Equal(42, write.Value);
+        Assert.Empty(plc.Target("plc1").WritesTo("GVL.Trigger"));
     }
 
     [Fact]
@@ -151,13 +210,25 @@ public class TestPlcTargetTests
         // its exclusion flag is set. Releasing the SUT here and blocking until it
         // finishes guarantees the SUT's 20 writes execute inside the harness write's
         // dynamic extent — genuine overlap, not a race that usually resolves one way.
+        //
+        // The wait result is captured here and asserted AFTER target.Write returns,
+        // not inside the callback: SubscriberRegistry.SubscriberList.Fire (see
+        // src/Dahlke.TwinCAT.Ads/SubscriberRegistry.cs) catches every exception a
+        // callback throws and routes it to a log warning rather than letting it
+        // propagate. An Assert.True inside the callback would be swallowed on failure —
+        // Write would return normally, the SUT's writes would then run with no
+        // suppression active at all, all 20 would be recorded, and the test would PASS
+        // for the wrong reason: silently degenerating back into a non-discriminating
+        // test with no guard actually enforced.
+        var sutCompletedInTime = false;
         await conn.SubscribeAsync("GVL.Trigger", 100, (_, _) =>
         {
             releaseSut.Release();
-            Assert.True(sutDone.Wait(TimeSpan.FromSeconds(10)), "SUT writes did not complete in time.");
+            sutCompletedInTime = sutDone.Wait(TimeSpan.FromSeconds(10));
         });
 
         target.Write("GVL.Trigger", true);
+        Assert.True(sutCompletedInTime, "SUT writes did not complete in time.");
         await sutWrites;
 
         Assert.Equal(20, target.WritesTo("GVL.Out").Count);
@@ -216,5 +287,66 @@ public class TestPlcTargetTests
         await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
 
         Assert.Throws<UnknownPlcTargetException>(() => plc.Target("nope"));
+    }
+
+    [Fact]
+    public async Task PlcId_ReturnsTheConfiguredIdentifier()
+    {
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+
+        Assert.Equal("plc1", plc.Target("plc1").PlcId);
+    }
+
+    [Fact]
+    public async Task Write_NullValue_Throws()
+    {
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var target = plc.Target("plc1");
+
+        Assert.Throws<ArgumentNullException>(() => target.Write("GVL.Temp", null));
+    }
+
+    [Fact]
+    public async Task SeedDictionary_IsSilentAndUnrecorded()
+    {
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var target = plc.Target("plc1");
+
+        var notified = 0;
+        await plc.Connection("plc1").SubscribeAsync("GVL.Temp", 100, (_, _) => notified++);
+
+        target.Seed(new Dictionary<string, object?> { ["GVL.Temp"] = 21.5f, ["GVL.Other"] = 1 });
+
+        Assert.Equal(0, notified);
+        Assert.Empty(target.Writes);
+        Assert.Equal(21.5f, target.Read<float>("GVL.Temp"));
+        Assert.Equal(1, target.Read<int>("GVL.Other"));
+    }
+
+    [Fact]
+    public async Task Dispose_IsIdempotent()
+    {
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var target = plc.Target("plc1");
+
+        target.Dispose();
+        target.Dispose();
+    }
+
+    [Fact]
+    public async Task TestPlcDisposeAsync_DetachesRecorders_SoALaterWriteIsNotRecorded()
+    {
+        // Not merely "the pool stopped" (TestPlcTests already covers that) — specifically
+        // that the recorder's own event subscription was torn down, so a write reaching
+        // the still-live SimulatedAdsConnection object after disposal is not recorded.
+        var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var target = plc.Target("plc1");
+        var simulated = target.Simulated;
+
+        await plc.DisposeAsync();
+
+        await simulated.WriteValueAsync("GVL.A", 1);
+
+        Assert.Empty(target.Writes);
     }
 }

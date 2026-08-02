@@ -29,17 +29,33 @@ public sealed class TestPlc : IAsyncDisposable
     {
         _handle = handle;
 
-        // Built eagerly, at start, so every target is recording from the first instruction
-        // of the test. A lazily-created recorder would miss writes the system under test
-        // made before the test first asked for the handle.
-        foreach (var plcId in targetIds)
+        try
         {
-            if (!handle.TryGetSimulatedConnection(plcId, out var simulated))
-                throw new InvalidOperationException(
-                    $"Target '{plcId}' did not start as a simulated connection. This should be "
-                    + "impossible for a TestPlc, which forces simulation for every target.");
+            // Built eagerly, at start, so every target is recording from the first
+            // instruction of the test. A lazily-created recorder would miss writes the
+            // system under test made before the test first asked for the handle.
+            foreach (var plcId in targetIds)
+            {
+                if (!handle.TryGetSimulatedConnection(plcId, out var simulated))
+                    throw new InvalidOperationException(
+                        $"Target '{plcId}' did not start as a simulated connection. This should be "
+                        + "impossible for a TestPlc, which forces simulation for every target.");
 
-            _targets[plcId] = new TestPlcTarget(plcId, simulated);
+                _targets[plcId] = new TestPlcTarget(plcId, simulated);
+            }
+        }
+        catch
+        {
+            // A throw mid-loop must not leave the targets built so far still subscribed
+            // and the pool still running: the constructor never returned, so nothing
+            // will ever call DisposeAsync to clean them up. AsTask().GetAwaiter()
+            // .GetResult() is the pattern AdsConnectionPoolHandle.DisposeAsync's own
+            // remarks name for exactly this — a synchronous context with no way to await.
+            foreach (var target in _targets.Values)
+                target.Dispose();
+
+            handle.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw;
         }
     }
 
