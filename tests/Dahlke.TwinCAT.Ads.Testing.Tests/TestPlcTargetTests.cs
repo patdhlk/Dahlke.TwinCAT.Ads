@@ -349,4 +349,73 @@ public class TestPlcTargetTests
 
         Assert.Empty(target.Writes);
     }
+
+    [Fact]
+    public async Task ReEntrantHarnessWrite_FromASubscriptionCallback_RecordsOnlyTheGenuineSutReaction()
+    {
+        // N1: a subscription callback that itself calls target.Write again — a natural
+        // cascade ("once the SUT acks, drive the next input") — must not let the outer
+        // Write's own event slip into the log, and must not lose a genuine SUT reaction
+        // nested inside the inner Write either. A version that clears the AsyncLocal
+        // unconditionally in Write's finally (rather than saving/restoring the previous
+        // value) lets the inner call's finally de-install the OUTER scope: the outer
+        // write's own event then finds no scope and gets recorded directly, while the
+        // outer scope's real entries are stranded with nowhere to commit to.
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var conn = plc.Connection("plc1");
+        var target = plc.Target("plc1");
+
+        // The cascade: GVL.Trigger's callback drives GVL.NextStep via a second,
+        // re-entrant target.Write call — harness code, not the code under test.
+        await conn.SubscribeAsync("GVL.Trigger", 100, (_, _) => target.Write("GVL.NextStep", true));
+
+        // The genuine SUT: reacts to GVL.NextStep — the harness's re-entrant write — by
+        // writing GVL.A. This is the one write that belongs in the log.
+        await conn.SubscribeAsync("GVL.NextStep", 100, (_, _) =>
+            conn.WriteValueAsync("GVL.A", 1).GetAwaiter().GetResult());
+
+        target.Write("GVL.Trigger", true);
+
+        var write = Assert.Single(target.Writes);
+        Assert.Equal("GVL.A", write.SymbolPath);
+        Assert.Empty(target.WritesTo("GVL.Trigger"));
+        Assert.Empty(target.WritesTo("GVL.NextStep"));
+    }
+
+    [Fact]
+    public async Task ATaskRunSpawnedFromASubscriptionCallback_JoinedAfterWriteReturns_IsRecorded()
+    {
+        // N2: AsyncLocal flows into a Task.Run spawned from inside a callback, carrying
+        // whatever buffer/scope was installed along with it — even though that task
+        // runs on its OWN thread, outside the synchronous chain the discard-last rule
+        // depends on. If that task's write lands after Write's own finally has already
+        // read and cleared the scope, a version that does not check which thread
+        // installed the scope appends to an orphaned buffer nobody will ever read again
+        // — silently lost, not merely misattributed.
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var conn = plc.Connection("plc1");
+        var target = plc.Target("plc1");
+
+        Task? sutTask = null;
+        await conn.SubscribeAsync("GVL.Trigger", 100, (_, _) =>
+        {
+            sutTask = Task.Run(async () =>
+            {
+                // Gives target.Write a realistic chance to have already returned — and
+                // so, for a thread-naive implementation, to have already cleared the
+                // scope it captured — before this write lands. Not a race that might
+                // not occur: Write's own body is synchronous and returns in
+                // microseconds against this 50ms delay.
+                await Task.Delay(50);
+                await conn.WriteValueAsync("GVL.Late", 1);
+            });
+        });
+
+        target.Write("GVL.Trigger", true);
+        Assert.NotNull(sutTask);
+        await sutTask;
+
+        var write = Assert.Single(target.WritesTo("GVL.Late"));
+        Assert.Equal(1, write.Value);
+    }
 }

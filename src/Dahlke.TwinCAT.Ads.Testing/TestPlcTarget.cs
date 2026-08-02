@@ -43,8 +43,44 @@ public sealed class TestPlcTarget : IDisposable
     // across every TestPlcTarget in the process, including targets on unrelated
     // TestPlc harnesses running concurrently under a parallel test runner, and across
     // targets within the same harness — a write driven on plc1 would wrongly suppress
-    // a reactive write recorded on plc2. Each instance's buffer is independent.
-    private readonly AsyncLocal<List<PlcWrite>?> _harnessWriteBuffer = new();
+    // a reactive write recorded on plc2. Each instance's scope is independent.
+    //
+    // The scope also carries the ID of the thread that installed it, and that thread
+    // check is not optional. The "harness's own write is always the buffer's LAST
+    // entry" guarantee holds only for writes that happen synchronously, on the SAME
+    // thread that called Write — that is the scope of
+    // SubscriptionCallbacksRunBeforeTheEvent. AsyncLocal, however, also flows into a
+    // Task.Run spawned from inside a callback, which runs on a DIFFERENT thread and is
+    // outside that guarantee entirely: such a write might land after Write's own
+    // finally has already read and cleared the scope (orphaning it — appended to a
+    // list nobody will ever read again), or land on another thread while the scope is
+    // still installed but interleaved with the owning thread's own appends (a List<T>
+    // data race, and liable to invert the discard if it lands last). Checking the
+    // thread ID routes both cases straight to `_writes` instead — correct, because a
+    // write from any other thread was never part of the synchronous chain the
+    // discard-last rule depends on — and removes the data race for free, since only
+    // the installing thread is ever allowed to touch a scope's buffer.
+    //
+    // A prior version of this field cleared the AsyncLocal unconditionally in `finally`
+    // rather than restoring the previous value, which broke a re-entrant Write (a
+    // subscription callback that itself calls target.Write, e.g. "drive the next input
+    // once the SUT acks"): the inner call's finally de-installed the OUTER scope, so
+    // the outer write's own event found no scope and was wrongly recorded, while the
+    // outer scope's real entries had nowhere to go. Save/restore fixes that: nesting on
+    // the SAME thread composes correctly because each inner Write hands its own
+    // (already discard-last'd) remainder up into the scope it displaced, rather than
+    // into `_writes` directly.
+    private readonly AsyncLocal<HarnessWriteScope?> _harnessWrite = new();
+
+    // One per in-flight (possibly nested) Write call on one thread. Buffered is
+    // touched ONLY by the thread recorded in ThreadId — see the field comment on
+    // _harnessWrite — so it needs no lock of its own.
+    private sealed class HarnessWriteScope
+    {
+        internal HarnessWriteScope(int threadId) => ThreadId = threadId;
+        internal int ThreadId { get; }
+        internal List<PlcWrite> Buffered { get; } = [];
+    }
 
     private readonly List<PlcWrite> _writes = [];
     private readonly object _gate = new();
@@ -70,6 +106,15 @@ public sealed class TestPlcTarget : IDisposable
     /// <summary>
     /// Every write the code under test made to this target, oldest first.
     /// </summary>
+    /// <remarks>
+    /// "Oldest first" means the order writes were recorded in, which is usually but not
+    /// always the order they happened in. A write the code under test makes IN REACTION
+    /// TO a <see cref="Write"/> call is recorded when that call returns, not the instant
+    /// it happens — so it can appear after an unrelated write that another thread made
+    /// directly to <c>_writes</c> while the <see cref="Write"/> call was still running.
+    /// This is a narrow case (concurrent writers to the same target during a harness
+    /// drive) and does not affect the far more common case of a single-threaded test.
+    /// </remarks>
     public IReadOnlyList<PlcWrite> Writes
     {
         get { lock (_gate) return _writes.ToArray(); }
@@ -79,6 +124,7 @@ public sealed class TestPlcTarget : IDisposable
     /// The writes the code under test made to one symbol path, oldest first. The path is
     /// matched case-insensitively, as every simulated symbol path is.
     /// </summary>
+    /// <remarks>See the ordering note on <see cref="Writes"/>.</remarks>
     /// <param name="symbolPath">The path to filter on.</param>
     public IReadOnlyList<PlcWrite> WritesTo(string symbolPath)
     {
@@ -135,31 +181,45 @@ public sealed class TestPlcTarget : IDisposable
         ArgumentNullException.ThrowIfNull(symbolPath);
         ArgumentNullException.ThrowIfNull(value);
 
-        var buffer = new List<PlcWrite>();
-        _harnessWriteBuffer.Value = buffer;
+        // Saved so a re-entrant Write (called from a subscription callback this very
+        // call triggers, on the SAME thread) can hand its own remainder up into the
+        // scope it is about to displace, and so `finally` can put that scope back
+        // rather than leaving the AsyncLocal cleared out from under an outer call.
+        var previous = _harnessWrite.Value;
+        var scope = new HarnessWriteScope(Environment.CurrentManagedThreadId);
+        _harnessWrite.Value = scope;
         try
         {
             // The simulated write completes synchronously; awaiting it would flow the
             // AsyncLocal through a continuation for no benefit. Every ValueWritten this
-            // call causes — the code under test's reactions first, this write's own
-            // last — lands in `buffer` via OnValueWritten below.
+            // call causes on THIS thread — the code under test's reactions first, this
+            // write's own last — lands in `scope.Buffered` via OnValueWritten below.
             _simulated.WriteValueAsync(symbolPath, value).GetAwaiter().GetResult();
         }
         finally
         {
-            _harnessWriteBuffer.Value = null;
+            _harnessWrite.Value = previous;
 
-            // The harness's own ValueWritten is guaranteed to be the buffer's LAST
-            // entry — see the field comment on _harnessWriteBuffer for why. Commit
-            // everything except that last entry; an unexpectedly empty buffer commits
-            // nothing rather than throwing. Empty should be impossible (WriteValueAsync
-            // always raises ValueWritten for its own write, changed or not), but a
-            // defensive no-op costs nothing next to an IndexOutOfRangeException off a
-            // write that already happened.
-            if (buffer.Count > 0)
+            // The harness's own ValueWritten is guaranteed to be the scope's LAST
+            // entry — see the field comment on _harnessWrite for why. Commit everything
+            // except that last entry; an unexpectedly empty buffer commits nothing
+            // rather than throwing. Empty should be impossible (WriteValueAsync always
+            // raises ValueWritten for its own write, changed or not), but a defensive
+            // no-op costs nothing next to an IndexOutOfRangeException off a write that
+            // already happened.
+            if (scope.Buffered.Count > 0)
             {
-                lock (_gate)
-                    _writes.AddRange(buffer.GetRange(0, buffer.Count - 1));
+                var reactive = scope.Buffered.GetRange(0, scope.Buffered.Count - 1);
+
+                // Nested inside an outer Write on the same thread: hand the remainder
+                // up into the outer scope rather than `_writes` directly — it is still
+                // the outer call's dynamic extent, and the outer call's own finally
+                // will discard-last again once IT completes.
+                if (previous is not null)
+                    previous.Buffered.AddRange(reactive);
+                else
+                    lock (_gate)
+                        _writes.AddRange(reactive);
             }
         }
     }
@@ -205,16 +265,21 @@ public sealed class TestPlcTarget : IDisposable
     {
         var write = new PlcWrite(e.SymbolPath, e.Value, e.PreviousValue, e.Changed);
 
-        // A buffer installed on THIS instance's AsyncLocal means this event fired
-        // inside THIS target's own Write call — either the harness's own write or a
-        // reaction it triggered. Buffer it; Write sorts out which is which once the
-        // call completes. No buffer means this write reached the store some other way
-        // (the code under test, or a reaction driven on a different target's Write),
-        // so it goes straight to the log.
-        var buffer = _harnessWriteBuffer.Value;
-        if (buffer is not null)
+        // A scope installed on THIS instance's AsyncLocal, AND whose installing thread
+        // is the one raising this event, means the event fired inside THIS target's own
+        // Write call, synchronously, on the thread the discard-last guarantee actually
+        // covers — either the harness's own write or a reaction it triggered. Buffer
+        // it; Write sorts out which is which once the call completes.
+        //
+        // A scope with a DIFFERENT ThreadId means the AsyncLocal flowed here from a
+        // Task.Run spawned inside a callback — a genuinely different thread, outside
+        // the guarantee the buffer depends on. That write goes straight to the log, the
+        // same as one with no scope at all (the code under test, or a reaction driven
+        // on a different target's Write).
+        var scope = _harnessWrite.Value;
+        if (scope is not null && scope.ThreadId == Environment.CurrentManagedThreadId)
         {
-            buffer.Add(write);
+            scope.Buffered.Add(write);
             return;
         }
 

@@ -353,6 +353,17 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// changed the value fires the callback; concurrent writers arriving with the same new value
     /// recapture the already-updated value and do not fire again.
     /// </para>
+    /// <para>
+    /// <b>Subscribers fire before <see cref="ValueWritten"/>, and this order is depended on
+    /// outside this file.</b> <c>Dahlke.TwinCAT.Ads.Testing</c>'s write log
+    /// (<c>TestPlcTarget</c>) relies on subscription callbacks — including any nested write a
+    /// callback makes — always completing before this write's own <see cref="ValueWritten"/>
+    /// fires, to tell a reactive write made by the code under test apart from the write that
+    /// triggered it. Swapping the order of <c>_subscribers.Fire</c> and
+    /// <c>RaiseValueWritten</c> below would silently break that package. See
+    /// <c>SubscriptionCallbacksRunBeforeTheEvent</c> in
+    /// <c>tests/Dahlke.TwinCAT.Ads.Tests/SimulatedWriteEventTests.cs</c>, which pins this order.
+    /// </para>
     /// </remarks>
     public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct = default)
     {
@@ -362,7 +373,9 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
         // rule, including its CAS-capture concurrency contract); the registry
         // delivers. ValueWritten reports the write itself, changed or not, and
         // runs after the subscribers so a handler reading the value back sees
-        // the written one.
+        // the written one. Do not reorder these two lines — see the "Subscribers
+        // fire before ValueWritten" remark above; Dahlke.TwinCAT.Ads.Testing's
+        // write log depends on it.
         var changed = _store.Write(symbolPath, value, out var previous);
         if (changed)
             _subscribers.Fire(symbolPath, value);
