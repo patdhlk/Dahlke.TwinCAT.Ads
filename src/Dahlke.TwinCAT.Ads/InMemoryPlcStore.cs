@@ -81,7 +81,26 @@ internal sealed class InMemoryPlcStore<TKey, TValue>
     /// should deliver. See the class remarks for the rule and the concurrency
     /// contract.
     /// </summary>
-    public bool Write(TKey key, TValue value)
+    public bool Write(TKey key, TValue value) => Write(key, value, out _);
+
+    /// <summary>
+    /// As <see cref="Write(TKey, TValue)"/>, and additionally hands back the value this
+    /// write displaced.
+    /// </summary>
+    /// <param name="previous">
+    /// The value the slot held before this write, or <see langword="default"/> when the
+    /// slot was empty. The two cases are not distinguished: a caller that needs to tell
+    /// "no previous value" from "previously null" must track that itself.
+    /// </param>
+    /// <remarks>
+    /// Exists because the change flag alone cannot answer what a symbol WAS — the
+    /// simulated symbol layer reports the displaced value on
+    /// <c>SimulatedAdsConnection.ValueWritten</c>. The capture is the same
+    /// compare-and-swap capture the change decision already relies on, so it carries
+    /// the same guarantee: after <c>AddOrUpdate</c> returns it holds exactly the value
+    /// displaced by the winning swap.
+    /// </remarks>
+    public bool Write(TKey key, TValue value, out TValue? previous)
     {
         TValue? capturedPrevious = default;
         var isFirstWrite = true;
@@ -95,6 +114,7 @@ internal sealed class InMemoryPlcStore<TKey, TValue>
                 return value;
             });
 
+        previous = capturedPrevious;
         return isFirstWrite || !_changeComparer.Equals(capturedPrevious!, value);
     }
 }
