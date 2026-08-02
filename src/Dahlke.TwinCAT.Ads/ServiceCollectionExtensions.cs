@@ -481,7 +481,8 @@ public static class ServiceCollectionExtensions
     /// <c>AddTwinCatAds</c> overloads: <see cref="TimeProvider"/>, the router
     /// ready signal, <see cref="AdsRouterService"/>, the connection factory, and
     /// the connection pool (both as <see cref="AdsConnectionPool"/> and as
-    /// <see cref="IAdsConnectionPool"/>), and the raw channel factory (both as
+    /// <see cref="IAdsConnectionPool"/>), a keyed <see cref="IAdsConnection"/> resolvable
+    /// by target identifier, and the raw channel factory (both as
     /// <see cref="AdsRawChannelFactory"/> and as <see cref="IAdsRawChannelFactory"/>).
     /// </summary>
     private static void RegisterCoreServices(IServiceCollection services)
@@ -508,10 +509,47 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AdsConnectionPool>();
         services.AddSingleton<IAdsConnectionPool>(sp => sp.GetRequiredService<AdsConnectionPool>());
         services.AddHostedService(sp => sp.GetRequiredService<AdsConnectionPool>());
+
+        // Keyed IAdsConnection, so a service that talks to ONE target names it at the
+        // injection point — [FromKeyedServices("plc1")] IAdsConnection — instead of
+        // repeating the id at every pool lookup.
+        //
+        // AnyKey rather than a descriptor per configured target, because there are no
+        // configured targets to loop over HERE. TwinCatAdsOptions is bound when
+        // IOptions<T> is first resolved — which is AdsConnectionPool's constructor, long
+        // after this method returns. Materializing options early would mean running a
+        // code-first caller's Action<TwinCatAdsOptions> a second time against a throwaway
+        // instance (side effects twice), and would still miss any target added by a
+        // Configure delegate registered after AddTwinCatAds returns — silently, as an
+        // unresolvable service rather than a startup error.
+        //
+        // Singleton is safe ONLY because AdsConnectionFacade is not IDisposable: the
+        // container caches what this factory returns and would dispose it at shutdown,
+        // racing the pool, which is the facade's real owner. If the facade ever becomes
+        // disposable, this registration has to change with it.
+        services.AddKeyedSingleton<IAdsConnection>(KeyedService.AnyKey, static (sp, key) =>
+            sp.GetRequiredService<IAdsConnectionPool>().GetConnection(AsPlcId(key)));
+
         services.AddSingleton<AdsRawChannelFactory>();
         services.AddSingleton<IAdsRawChannelFactory>(sp => sp.GetRequiredService<AdsRawChannelFactory>());
         services.AddHostedService(sp => sp.GetRequiredService<AdsRawChannelFactory>());
     }
+
+    /// <summary>
+    /// Converts a keyed-service key into a PLC target id, rejecting the keys
+    /// <see cref="KeyedService.AnyKey"/> lets through that the pool cannot take.
+    /// </summary>
+    /// <remarks>
+    /// AnyKey matches ANY non-null key, so <c>GetRequiredKeyedService&lt;IAdsConnection&gt;(42)</c>
+    /// reaches the factory. Casting there would surface as an
+    /// <see cref="InvalidCastException"/> naming neither the library nor what was wrong;
+    /// this reuses <see cref="UnknownPlcTargetException"/> so that both ways of asking for
+    /// a connection that is not there fail with one exception type.
+    /// </remarks>
+    private static string AsPlcId(object? key) => key as string ?? throw new UnknownPlcTargetException(
+        key?.ToString() ?? "(null)",
+        $"A keyed IAdsConnection must be resolved with a string service key naming a configured "
+        + $"PLC target; the key supplied was {key?.GetType().Name ?? "null"}.", null);
 
     /// <summary>
     /// Registers the PostConfigure delegate used by all
