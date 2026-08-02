@@ -456,4 +456,190 @@ public class TestPlcTargetTests
         var write = Assert.Single(target.WritesTo("GVL.Late"));
         Assert.Equal(1, write.Value);
     }
+
+    [Fact]
+    public void RawThreadStart_FlowsAsyncLocal()
+    {
+        // Not a guard on its own — it establishes the mechanism the next two tests are
+        // built on, so a future reader does not have to take it on faith. A raw
+        // Thread.Start captures the ambient ExecutionContext, so every AsyncLocal value
+        // live on the starting thread — including TestPlcTarget's own HarnessWriteScope —
+        // is visible on the new thread even though that thread is a genuinely different
+        // physical one. Without that flow, "a cross-thread write that can still see an
+        // open scope" would not be a reachable state at all, and the two tests below
+        // would be proving nothing.
+        var ambient = new AsyncLocal<string?>();
+        ambient.Value = "set-on-parent";
+
+        string? seenOnChild = null;
+        var childThreadId = 0;
+
+        var child = new Thread(() =>
+        {
+            seenOnChild = ambient.Value;
+            childThreadId = Environment.CurrentManagedThreadId;
+        });
+        child.Start();
+        child.Join();
+
+        Assert.Equal("set-on-parent", seenOnChild);
+        Assert.NotEqual(Environment.CurrentManagedThreadId, childThreadId);
+    }
+
+    [Fact]
+    public async Task ACrossThreadWriteAfterTheHarnessOwnEvent_ButBeforeWriteReturns_IsRecorded()
+    {
+        // Pins the ThreadId conjunct in OnValueWritten — the one qualifier there that
+        // the Closed conjunct cannot stand in for. Delete
+        // `scope.ThreadId == Environment.CurrentManagedThreadId` and every other test in
+        // the suite stays green while this one goes red.
+        //
+        // The window is exact rather than lucky, from two facts in
+        // SimulatedAdsConnection: RaiseValueWritten walks GetInvocationList() in
+        // subscription order and TestPlcTarget subscribes in its own constructor, so
+        // OnValueWritten always runs FIRST; and RaiseValueWritten is called from inside
+        // WriteValueAsync, which runs inside Write's `try`, so every handler runs BEFORE
+        // Write's finally. A SECOND ValueWritten handler attached by the test
+        // (target.Simulated is public and documented for exactly this) therefore runs
+        // post-raise and pre-finally: the harness's own GVL.Trigger write is ALREADY the
+        // last element of scope.Buffered, and the scope is still open — Closed is false,
+        // so the Closed conjunct alone lets a write straight through.
+        //
+        // A cross-thread write landing in that window, with the scope flowed in via
+        // ExecutionContext (see RawThreadStart_FlowsAsyncLocal above), becomes the
+        // buffer's NEW last element — and discard-last then eats it: the genuine SUT
+        // write silently lost, and the harness's own GVL.Trigger committed to the log in
+        // its place. Exactly the false pass this package exists to prevent. Thread.Start
+        // plus Join makes it deterministic — no timing, no scheduler luck, no stress loop.
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var conn = plc.Connection("plc1");
+        var target = plc.Target("plc1");
+
+        var workerThreadId = 0;
+
+        void SecondHandler(object? sender, SimulatedWriteEventArgs e)
+        {
+            // Only react to the harness's own drive, never to the worker's own write —
+            // otherwise this handler recurses.
+            if (!string.Equals(e.SymbolPath, "GVL.Trigger", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var worker = new Thread(() =>
+            {
+                workerThreadId = Environment.CurrentManagedThreadId;
+                conn.WriteValueAsync("GVL.Late", 1).GetAwaiter().GetResult();
+            });
+            worker.Start();
+            worker.Join();
+        }
+
+        target.Simulated.ValueWritten += SecondHandler;
+        try
+        {
+            target.Write("GVL.Trigger", true);
+        }
+        finally
+        {
+            target.Simulated.ValueWritten -= SecondHandler;
+        }
+
+        // Asserted so a future change that quietly runs the worker inline cannot make
+        // this test pass for a reason unrelated to the property it pins.
+        Assert.NotEqual(0, workerThreadId);
+        Assert.NotEqual(Environment.CurrentManagedThreadId, workerThreadId);
+
+        var write = Assert.Single(target.WritesTo("GVL.Late"));
+        Assert.Equal(1, write.Value);
+        Assert.Empty(target.WritesTo("GVL.Trigger"));
+    }
+
+    [Fact]
+    public async Task ANestedHarnessWriteOnAnotherThread_DoesNotCommitIntoTheOuterScope()
+    {
+        // Pins the ThreadId conjunct on the OTHER decision point — the nested-commit
+        // branch in Write's finally (`previous.ThreadId ==
+        // Environment.CurrentManagedThreadId`). Delete it and this is the only test in
+        // the suite that fails.
+        //
+        // Same deterministic post-raise / pre-finally window as the test above, opened
+        // the same way with a second ValueWritten handler, for the same reasons. What
+        // differs is what runs in it: a nested harness Write, on another thread. That
+        // inner call flows the OUTER scope in as `previous`, and the outer scope is
+        // still open — so `!previous.Closed` alone lets it through. Without the ThreadId
+        // conjunct the inner call hands its remainder into the outer thread's live
+        // buffer, where it becomes the new last element; the outer finally's discard-last
+        // then eats the genuine SUT reaction and commits the harness's own outer write in
+        // its place.
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var conn = plc.Connection("plc1");
+        var target = plc.Target("plc1");
+
+        // The genuine code under test: reacts to GVL.Nested by writing GVL.SutReaction.
+        // That reaction is the one write that belongs in the log.
+        await conn.SubscribeAsync("GVL.Nested", 100, (_, _) =>
+            conn.WriteValueAsync("GVL.SutReaction", 7).GetAwaiter().GetResult());
+
+        void SecondHandler(object? sender, SimulatedWriteEventArgs e)
+        {
+            if (!string.Equals(e.SymbolPath, "GVL.Trigger", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var worker = new Thread(() => target.Write("GVL.Nested", true));
+            worker.Start();
+            worker.Join();
+        }
+
+        target.Simulated.ValueWritten += SecondHandler;
+        try
+        {
+            target.Write("GVL.Trigger", true);
+        }
+        finally
+        {
+            target.Simulated.ValueWritten -= SecondHandler;
+        }
+
+        // Asserted as the whole log, not just the one path, so a failure prints what
+        // actually landed there — which is how you tell "lost" from "substituted".
+        Assert.Equal(["GVL.SutReaction"], target.Writes.Select(w => w.SymbolPath));
+    }
+
+    [Fact]
+    public async Task ANestedHarnessWriteUnderAStaleOuterScope_DoesNotCommitIntoIt()
+    {
+        // Pins the fourth and last qualifier: `!previous.Closed` on the nested-commit
+        // branch in Write's finally. Delete it and, again, this is the only test that
+        // fails.
+        //
+        // Same ExecutionContext.Capture/Run technique as
+        // AWriteResumingOnTheInstallingThreadAfterWriteReturned_IsRecorded, and just as
+        // deterministic — re-entering a captured context is a synchronous call on THIS
+        // thread, not a pool continuation the scheduler might place elsewhere. The one
+        // difference is what the re-entered context does: target.Write rather than a
+        // plain connection write, which moves the decision point from OnValueWritten to
+        // the nested-commit branch. `previous` is then the ALREADY-CLOSED outer scope, on
+        // the very thread that installed it — the ThreadId conjunct matches, and only
+        // Closed stands between the genuine SUT reaction and a buffer whose own Write
+        // call already drained and abandoned it.
+        await using var plc = await TestPlc.Create().WithTarget("plc1").StartAsync();
+        var conn = plc.Connection("plc1");
+        var target = plc.Target("plc1");
+
+        ExecutionContext? capturedDuringWrite = null;
+        await conn.SubscribeAsync("GVL.Trigger", 100, (_, _) =>
+            capturedDuringWrite = ExecutionContext.Capture());
+
+        // The genuine code under test: reacts to GVL.Nested by writing GVL.SutReaction.
+        await conn.SubscribeAsync("GVL.Nested", 100, (_, _) =>
+            conn.WriteValueAsync("GVL.SutReaction", 7).GetAwaiter().GetResult());
+
+        target.Write("GVL.Trigger", true);
+        Assert.NotNull(capturedDuringWrite);
+
+        // Same thread as the Write above, but with the ambient scope rewound to the
+        // now-closed outer one.
+        ExecutionContext.Run(capturedDuringWrite, _ => target.Write("GVL.Nested", true), null);
+
+        Assert.Equal(["GVL.SutReaction"], target.Writes.Select(w => w.SymbolPath));
+    }
 }

@@ -92,19 +92,26 @@ public sealed class TestPlcTarget : IDisposable
 
         // Set as the first action in Write's finally — see the field comment on
         // _harnessWrite. A plain bool, not volatile and not Interlocked, which is
-        // deliberate: Buffered is touched only where BOTH this flag and ThreadId are
-        // checked together (OnValueWritten's append, and the nested-commit AddRange in
-        // Write below), never on ThreadId alone, and a matching ThreadId with Closed
-        // still false can only mean the literal same physical thread reading its own
-        // scope back — always safe, a thread's own prior writes are visible to its own
-        // later reads in program order without a barrier. The only way a DIFFERENT
-        // physical thread could ever see a matching ThreadId is the runtime reusing a
-        // terminated thread's numeric ManagedThreadId, which requires that original
-        // thread to have already exited — and a thread cannot exit mid-Write, so by the
-        // time its ID is up for reuse, Closed is already true and thread termination
-        // itself is a safe publication point for that write. Every mismatched-thread
-        // case routes to `_writes` directly regardless of what `Closed` reads as, so a
-        // hypothetically stale read here can never change the outcome.
+        // deliberate. Buffered is touched from exactly three places. Two of them belong
+        // to a call other than the one that installed the scope — OnValueWritten's
+        // append, and the nested-commit AddRange in Write below — and BOTH require this
+        // flag and ThreadId to be checked together, never ThreadId alone. The third is
+        // the installing Write call's own finally, which reads Buffered.Count and calls
+        // GetRange with no guard at all; it needs none, precisely because the two guarded
+        // paths insist on a ThreadId match, making the installing thread the only thread
+        // that can ever append to a scope's Buffered — so that read is that same thread
+        // reading back its own list, synchronously, with no other writer possible. For
+        // the two guarded paths, a matching ThreadId with Closed still false can only
+        // mean the literal same physical thread reading its own scope back — always safe,
+        // a thread's own prior writes are visible to its own later reads in program order
+        // without a barrier. The only way a DIFFERENT physical thread could ever see a
+        // matching ThreadId is the runtime reusing a terminated thread's numeric
+        // ManagedThreadId, which requires that original thread to have already exited —
+        // and a thread cannot exit mid-Write, so by the time its ID is up for reuse,
+        // Closed is already true and thread termination itself is a safe publication
+        // point for that write. Every mismatched-thread case routes to `_writes` directly
+        // regardless of what `Closed` reads as, so a hypothetically stale read here can
+        // never change the outcome.
         internal bool Closed { get; set; }
     }
 
