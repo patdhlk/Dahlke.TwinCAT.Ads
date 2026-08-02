@@ -315,7 +315,15 @@ public class AdsConnectionPoolBuilderParityTests
         finally
         {
             for (var i = hostedServices.Count - 1; i >= 0; i--)
-                await hostedServices[i].StopAsync(CancellationToken.None);
+            {
+                // Per-item, so one failing StopAsync neither aborts the teardown nor
+                // replaces a propagating assertion failure — the same discipline
+                // AdsConnectionPoolHandle.DisposeAsync and BuildAndStartAsync's unwind
+                // already apply. AdsRouterService derives from BackgroundService, whose
+                // StopAsync awaits the execute task and can throw.
+                try { await hostedServices[i].StopAsync(CancellationToken.None); }
+                catch { /* teardown best-effort; the assertion is what matters */ }
+            }
         }
     }
 }
