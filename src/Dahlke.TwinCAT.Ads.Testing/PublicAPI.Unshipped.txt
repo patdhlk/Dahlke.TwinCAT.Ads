@@ -1,0 +1,13 @@
+#nullable enable
+Dahlke.TwinCAT.Ads.Testing.TestPlc
+Dahlke.TwinCAT.Ads.Testing.TestPlc.Connection(string! plcId) -> Dahlke.TwinCAT.Ads.IAdsConnection!
+Dahlke.TwinCAT.Ads.Testing.TestPlc.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Dahlke.TwinCAT.Ads.Testing.TestPlc.Pool.get -> Dahlke.TwinCAT.Ads.IAdsConnectionPool!
+Dahlke.TwinCAT.Ads.Testing.TestPlc.RawChannels.get -> Dahlke.TwinCAT.Ads.IAdsRawChannelFactory!
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder.ConfigureTarget(string! plcId, System.Action<Dahlke.TwinCAT.Ads.PlcTargetOptions!>! configure) -> Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder!
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder.StartAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.Testing.TestPlc!>!
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder.UseLoggerFactory(Microsoft.Extensions.Logging.ILoggerFactory! loggerFactory) -> Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder!
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder.WithTarget(string! plcId) -> Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder!
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder.WithTarget(string! plcId, System.Action<System.Collections.Generic.IDictionary<string!, object?>!>! seed) -> Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder!
+static Dahlke.TwinCAT.Ads.Testing.TestPlc.Create() -> Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder!

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- What differs per package; the rest is in src/Directory.Build.props -->
+    <PackageId>Dahlke.TwinCAT.Ads.Testing</PackageId>
+    <Description>Test harness for Dahlke.TwinCAT.Ads — a started, seeded, simulated PLC pool and a record of what the code under test wrote, with no generic-host boilerplate and no test-framework dependency.</Description>
+    <PackageTags>TwinCAT;ADS;Beckhoff;PLC;Automation;Testing;Simulation</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Dahlke.TwinCAT.Ads.Testing.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Dahlke.TwinCAT.Ads/Dahlke.TwinCAT.Ads.csproj" />
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="4.14.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>
