@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Dahlke.TwinCAT.Ads.Tests;
@@ -98,20 +99,36 @@ public class KeyedConnectionRegistrationTests
             sp.GetRequiredKeyedService<IAdsConnection>("plc2"));
     }
 
+    // Enumerating with the AnyKey sentinel is one of the few places where the DI container's
+    // own behaviour differs across the target frameworks, so the assertion has to as well.
+    // Either way pool.GetAllConnections() is the answer; what differs is how the container
+    // says so.
+#if NET10_0_OR_GREATER
+    [Fact]
+    public void KeyedConnection_EnumeratingWithAnyKey_ReturnsEmpty()
+    {
+        using var sp = BuildProvider();
+
+        // .NET 10 skips AnyKey descriptors when enumerating, so the factory is never
+        // reached and the caller simply gets nothing back.
+        Assert.Empty(sp.GetKeyedServices<IAdsConnection>(KeyedService.AnyKey));
+    }
+#else
     [Fact]
     public void KeyedConnection_EnumeratingWithAnyKey_ThrowsPointingAtTheEnumerationApi()
     {
         using var sp = BuildProvider();
 
-        // GetKeyedServices(AnyKey) does NOT skip AnyKey descriptors — it invokes the
-        // factory passing the sentinel itself. Enumeration cannot be served, so this
-        // throws; what it must not do is throw naming AnyKeyObj, an internal DI type.
+        // On .NET 8 and 9 GetKeyedServices(AnyKey) does NOT skip AnyKey descriptors — it
+        // invokes the factory passing the sentinel itself. Enumeration cannot be served, so
+        // this throws; what it must not do is throw naming AnyKeyObj, an internal DI type.
         var ex = Assert.Throws<InvalidOperationException>(
             () => sp.GetKeyedServices<IAdsConnection>(KeyedService.AnyKey).ToList());
 
         Assert.Contains("GetAllConnections", ex.Message);
         Assert.DoesNotContain("AnyKeyObj", ex.Message);
     }
+#endif
 
     [Fact]
     public void UnkeyedIAdsConnection_IsStillNotRegistered()
@@ -152,6 +169,98 @@ public class KeyedConnectionRegistrationTests
             d.ServiceType == typeof(IAdsConnection) && d.IsKeyedService);
 
         Assert.Equal(1, keyedCount);
+    }
+
+    [Fact]
+    public void KeyedConnection_ResolvesFromConfigurationFirstOverload()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["PlcTargets:plc1:AmsNetId"] = "1.2.3.4.5.6",
+            })
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAdsSimulation(configuration);
+
+        using var sp = services.BuildServiceProvider();
+
+        Assert.Equal("plc1", sp.GetRequiredKeyedService<IAdsConnection>("plc1").PlcId);
+    }
+
+    [Fact]
+    public void KeyedConnection_ResolvesFromComboOverload()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["PlcTargets:fromConfig:AmsNetId"] = "1.2.3.4.5.6",
+            })
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAdsSimulation(configuration, o =>
+        {
+            o.Targets["fromLambda"] = new PlcTargetOptions { AmsNetId = "1.2.3.4.5.7" };
+        });
+
+        using var sp = services.BuildServiceProvider();
+
+        Assert.Equal("fromConfig", sp.GetRequiredKeyedService<IAdsConnection>("fromConfig").PlcId);
+        Assert.Equal("fromLambda", sp.GetRequiredKeyedService<IAdsConnection>("fromLambda").PlcId);
+    }
+
+    [Fact]
+    public void KeyedConnection_TargetAddedByLaterConfigureDelegate_IsResolvable()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAdsSimulation(o =>
+        {
+            o.Targets["plc1"] = new PlcTargetOptions { AmsNetId = "1.2.3.4.5.6" };
+        });
+
+        // Registered AFTER AddTwinCatAds returned. This is the case a per-target loop at
+        // registration time could not have covered, and it is why the descriptor is AnyKey.
+        services.Configure<TwinCatAdsOptions>(o =>
+        {
+            o.Targets["late"] = new PlcTargetOptions { AmsNetId = "1.2.3.4.5.9" };
+        });
+
+        using var sp = services.BuildServiceProvider();
+
+        Assert.Equal("late", sp.GetRequiredKeyedService<IAdsConnection>("late").PlcId);
+    }
+
+    [Fact]
+    public void KeyedConnection_FromKeyedServicesAttribute_InjectsConfiguredTarget()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAdsSimulation(o =>
+        {
+            o.Targets["plc1"] = new PlcTargetOptions { AmsNetId = "1.2.3.4.5.6" };
+            o.Targets["plc2"] = new PlcTargetOptions { AmsNetId = "1.2.3.4.5.7" };
+        });
+        services.AddSingleton<TempService>();
+
+        using var sp = services.BuildServiceProvider();
+
+        // The shape from issue #43: the id appears once, at the injection point.
+        var service = sp.GetRequiredService<TempService>();
+
+        Assert.Equal("plc2", service.Connection.PlcId);
+        Assert.Same(
+            sp.GetRequiredService<IAdsConnectionPool>().GetConnection("plc2"),
+            service.Connection);
+    }
+
+    private sealed class TempService([FromKeyedServices("plc2")] IAdsConnection connection)
+    {
+        public IAdsConnection Connection { get; } = connection;
     }
 
     /// <summary>

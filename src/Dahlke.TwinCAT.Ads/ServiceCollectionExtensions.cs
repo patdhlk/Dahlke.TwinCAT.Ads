@@ -548,13 +548,19 @@ public static class ServiceCollectionExtensions
     /// connection that is not there fail with one exception type.
     /// </para>
     /// <para>
-    /// <b>The sentinel itself arrives here too.</b>
+    /// <b>On .NET 8 and 9 the sentinel itself arrives here too.</b>
     /// <c>GetKeyedServices&lt;IAdsConnection&gt;(KeyedService.AnyKey)</c> does not skip AnyKey
     /// descriptors as one might expect — it invokes this factory passing
     /// <see cref="KeyedService.AnyKey"/> as the key. Left to the general path that produces a
     /// message naming <c>AnyKeyObj</c>, an internal type of the DI container that tells the
     /// caller nothing. Enumeration cannot be served — there is no single connection for "any
     /// key" — so it fails, but it fails naming the API that CAN serve it.
+    /// </para>
+    /// <para>
+    /// .NET 10 changed that: it skips AnyKey descriptors while enumerating, so the caller gets an
+    /// empty sequence and this branch is never reached. The branch stays because the library
+    /// targets net8.0 and net9.0 as well, and because it still fires on every framework when the
+    /// sentinel is passed to <c>GetRequiredKeyedService</c> directly.
     /// </para>
     /// </remarks>
     private static string AsPlcId(object? key)
