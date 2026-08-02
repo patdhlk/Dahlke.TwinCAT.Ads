@@ -280,6 +280,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `IPlcAlarmHandler` is an ordinary enumerable seam, so a handler needing constructor arguments
   can be registered with a plain `AddSingleton<IPlcAlarmHandler>(sp => ...)`.
 
+- **A non-DI entry point — console, WPF and WinForms no longer pay a hosting tax to read one
+  symbol.** ([#37](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/37)) `AdsConnectionPool`,
+  `AdsConnectionFacade` and `AdsConnectionFactory` are all internal, so the only supported way to
+  obtain an `IAdsConnection` was to build a generic host and start it. That is the right shape for
+  ASP.NET Core and the wrong one for the HMIs and commissioning tools this library is largely
+  written for.
+
+  ```csharp
+  await using var pool = await AdsConnectionPoolBuilder
+      .Create()
+      .AddTarget("plc1", o => { o.AmsNetId = "192.168.1.10.1.1"; o.Port = 851; })
+      .BuildAndStartAsync();
+
+  var conn = pool.GetConnection("plc1");
+  ```
+
+  It is a face on the DI path, not a second implementation: the builder stands up a private
+  `ServiceCollection`, calls the very same `AddTwinCatAds`, and starts what comes out — so the two
+  entry points cannot drift, and anything added to the registration later reaches both. That
+  includes the part easiest to omit by hand: `ValidateOnStart` only *queues* validation, and
+  `IStartupValidator` runs it, so a malformed AMS Net ID fails at start here exactly as it does in
+  a host rather than surfacing later as a connection error blaming the network.
+
+  `CreateSimulation()` mirrors `AddTwinCatAdsSimulation`. `ConfigureServices` is the seam for
+  companion packages — an `IHostedService` registered there is started and stopped with the pool,
+  so `AddTwinCatAdsAlarms` works from a console app. The handle is `IAsyncDisposable` rather than
+  `IDisposable`, deliberately: stopping the router and the reconnect loops is genuinely
+  asynchronous, and a synchronous `Dispose` would either block or skip the stop.
+
+  Also new, because without it the audience this is for gets a working entry point whose first
+  read fails: `conn.WaitForConnectedAsync(timeout)`, an extension on `IAdsConnection`. A real
+  target's loop is deferred until the embedded router is ready, so `BuildAndStartAsync` returns
+  before the first read can succeed. Simulated targets are already connected and return
+  immediately. An extension rather than an `IAdsConnectionPool` member: the interface is public
+  and implementable, and hosted consumers hit the same startup gap.
+
+  One new dependency on the core package, `Microsoft.Extensions.DependencyInjection` — the
+  implementation, where only the abstractions were referenced before.
+
+- **`Dahlke.TwinCAT.Ads.Testing` — the started simulated pool, packaged.**
+  ([#39](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/39)) `SimulatedAdsConnection` being
+  public was the right foundation; the step up from it — a started pool with two seeded targets,
+  ready to inject — was host boilerplate every consumer rebuilt in their own test project.
+
+  ```csharp
+  await using var plc = await TestPlc.Create()
+      .WithTarget("plc1", seed => seed["GVL.Temp"] = 21.5f)
+      .StartAsync();
+
+  var sut = new TempService(plc.Pool);
+  plc.Target("plc1").Write("GVL.Temp", 30f);
+  plc.Target("plc1").AssertWritten("GVL.Setpoint", 23.5f);
+  ```
+
+  Depends on the core package and no test framework, so xunit, NUnit, MSTest and a bare console
+  harness all work; failures throw `PlcAssertionException` listing every write recorded for that
+  path with its CLR type, because comparison is `Equals`-based and type-sensitive and "expected
+  23.5, got 23.5" is otherwise the message a `Single`/`Double` mismatch produces.
+
+  Seed, drive and assert are three different things and the package keeps them apart: `Seed` is
+  silent, `Write` fires subscriptions but is **not** recorded, and only writes made by the code
+  under test enter the log. Without that exclusion a test that primes a symbol and then asserts
+  the code under test wrote it would pass while testing nothing. The exclusion rides an
+  `AsyncLocal` rather than a time window, so a write made concurrently by the code under test is
+  still recorded.
+
+  Supporting this, `SimulatedAdsConnection` gained a public `ValueWritten` event. It fires for
+  every write including unchanged ones — where subscriptions deliberately stay silent, because
+  "did the code write 23.5" must not depend on what the fixture seeded — and does not fire for
+  `SetInitialValues`, where seeding deliberately stays silent too.
+
 ### Changed
 
 - **BREAKING: `AdsRawChannelSeed.Port` is now `int?`, and required.** A seed entry names its

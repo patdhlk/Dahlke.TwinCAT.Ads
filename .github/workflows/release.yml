@@ -34,6 +34,7 @@ jobs:
           dotnet pack src/Dahlke.TwinCAT.Ads/Dahlke.TwinCAT.Ads.csproj --configuration Release --no-build -p:Version=${{ steps.version.outputs.VERSION }} --output ./nupkg
           dotnet pack src/Dahlke.TwinCAT.Ads.Reactive/Dahlke.TwinCAT.Ads.Reactive.csproj --configuration Release --no-build -p:Version=${{ steps.version.outputs.VERSION }} --output ./nupkg
           dotnet pack src/Dahlke.TwinCAT.Ads.Alarms/Dahlke.TwinCAT.Ads.Alarms.csproj --configuration Release --no-build -p:Version=${{ steps.version.outputs.VERSION }} --output ./nupkg
+          dotnet pack src/Dahlke.TwinCAT.Ads.Testing/Dahlke.TwinCAT.Ads.Testing.csproj --configuration Release --no-build -p:Version=${{ steps.version.outputs.VERSION }} --output ./nupkg
 
       - name: Verify symbols were packed
         # A missing .snupkg is the whole failure this guards: the push below would succeed, the

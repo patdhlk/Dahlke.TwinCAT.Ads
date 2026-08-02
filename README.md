@@ -44,6 +44,12 @@ Optionally add the alarms companion to track a PLC alarm array (see [PLC alarms]
 dotnet add package Dahlke.TwinCAT.Ads.Alarms
 ```
 
+Optionally add the testing harness to your **test** projects (see [Testing](#testing)). It depends on the core package and on no test framework:
+
+```bash
+dotnet add package Dahlke.TwinCAT.Ads.Testing
+```
+
 ## Quick Start
 
 ### Configuration-first (recommended for server applications)
@@ -109,6 +115,93 @@ builder.Services.AddTwinCatAds(builder.Configuration, o =>
 {
     o.Diagnostics.SymbolDump.Prefixes.Add("GVL");
 });
+```
+
+## Console, WPF and WinForms — no host required
+
+The DI registrations above are right for ASP.NET Core and worker services. For a commissioning tool or an HMI, `AdsConnectionPoolBuilder` gives the same pool with no generic host:
+
+```csharp
+await using var pool = await AdsConnectionPoolBuilder
+    .Create()
+    .AddTarget("plc1", o => { o.AmsNetId = "192.168.1.10.1.1"; o.Port = 851; })
+    .BuildAndStartAsync();
+
+var conn = pool.GetConnection("plc1");
+```
+
+This is a face on the DI path, not a second implementation: the builder stands up a private `ServiceCollection`, calls the very same `AddTwinCatAds`, and starts what comes out. So the five things this library does — options validation, the embedded router, reconnection, health tracking and raw channels — behave here exactly as they do in a hosted application, because they are the same registrations running the same code. What the private container is *not* is a generic host; see [Companion packages](#companion-packages) for where that shows.
+
+`CreateSimulation()` is the `AddTwinCatAdsSimulation` equivalent — every target in memory, no TwinCAT installation:
+
+```csharp
+await using var pool = await AdsConnectionPoolBuilder
+    .CreateSimulation()
+    .AddTarget("plc1", o => o.InitialValues["GVL.Temp"] = 21.5f)
+    .BuildAndStartAsync();
+```
+
+The returned handle **is** an `IAdsConnectionPool`, and also exposes `RawChannels` and `Services`.
+
+| Builder method | What it does |
+|---|---|
+| `AddTarget(id, configure)` | Configures one target, creating it if needed. Two calls for one id compose. |
+| `Configure(configure)` | Applies a delegate to the whole options tree — router, diagnostics, raw channels. |
+| `UseConfiguration(configuration)` | Binds the usual sections first, before any `Configure`/`AddTarget` lambda. |
+| `UseLoggerFactory(factory)` | Routes logs somewhere. Without it the pool is silent. |
+| `ConfigureServices(configure)` | Adds services to the private container — including companion packages. |
+
+### Waiting for a real target
+
+`BuildAndStartAsync` returns as soon as the pool is started. A **simulated** target is connected at that point. A **real** target is not: its connection loop is deferred until the embedded router is ready, which is retried with backoff. So a tool that reads immediately gets `AdsConnectionUnavailableException` after `TimeoutMs`.
+
+```csharp
+if (!await conn.WaitForConnectedAsync(TimeSpan.FromSeconds(30)))
+{
+    Console.Error.WriteLine("PLC did not come up.");
+    return 1;
+}
+```
+
+`WaitForConnectedAsync` is an extension on `IAdsConnection`, so it works just as well on a connection resolved from DI during host startup.
+
+### Companion packages
+
+`ConfigureServices` is the seam. Anything registered there is built with everything else. An `IHostedService` registered there — the alarm monitor `AddTwinCatAdsAlarms` registers — is deliberately moved to start **after** the router, pool and raw channels, matching a generic host where `AddTwinCatAds(...)` is called before `AddTwinCatAdsAlarms(...)`, so a companion package can assume the pool it depends on is already connected:
+
+```csharp
+var alarmsConfig = new ConfigurationBuilder()
+    .AddJsonFile("appsettings.json", optional: true)
+    .Build();
+
+await using var pool = await AdsConnectionPoolBuilder
+    .Create()
+    .AddTarget("plc1", o => o.AmsNetId = "192.168.1.10.1.1")
+    .ConfigureServices(s => s.AddTwinCatAdsAlarms(alarmsConfig))
+    .BuildAndStartAsync();
+
+var monitor = pool.Services.GetRequiredService<IPlcAlarmMonitor>();
+```
+
+**The private container is a hosted-service runner, not a host.** It calls `StartAsync` and `StopAsync` and nothing else. Four things a generic host would do are absent:
+
+- `IHostedLifecycleService`'s `StartingAsync`/`StartedAsync`/`StoppingAsync`/`StoppedAsync` are never invoked, even on a service that implements the interface.
+- `BackgroundServiceExceptionBehavior` is not honoured. A `BackgroundService` whose `ExecuteAsync` faults after startup faults only its own task, which nothing observes — so the application keeps running where the host default, `StopHost`, would have brought it down.
+- The provider is built without `ValidateScopes` or `ValidateOnBuild`, so a captive dependency or an unresolvable registration surfaces at first resolve rather than at build.
+- Shutdown is unbounded — there is no `HostOptions.ShutdownTimeout` here, so a service that hangs in `StopAsync` hangs `DisposeAsync` with it.
+
+The first two are unreachable through this library's own services or `Dahlke.TwinCAT.Ads.Alarms`: the alarm monitor, the pool and the raw-channel factory are plain `IHostedService` implementations with no lifecycle hooks, and the embedded router — the one `BackgroundService` among them — wraps the whole of its `ExecuteAsync` in a catch-all, so its task never faults. All four matter for a service *you* register through `ConfigureServices`.
+
+### Shutting down
+
+The handle is `IAsyncDisposable` and not `IDisposable`, because stopping the router and the reconnect loops is genuinely asynchronous. `await using` is the intended shape. A WinForms or WPF shutdown path that cannot `await` should block explicitly rather than leave the pool running:
+
+```csharp
+protected override void OnExit(ExitEventArgs e)
+{
+    _pool.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    base.OnExit(e);
+}
 ```
 
 ## Reading and Writing Values
@@ -571,6 +664,8 @@ if (pool.TryGetSimulatedConnection("plc1", out var sim))
     sim.SetInitialValues(new Dictionary<string, object?> { ["GVL.A"] = 99 });
 ```
 
+For a whole started fleet rather than one connection, see [Testing](#testing).
+
 ### Hand-written doubles — `AdsConnectionBase`
 
 `SimulatedAdsConnection` is the right first answer for a test: it is a working connection with a real value store, real subscriptions and real RPC seeding. What it deliberately does not do is **fail** — a specific `AdsErrorCode`, a timeout on the third call, a symbol that disappears mid-run — and that is where a hand-written double comes from.
@@ -614,6 +709,73 @@ public sealed class OutageDouble : AdsConnectionBase
 ```
 
 Note this softens — but does not remove — the cost of adding a member to `IAdsConnection`: a double deriving from the base keeps compiling and picks up a throwing default, while one implementing the interface directly does not.
+
+## Testing
+
+`Dahlke.TwinCAT.Ads.Testing` packages what every consumer previously rebuilt: a started pool with simulated targets, seeded, ready to inject — plus a record of what the code under test wrote.
+
+```bash
+dotnet add package Dahlke.TwinCAT.Ads.Testing
+```
+
+It depends on the core package and on **no test framework**, so it works from xunit, NUnit, MSTest or a plain console harness.
+
+```csharp
+await using var plc = await TestPlc.Create()
+    .WithTarget("plc1", seed => seed["GVL.Temp"] = 21.5f)
+    .StartAsync();
+
+var sut = new TempService(plc.Pool);
+
+plc.Target("plc1").Write("GVL.Temp", 30f);          // drive the system under test
+await sut.ProcessAsync();
+plc.Target("plc1").AssertWritten("GVL.Setpoint", 23.5f);
+```
+
+`plc.Pool` is an ordinary `IAdsConnectionPool` — inject it exactly as the application would. `WithTarget(plcId)` (no seed) adds an empty target; `ConfigureTarget(plcId, configure)` reaches `PlcTargetOptions` directly for anything else — timeouts, display name. It is a separate method rather than a second `WithTarget` overload, since two overloads differing only in delegate type would leave `WithTarget("plc1", x => …)` depending on how the compiler resolves an implicitly-typed lambda between them. `Mode` stays forced to `Simulated` regardless of what `ConfigureTarget` sets — a `TestPlc` never touches hardware.
+
+### Seed, write, and what got recorded
+
+Three verbs that look similar and are not:
+
+| | Fires subscriptions | Recorded in `Writes` |
+|---|---|---|
+| `Target(id).Seed(path, value)` | no | no |
+| `Target(id).Write(path, value)` | yes | **no** |
+| a write by the code under test | yes | yes |
+
+`Seed` is fixture setup. `Write` **drives** the PLC side — an input changing, a sensor moving — so it fires subscriptions, or a system under test that subscribes would never react.
+
+**A harness `Write` is deliberately excluded from the log.** The log answers "what did the code under test write", and a harness write is not that. Without the exclusion, a test that primes `GVL.Setpoint` and then asserts the code under test wrote it would pass while testing nothing.
+
+### Assertions
+
+```csharp
+var target = plc.Target("plc1");
+
+target.AssertWritten("GVL.Setpoint");                 // written at all
+target.AssertWritten("GVL.Setpoint", 23.5f);          // written with this value
+target.AssertNotWritten("GVL.Estop");
+target.AssertWriteCount("GVL.Setpoint", 2);
+
+target.Writes;                     // every recorded write, oldest first
+target.WritesTo("GVL.Setpoint");   // just this path
+target.ClearWrites();
+```
+
+Failures throw `PlcAssertionException` listing every write actually recorded for that path, **with CLR types**:
+
+```
+Expected a write of 23.5 (Single) to "GVL.Setpoint" on plc1, but 2 write(s) were recorded:
+  [0] 23.5 (Double)
+  [1] 24 (Double)
+```
+
+The types are there because comparison is `Equals`-based and therefore type-sensitive — a boxed `float` 23.5 does not equal a boxed `double` 23.5. That is the same rule the simulated connection uses to decide whether a write is a change, and it is the likeliest reason a correct-looking assertion fails.
+
+### Reaching further
+
+`Target(id).Simulated` is the live `SimulatedAdsConnection` — use it for enum metadata, ADS state, or to observe *every* write including the harness's own via `ValueWritten`. For a connection that must **fail** in a specific way, `TestPlc` is the wrong tool: see [Hand-written doubles — `AdsConnectionBase`](#hand-written-doubles--adsconnectionbase).
 
 ## Raw ADS channels
 

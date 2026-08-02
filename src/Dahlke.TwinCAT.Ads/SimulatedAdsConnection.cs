@@ -112,6 +112,19 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
 #pragma warning restore CS0067
 
     /// <summary>
+    /// Raised after every write to this connection — <see cref="WriteValueAsync{T}(string, T, CancellationToken)"/>,
+    /// <see cref="WriteValueAsync(string, object, CancellationToken)"/>, and once per
+    /// accepted entry of <see cref="WriteValuesAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="SimulatedWriteEventArgs"/> for the fire rule, the ordering against
+    /// subscription callbacks, and the threading contract. Notably this event fires for
+    /// unchanged writes (where subscriptions do not) and does NOT fire for
+    /// <see cref="SetInitialValues"/> (where seeding is silent by design).
+    /// </remarks>
+    public event EventHandler<SimulatedWriteEventArgs>? ValueWritten;
+
+    /// <summary>
     /// Creates an in-memory simulated PLC connection.
     /// </summary>
     /// <param name="plcId">The configured identifier of the simulated target.</param>
@@ -286,6 +299,33 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     };
 
     /// <summary>
+    /// Raises <see cref="ValueWritten"/> with per-handler exception isolation, mirroring
+    /// how <see cref="SubscriberRegistry{TKey, TValue}"/> isolates subscription callbacks:
+    /// one faulty listener must not abort the write nor deny the others their notification.
+    /// </summary>
+    private void RaiseValueWritten(string symbolPath, object? value, object? previous, bool changed)
+    {
+        var handlers = ValueWritten;
+        if (handlers is null)
+            return;
+
+        var args = new SimulatedWriteEventArgs(symbolPath, value, previous, changed);
+        foreach (var handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((EventHandler<SimulatedWriteEventArgs>)handler)(this, args);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "ValueWritten handler for path {Path} threw an exception; notification continues for other handlers.",
+                    symbolPath);
+            }
+        }
+    }
+
+    /// <summary>
     /// Writes a typed value. The value is stored boxed; subsequent typed reads will
     /// apply the conversion rules documented on
     /// <see cref="ReadValueAsync{T}(string, CancellationToken)"/>.
@@ -313,6 +353,17 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     /// changed the value fires the callback; concurrent writers arriving with the same new value
     /// recapture the already-updated value and do not fire again.
     /// </para>
+    /// <para>
+    /// <b>Subscribers fire before <see cref="ValueWritten"/>, and this order is depended on
+    /// outside this file.</b> <c>Dahlke.TwinCAT.Ads.Testing</c>'s write log
+    /// (<c>TestPlcTarget</c>) relies on subscription callbacks — including any nested write a
+    /// callback makes — always completing before this write's own <see cref="ValueWritten"/>
+    /// fires, to tell a reactive write made by the code under test apart from the write that
+    /// triggered it. Swapping the order of <c>_subscribers.Fire</c> and
+    /// <c>RaiseValueWritten</c> below would silently break that package. See
+    /// <c>SubscriptionCallbacksRunBeforeTheEvent</c> in
+    /// <c>tests/Dahlke.TwinCAT.Ads.Tests/SimulatedWriteEventTests.cs</c>, which pins this order.
+    /// </para>
     /// </remarks>
     public Task WriteValueAsync(string symbolPath, object value, CancellationToken ct = default)
     {
@@ -320,9 +371,16 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
 
         // The store decides (first write, or changed by Equals — the one fire
         // rule, including its CAS-capture concurrency contract); the registry
-        // delivers.
-        if (_store.Write(symbolPath, value))
+        // delivers. ValueWritten reports the write itself, changed or not, and
+        // runs after the subscribers so a handler reading the value back sees
+        // the written one. Do not reorder these two lines — see the "Subscribers
+        // fire before ValueWritten" remark above; Dahlke.TwinCAT.Ads.Testing's
+        // write log depends on it.
+        var changed = _store.Write(symbolPath, value, out var previous);
+        if (changed)
             _subscribers.Fire(symbolPath, value);
+
+        RaiseValueWritten(symbolPath, value, previous, changed);
 
         return Task.CompletedTask;
     }
@@ -402,8 +460,11 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
             // Same store-decides/registry-delivers step as WriteValueAsync. Fire
             // never rethrows (per-callback exceptions are isolated inside the
             // registry), so no try/catch is needed around the loop body.
-            if (_store.Write(path, value))
+            var changed = _store.Write(path, value, out var previous);
+            if (changed)
                 _subscribers.Fire(path, value);
+
+            RaiseValueWritten(path, value, previous, changed);
 
             results[path] = AdsValueResult.Success(null, path);
         }
