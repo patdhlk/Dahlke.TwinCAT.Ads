@@ -51,6 +51,26 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
     private readonly IPlcAlarmDialect _dialect;
     private readonly ILogger<PlcAlarmMonitor> _logger;
 
+    // Where the registered IPlcAlarmHandlers come from. Held as the provider and resolved in
+    // StartAsync rather than injected as IEnumerable<IPlcAlarmHandler>, which would be the
+    // tidier shape, because a handler may legitimately depend on IPlcAlarmMonitor — a pager
+    // that calls AcknowledgeAsync, a dashboard that reads GetOutstanding — and constructor
+    // injection would make that a dependency cycle the container refuses to build. Resolving
+    // after this instance exists breaks the cycle: the singleton the handler asks for is the
+    // one already being started.
+    private readonly IServiceProvider _services;
+
+    // Cancelled when this monitor shuts down and handed to every IPlcAlarmHandler, so a handler
+    // awaiting something slow is told to stop rather than holding the notification thread for
+    // its own timeout while the host waits to go down.
+    //
+    // Deliberately never DISPOSED. Publish reads its token on the ADS notification thread, and a
+    // notification already in flight when Dispose runs would race that disposal into an
+    // ObjectDisposedException reported as a handler fault — blaming a handler that did nothing
+    // wrong, exactly the confusion the _disposed check in Publish exists to avoid. A source with
+    // no timer holds nothing that needs releasing.
+    private readonly CancellationTokenSource _shutdown = new();
+
     private readonly Dictionary<string, PlcAlarmTargetOptions> _targets = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PlcAlarmStore> _stores = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, object> _locks = new(StringComparer.OrdinalIgnoreCase);
@@ -90,16 +110,24 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
     // still what makes check-then-act atomic where that matters.
     private volatile bool _disposed;
 
+    // Written once by StartAsync, read on every notification from the ADS router thread.
+    // Volatile because those are different threads and nothing on the publication path
+    // synchronises with the write. Empty until then, which is the honest reading: before
+    // StartAsync no subscription exists and there is nothing to deliver.
+    private volatile IPlcAlarmHandler[] _handlers = [];
+
     public PlcAlarmMonitor(
         IAdsConnectionPool pool,
         IAlarmTextCatalog catalog,
         IPlcAlarmDialect dialect,
         IOptions<PlcAlarmsOptions> options,
+        IServiceProvider services,
         ILogger<PlcAlarmMonitor> logger)
     {
         _pool = pool;
         _catalog = catalog;
         _dialect = dialect;
+        _services = services;
         _logger = logger;
         _transitionsView = _transitions.AsObservable();
 
@@ -196,6 +224,26 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
     /// </remarks>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // FIRST, before a single subscription exists — the whole reason IPlcAlarmHandler is a
+        // seam rather than a documentation note. ADS delivers a notification the instant a
+        // subscription is registered, so the PLC's entire outstanding set lands during the
+        // awaits below; anything resolved after them could miss it, which is precisely the trap
+        // AlarmChanged consumers have to know to avoid. Resolved once and cached: this runs on
+        // every notification thereafter, and re-resolving per transition would put container
+        // lookups on the ADS notification thread.
+        _handlers = [.. _services.GetServices<IPlcAlarmHandler>()];
+
+        // Named, not counted. "Is my handler actually wired up" is the question this line
+        // exists to answer, and a number cannot answer it — a consumer who registered two and
+        // sees one still has to go looking. Silent when none are registered, which is the
+        // ordinary case for a consumer using AlarmChanged or Transitions instead.
+        if (_handlers.Length > 0)
+        {
+            _logger.LogInformation(
+                "Delivering alarm transitions to registered handlers: {AlarmHandlers}",
+                string.Join(", ", _handlers.Select(handler => handler.GetType().Name)));
+        }
+
         // Materialised before awaiting anything, so every attempt is in flight at once
         // rather than started lazily one await at a time.
         var attempts = _targets
@@ -252,6 +300,21 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
             detachers = [.. _retryDetach];
             _subscriptions.Clear();
             _retryDetach.Clear();
+        }
+
+        // Before anything else is torn down, so a handler awaiting a slow gateway is released
+        // now rather than after StopAsync has waited out its timeout.
+        try
+        {
+            _shutdown.Cancel();
+        }
+        catch (Exception ex)
+        {
+            // Cancel runs the consumer callbacks registered on this token INLINE, so a handler
+            // that registered a throwing one would otherwise fault Dispose — that is, fault
+            // StopAsync — and the subscriptions below would never be released.
+            _logger.LogWarning(ex,
+                "An alarm handler's cancellation callback threw while the monitor was shutting down");
         }
 
         // Outside the lock: a registration landing concurrently must be able to take
@@ -554,6 +617,39 @@ internal sealed class PlcAlarmMonitor : IPlcAlarmMonitor, IHostedService, IDispo
         // still land between this check and the OnNext below, which is why that catch stays.
         if (_disposed)
             return;
+
+        // Registered handlers first, then the event, then the observable. All three are
+        // isolated the same way and all three run on THIS thread, so a slow handler here delays
+        // the two paths below it as much as it delays this target's next snapshot — said out
+        // loud on IPlcAlarmHandler, because an asynchronous signature invites the opposite
+        // assumption.
+        //
+        // Waited on, not fired and forgotten. Per-target ordering is this type's central
+        // guarantee and it is bought by not leaving the lock until delivery is done; letting
+        // these tasks run on would hand a handler Raised after the Ended that followed it — the
+        // wrong direction for an alarm system to fail in. GetAwaiter().GetResult() rather than
+        // .Wait() so a handler's exception arrives as itself instead of wrapped in an
+        // AggregateException, which the OperationCanceledException filter below depends on.
+        // There is no synchronization context on the ADS router thread, so nothing here can
+        // deadlock on a continuation trying to get back to it.
+        foreach (var handler in _handlers)
+        {
+            try
+            {
+                handler.OnTransitionAsync(transition, _shutdown.Token).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+            {
+                // The host is going down and the handler did exactly what the token asked of
+                // it. Logging that as a fault would make every clean shutdown look like one.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "The alarm handler {HandlerType} threw for {AlarmKey} ({Kind}); delivery continues",
+                    handler.GetType().Name, transition.Alarm.Key, transition.Kind);
+            }
+        }
 
         // Deliberately NOT AlarmChanged?.Invoke(...): invoking a multicast delegate stops
         // at the FIRST handler that throws, so one bad subscriber would silently starve

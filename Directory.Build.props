@@ -17,6 +17,70 @@
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!--
+      Dependency version policy, stated once for the whole repository. Only the numbers live
+      here — nothing is referenced from this file, so a project that does not want a package
+      simply does not mention it.
+
+      WHY THE SHIPPED PACKAGES BRACKET BECKHOFF AND NOT THESE. Dahlke.TwinCAT.Ads.csproj pins
+      Beckhoff to [7.0.292,8.0.0) and explains why at length: a major version could reshape the
+      value-decode contract while preserving every signature. The reasoning below is not a
+      weaker version of that argument, it is a different one, and the difference is not
+      "Microsoft is better behaved across majors". A ceiling only works on a package that
+      nothing ELSE in the consumer's graph references. Beckhoff.TwinCAT.Ads is a leaf — this
+      repository is the only thing asking for it — so its ceiling costs a consumer nothing worse
+      than a restore error a maintainer can evaluate deliberately. ASP.NET Core references
+      Microsoft.Extensions.* directly, so [8.0.0,9.0.0) here would be an unresolvable conflict
+      for any net9 or net10 web app that referenced this package, unfixable from the consumer's
+      end short of dropping the package. A ceiling there breaks working consumers rather than
+      protecting them.
+
+      FIXED, NOT FLOATING. "8.*" packs as ">= whatever nuget.org happened to hold on the day the
+      release workflow ran", which makes the declared floor of a shipped package a function of
+      build timing — the opposite of what Deterministic and ContinuousIntegrationBuild above are
+      here to buy. These are the lowest versions carrying the APIs this repository uses; a
+      consumer whose own graph wants newer lifts them, which is exactly what the absent ceiling
+      is for.
+
+      PER TARGET FRAMEWORK, because the shipped packages multi-target net8/net9/net10 and a
+      single 8.x line for all three hands a net10 consumer 8.x abstractions unless something
+      else in their graph lifts them. For a cross-targeting project $(TargetFramework) is a
+      global property during each per-framework inner build, so it is already set when this file
+      is evaluated and each leg gets its own major — verified in the packed nuspec, which has a
+      dependency group per framework.
+
+      net8.0 is the UNCONDITIONED default rather than a fourth condition, and that matters: a
+      project with a single <TargetFramework> sets it in its own body, which is AFTER this file
+      is imported, so the conditions below would all miss and the version would come out empty
+      (NU1015). Every single-target project in this repository is net8.0, so the default is
+      right for all of them; one added later on a newer framework would silently take the 8.0.0
+      floor, which is safe but stale. Give it <TargetFrameworks> (plural, one value) if that
+      ever matters — the cross-targeting build sets the property early enough.
+
+      Tests, examples and prototypes use the same properties. They ship nothing, so their floors
+      matter less — but a test project pinned to a line BELOW what the library it references
+      declares is a package downgrade (NU1605, an error here), which is how a version bump in
+      src would otherwise break the build somewhere that looks unrelated to it.
+    -->
+    <MicrosoftExtensionsVersion>8.0.0</MicrosoftExtensionsVersion>
+    <MicrosoftExtensionsVersion Condition="'$(TargetFramework)' == 'net9.0'">9.0.0</MicrosoftExtensionsVersion>
+    <MicrosoftExtensionsVersion Condition="'$(TargetFramework)' == 'net10.0'">10.0.0</MicrosoftExtensionsVersion>
+
+    <!--
+      System.Reactive ships one line rather than one per .NET major, so there is no target
+      framework to match it to. Fixed and unbounded for the same reasons as above, and the
+      shared-graph argument applies to it harder than to anything else here: a consumer of an Rx
+      companion package references System.Reactive themselves nearly by definition.
+
+      6.1.0 rather than 6.0.0, which is not an arbitrary choice of patch. Beckhoff.TwinCAT.Ads
+      7.0.292 itself depends on System.Reactive >= 6.1.0, so anything lower is a downgrade the
+      moment the Alarms package is restored beside the core one. A floor is the lowest version
+      that actually RESOLVES, not the lowest that compiles.
+    -->
+    <SystemReactiveVersion>6.1.0</SystemReactiveVersion>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
     <!--
       Normalises the absolute source paths baked into the PDB to deterministic placeholders, so a

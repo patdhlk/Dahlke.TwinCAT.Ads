@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TwinCAT.Ads;
@@ -31,7 +33,22 @@ public class PlcAlarmMonitorConcurrencyTests
     private const string PlcId = "plc1";
     private const string Path = "GVL.Errors";
 
-    private static PlcAlarmMonitor MonitorFor(StubPool pool, params string[] plcIds)
+    private static PlcAlarmMonitor MonitorFor(StubPool pool, params string[] plcIds) =>
+        MonitorFor(pool, new ServiceCollection().BuildServiceProvider(), plcIds);
+
+    /// <summary>A single-target monitor whose container holds <paramref name="handlers"/>.</summary>
+    private static PlcAlarmMonitor MonitorWithHandlers(StubPool pool, params IPlcAlarmHandler[] handlers)
+    {
+        var services = new ServiceCollection();
+
+        foreach (var handler in handlers)
+            services.AddSingleton(handler);
+
+        return MonitorFor(pool, services.BuildServiceProvider(), []);
+    }
+
+    private static PlcAlarmMonitor MonitorFor(
+        StubPool pool, IServiceProvider services, string[] plcIds)
     {
         var options = new PlcAlarmsOptions();
 
@@ -46,6 +63,9 @@ public class PlcAlarmMonitorConcurrencyTests
             // the end of it. Nothing here acknowledges, so the RPC half is never reached.
             new ErrorHandlerAlarmDialect(),
             Options.Create(options),
+            // Where the monitor reads its IPlcAlarmHandlers from at startup. Empty unless a
+            // test went through MonitorWithHandlers.
+            services,
             NullLogger<PlcAlarmMonitor>.Instance);
     }
 
@@ -392,6 +412,192 @@ public class PlcAlarmMonitorConcurrencyTests
         }
     }
 
+    [Fact]
+    public async Task RegisteredHandler_SeesTheSnapshotThatArrivesDuringRegistration()
+    {
+        // The defect this seam removes, reproduced end to end. The PLC is already holding an
+        // alarm and the router delivers it AS THE SUBSCRIPTION IS REGISTERED — inside
+        // StartAsync, before it returns. An AlarmChanged handler attached on the next line of
+        // the consumer's Program.cs is already too late and never hears about it; a handler
+        // resolved through the container is attached before the subscription exists at all.
+        var pool = new StubPool(failFirstSubscribe: false);
+        pool.Connection.NotifyOnSubscribe(OneAlarm());
+
+        var registered = new RecordingHandler();
+        using var monitor = MonitorWithHandlers(pool, registered);
+
+        await monitor.StartAsync(CancellationToken.None);
+
+        // Exactly what the README used to have to tell people not to do.
+        var afterStart = new List<AlarmTransition>();
+        monitor.AlarmChanged += (_, t) => { lock (afterStart) { afterStart.Add(t); } };
+
+        var seen = Assert.Single(registered.Transitions);
+        Assert.Equal(AlarmTransitionKind.Raised, seen.Kind);
+        Assert.Equal("BMK1Err404", seen.Alarm.Key);
+
+        // The control half. Without it this test would still pass if the handler were being
+        // invoked from somewhere ordinary and the timing claim above were wrong.
+        lock (afterStart)
+            Assert.Empty(afterStart);
+
+        // And the alarm really is outstanding — the monitor folded the snapshot in, so this is
+        // a delivery difference rather than one consumer being handed a phantom transition.
+        Assert.Single(monitor.GetOutstanding());
+    }
+
+    [Fact]
+    public async Task RegisteredHandlers_AreIsolatedFromOneAnother()
+    {
+        // Same guarantee AlarmChanged already makes: one bad handler must not starve the ones
+        // registered after it. Ordering matters — the thrower is first, so a foreach that let
+        // the exception escape would take the recorder with it.
+        var pool = new StubPool(failFirstSubscribe: false);
+        var thrower = new ThrowingHandler();
+        var recorder = new RecordingHandler();
+        using var monitor = MonitorWithHandlers(pool, thrower, recorder);
+
+        await monitor.StartAsync(CancellationToken.None);
+
+        pool.Connection.Notify(OneAlarm());
+
+        Assert.Equal(1, thrower.Calls);
+        Assert.Single(recorder.Transitions);
+
+        // Not unsubscribed by throwing: later transitions still reach it. Two more, because
+        // an alarm that clears AND is acknowledged in one snapshot emits Acknowledged before
+        // the Ended that retires it.
+        pool.Connection.Notify(OneAlarm(isActive: false, isAcked: true));
+
+        Assert.Equal(3, thrower.Calls);
+        Assert.Equal(3, recorder.Transitions.Count);
+    }
+
+    [Fact]
+    public async Task RegisteredHandler_IsAwaitedBeforeTheNextTransitionIsPublished()
+    {
+        // The signature is asynchronous; the delivery contract is not. Per-target ordering is
+        // bought by not leaving the lock until the handler's task completes, so a handler that
+        // awaits must still be finished with Raised before Ended is published to anyone. Fired
+        // and forgotten, both continuations would race and this fails.
+        var pool = new StubPool(failFirstSubscribe: false);
+        var handler = new SlowHandler();
+        using var monitor = MonitorWithHandlers(pool, handler);
+
+        await monitor.StartAsync(CancellationToken.None);
+
+        pool.Connection.Notify(OneAlarm());
+        pool.Connection.Notify(OneAlarm(isActive: false, isAcked: true));
+
+        // Every transition COMPLETED in order, not merely started in order — each entry is
+        // appended after that invocation's await has resumed.
+        Assert.Equal(
+            [AlarmTransitionKind.Raised, AlarmTransitionKind.Acknowledged, AlarmTransitionKind.Ended],
+            handler.Completed);
+
+        // And no invocation ever began before its predecessor had finished.
+        Assert.Equal(1, handler.MaxConcurrent);
+    }
+
+    [Fact]
+    public async Task Dispose_CancelsTheTokenHandlersWereGiven()
+    {
+        // A handler awaiting a pager gateway must be told the host is going down, or StopAsync
+        // waits out the handler's own timeout instead of the token's.
+        var pool = new StubPool(failFirstSubscribe: false);
+        var handler = new RecordingHandler();
+        var monitor = MonitorFor(pool, BuildProviderWith(handler), []);
+
+        await monitor.StartAsync(CancellationToken.None);
+        pool.Connection.Notify(OneAlarm());
+
+        Assert.False(handler.LastToken.IsCancellationRequested);
+
+        monitor.Dispose();
+
+        Assert.True(handler.LastToken.IsCancellationRequested);
+    }
+
+    private static IServiceProvider BuildProviderWith(IPlcAlarmHandler handler)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(handler);
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>Records every transition it is handed, and the token it came with.</summary>
+    private sealed class RecordingHandler : IPlcAlarmHandler
+    {
+        private readonly List<AlarmTransition> _transitions = [];
+
+        public IReadOnlyList<AlarmTransition> Transitions
+        {
+            get { lock (_transitions) return [.. _transitions]; }
+        }
+
+        public CancellationToken LastToken { get; private set; }
+
+        public Task OnTransitionAsync(AlarmTransition transition, CancellationToken ct)
+        {
+            LastToken = ct;
+
+            lock (_transitions)
+                _transitions.Add(transition);
+
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>Throws before its first await, the way a misconfigured notifier would.</summary>
+    private sealed class ThrowingHandler : IPlcAlarmHandler
+    {
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public Task OnTransitionAsync(AlarmTransition transition, CancellationToken ct)
+        {
+            Interlocked.Increment(ref _calls);
+            throw new InvalidOperationException("the pager gateway is down");
+        }
+    }
+
+    /// <summary>
+    /// Yields and then delays, so a caller that did not await it would be observably ahead.
+    /// </summary>
+    private sealed class SlowHandler : IPlcAlarmHandler
+    {
+        private readonly List<AlarmTransitionKind> _completed = [];
+        private int _inFlight;
+        private int _maxConcurrent;
+
+        public IReadOnlyList<AlarmTransitionKind> Completed
+        {
+            get { lock (_completed) return [.. _completed]; }
+        }
+
+        /// <summary>The most invocations that were ever in flight at once — must stay 1.</summary>
+        public int MaxConcurrent => Volatile.Read(ref _maxConcurrent);
+
+        public async Task OnTransitionAsync(AlarmTransition transition, CancellationToken ct)
+        {
+            var inFlight = Interlocked.Increment(ref _inFlight);
+
+            int seen;
+            while ((seen = Volatile.Read(ref _maxConcurrent)) < inFlight)
+                Interlocked.CompareExchange(ref _maxConcurrent, inFlight, seen);
+
+            // Past this point the method has returned an incomplete task to the monitor. A
+            // monitor that did not await it would publish the next transition right now.
+            await Task.Delay(50, ct).ConfigureAwait(false);
+
+            lock (_completed)
+                _completed.Add(transition.Kind);
+
+            Interlocked.Decrement(ref _inFlight);
+        }
+    }
+
     private static async Task WaitForAsync(Func<bool> condition)
     {
         for (var i = 0; i < 100 && !condition(); i++)
@@ -446,6 +652,10 @@ public class PlcAlarmMonitorConcurrencyTests
         private readonly List<Action<string, object?>> _callbacks = [];
         private TaskCompletionSource? _block;
         private Func<Exception>? _failure;
+
+        // A holder rather than the value itself, so "deliver null on registration" stays
+        // distinguishable from "deliver nothing".
+        private StrongBox<object?>? _onSubscribe;
         private int _forcedSuccess;
         private int _subscribeAttempts;
         private int _registrationsCreated;
@@ -503,6 +713,20 @@ public class PlcAlarmMonitorConcurrencyTests
 
         public void ReleaseBlockedSubscribe() => Interlocked.Exchange(ref _block, null)?.TrySetResult();
 
+        /// <summary>
+        /// Makes every successful <c>SubscribeAsync</c> deliver <paramref name="value"/> to the
+        /// callback it is registering, before it returns the handle.
+        /// </summary>
+        /// <remarks>
+        /// This is real ADS behaviour and the reason <see cref="IPlcAlarmHandler"/> exists: the
+        /// router fires one notification for each subscription AS IT IS REGISTERED, so the
+        /// PLC's whole outstanding set lands inside <c>StartAsync</c>. No simulated connection
+        /// can stand in here — <c>SimulatedAdsConnection</c> documents that seeding fires no
+        /// callbacks and that its notifications come only from later writes, so against it
+        /// every consumer looks like it caught the first snapshot whether it could have or not.
+        /// </remarks>
+        public void NotifyOnSubscribe(object? value) => Volatile.Write(ref _onSubscribe, new(value));
+
         /// <summary>Delivers a notification to every live subscription.</summary>
         public void Notify(object? value)
         {
@@ -537,6 +761,12 @@ public class PlcAlarmMonitorConcurrencyTests
 
             Interlocked.Increment(ref _registrationsCreated);
             Interlocked.Increment(ref _liveSubscriptions);
+
+            // Before the handle is returned, which is the whole point: StartAsync has not got
+            // this subscription back yet, so anything a consumer attaches after StartAsync
+            // returns is already too late for this snapshot.
+            if (Volatile.Read(ref _onSubscribe) is { } initial)
+                callback(Path, initial.Value);
 
             return new Registration(this, callback);
         }

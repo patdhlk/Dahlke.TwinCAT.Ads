@@ -29,6 +29,13 @@ else
 // runs from the repo root, from the output directory, or published.
 builder.Services.AddTwinCatAdsAlarms(builder.Configuration);
 
+// The monitor resolves this before it subscribes to anything, so it cannot miss the
+// snapshot ADS delivers as the subscription is registered. Attaching AlarmChanged after
+// builder.Build() instead would work HERE only because the simulated PLC's alarm array
+// starts empty — against a real PLC already holding alarms at boot, that snapshot lands
+// inside StartAsync and an event attached afterwards never sees it.
+builder.Services.AddAlarmHandler<AlarmConsolePrinter>();
+
 // Registered AFTER AddTwinCatAdsAlarms deliberately: hosted services start in
 // registration order, so the monitor's subscription is live before the driver's
 // first write. Reversing these two lines loses the opening transitions.
@@ -37,19 +44,26 @@ if (!useRealPlc)
 
 using var host = builder.Build();
 
-var monitor = host.Services.GetRequiredService<IPlcAlarmMonitor>();
-
-// Handlers run on the ADS notification thread and hold up this target's next
-// snapshot, so they must be quick — print and return, never await work here.
-monitor.AlarmChanged += (_, transition) =>
-{
-    var alarm = transition.Alarm;
-    Console.WriteLine(
-        $"[{transition.Kind.ToString().ToUpperInvariant()}] {alarm.Key} " +
-        $"({alarm.Severity}) — {alarm.Text ?? "(no catalog text)"}");
-};
-
 await host.RunAsync();
+
+/// <summary>Prints every transition as it happens.</summary>
+/// <remarks>
+/// Handlers run on the ADS notification thread and are awaited before this target's next
+/// snapshot is applied, so they must be quick — print and return, never await real work here.
+/// A handler with real work to do should hand it to a queue and return.
+/// </remarks>
+internal sealed class AlarmConsolePrinter : IPlcAlarmHandler
+{
+    public Task OnTransitionAsync(AlarmTransition transition, CancellationToken ct)
+    {
+        var alarm = transition.Alarm;
+        Console.WriteLine(
+            $"[{transition.Kind.ToString().ToUpperInvariant()}] {alarm.Key} " +
+            $"({alarm.Severity}) — {alarm.Text ?? "(no catalog text)"}");
+
+        return Task.CompletedTask;
+    }
+}
 
 /// <summary>
 /// Drives the SIMULATED PLC through an alarm lifecycle so the example shows something

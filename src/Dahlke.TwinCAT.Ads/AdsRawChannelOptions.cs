@@ -150,8 +150,27 @@ public sealed class AdsRawChannelSeed
     /// </remarks>
     public string AmsNetId { get; set; } = string.Empty;
 
-    /// <summary>The target's ADS port, in the range 0-65535.</summary>
-    public int Port { get; set; }
+    /// <summary>The target's ADS port, in the range 1-65535. Required.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Nullable because "not specified" has to be distinguishable from a port number.</b> A
+    /// plain <see cref="int"/> defaults to <c>0</c>, and <c>0</c> is a value the configuration
+    /// binder produces for a seed entry that never names a port at all — from
+    /// <c>Microsoft.Extensions.Configuration.Binder</c> 10.0.0 that includes
+    /// <c>"Port": null</c>, which through 9.x was an unconvertible empty string that dropped the
+    /// whole entry and failed startup. The same configuration therefore failed on net8 and
+    /// started silently on net10, seeding a target nobody asked for while the one that was meant
+    /// answered every read with an ADS error. There is no rule that can tell those apart while
+    /// the property is non-nullable: <c>0</c> IS the default. Making it nullable is what makes
+    /// "the operator did not say" a state of its own, rejected at startup on every framework.
+    /// </para>
+    /// <para>
+    /// The range matches <see cref="PlcTargetOptions.Port"/>'s, which has always been
+    /// <c>[1, 65535]</c>: port <c>0</c> addresses nothing on an ADS device, so it is a typo
+    /// wherever it appears rather than a legal value in one place and not the other.
+    /// </para>
+    /// </remarks>
+    public int? Port { get; set; }
 
     /// <summary>
     /// The slots to pre-load into this target's store. Empty by default, which

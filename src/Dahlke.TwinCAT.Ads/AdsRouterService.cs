@@ -153,6 +153,39 @@ internal class AdsRouterService : BackgroundService
         _timeProvider = timeProvider;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>Resolves the ready signal when the host never lets <see cref="ExecuteAsync"/> run
+    /// at all.</b> <see cref="ExecuteAsync"/> is written to resolve the signal on every exit,
+    /// which was a complete guarantee for as long as <see cref="BackgroundService"/> always
+    /// invoked it. It no longer does: from <c>Microsoft.Extensions.Hosting.Abstractions</c>
+    /// 10.0.0, <c>StartAsync</c> short-circuits on an already-cancelled token and leaves
+    /// <c>ExecuteTask</c> in the Canceled state without ever calling <c>ExecuteAsync</c>. The
+    /// signal would then never be resolved, and every pool loop awaiting it would wait
+    /// forever — a shutdown requested DURING startup, which is exactly when a host has least
+    /// slack, would hang instead of unwinding.
+    /// </para>
+    /// <para>
+    /// Checked in a <c>finally</c> rather than up front so a token cancelled while
+    /// <c>base.StartAsync</c> is running is caught too, and <c>SetCancelled</c> is TrySet, so
+    /// on a framework that DID run <see cref="ExecuteAsync"/> — every version below 10.0.0 —
+    /// this is a no-op over the state that method already set.
+    /// </para>
+    /// </remarks>
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await base.StartAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (cancellationToken.IsCancellationRequested)
+                _readySignal.SetCancelled();
+        }
+    }
+
     /// <summary>
     /// Whether the embedded AMS router must be started for this configuration.
     /// </summary>

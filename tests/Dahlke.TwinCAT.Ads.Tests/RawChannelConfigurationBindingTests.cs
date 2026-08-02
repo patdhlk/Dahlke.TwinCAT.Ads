@@ -475,24 +475,23 @@ public class RawChannelConfigurationBindingTests
     }
 
     /// <summary>
-    /// The same protection through the JSON provider, for the two forms a host is
-    /// most likely to produce by accident: a <c>null</c> and an empty string.
+    /// A port that is neither a number nor absent — <c>"typo"</c> — still drops the whole entry
+    /// in the binder, and is still caught by the discard check.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Written against JSON specifically, because the providers do NOT agree and only
-    /// this one matters to a host with an <c>appsettings.json</c>. The JSON provider
-    /// represents a JSON <c>null</c> as an EMPTY STRING, which fails to convert to
-    /// <see cref="int"/> and so drops the element — caught here. An in-memory
-    /// collection holding a CLR <see langword="null"/> for the same key behaves
-    /// differently: the binder skips the property and <c>Port</c> keeps its default of
-    /// <c>0</c>, with no drop and no failure. Probed, because an in-memory test would
-    /// have quietly proved the wrong thing.
+    /// Written against JSON specifically, because the providers do NOT agree and only this one
+    /// matters to a host with an <c>appsettings.json</c>.
+    /// </para>
+    /// <para>
+    /// The two forms that mean "no port" — a JSON <c>null</c> and an empty string — used to
+    /// belong here and no longer do: since <c>Port</c> became <see cref="int?"/> the binder
+    /// converts both to <see langword="null"/> rather than failing, so the entry survives and is
+    /// rejected by name instead. That is
+    /// <see cref="SeedEntryWithNoPort_FailsAtStartupNamingIt"/>.
     /// </para>
     /// </remarks>
     [Theory]
-    [InlineData("null")]
-    [InlineData("\"\"")]
     [InlineData("\"typo\"")]
     public void SeedEntryWithAnUnconvertiblePortInJson_FailsAtStartup(string portLiteral)
     {
@@ -582,9 +581,116 @@ public class RawChannelConfigurationBindingTests
 
         var ex = Assert.Throws<OptionsValidationException>(() => _ = options.Value);
 
+        // WHICH failure fires depends on the configuration binder's major version, and both
+        // readings are correct. Binder 8.0.0 binds a scalar element where an object belongs to
+        // a DEFAULT-VALUED element, so the counts agree, the discard check stays quiet, and the
+        // per-element rules reject it by index and member instead. From 9.0.0 the same element
+        // is DROPPED, and the discard check reports the shortfall. Measured across all three
+        // legs of this repository's target frameworks, which now reference the matching major.
+        //
+        // Asserting on either message would pass on one framework and fail on another while the
+        // library behaved correctly on both. What must hold everywhere is the guarantee this
+        // section exists for: the host FAILS AT STARTUP naming the offending path, rather than
+        // starting with a slot silently missing from the seeded target.
+        Assert.Contains(ex.Failures, f => f.Contains("RawChannels:Seed:0"));
+    }
+
+    /// <summary>
+    /// A seed entry that never names a port fails startup BY NAME, on every target framework,
+    /// however the operator managed to not name it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the test that <see cref="AdsRawChannelSeed.Port"/> is
+    /// <see cref="int?"/> for. While it was a plain <see cref="int"/> the three cases below did
+    /// not agree with each other OR across frameworks: through Binder 9.x a JSON <c>null</c>
+    /// and an empty string both arrived as an unconvertible empty string and DROPPED the whole
+    /// entry (caught by the discard check), while from 10.0.0 the binder skipped the property
+    /// and left <c>Port</c> at its default of <c>0</c> — which was inside the then-documented
+    /// 0-65535 range, so nothing objected and the host started with a seed pointing at a target
+    /// nobody asked for. The same appsettings.json failed on net8 and started silently on
+    /// net10, and no rule could tell "the operator did not say" from "the operator wrote 0"
+    /// while <c>0</c> WAS the default.
+    /// </para>
+    /// <para>
+    /// Nullable, the three cases converge: the binder converts an absent key, a JSON
+    /// <c>null</c> and an empty string alike to <see langword="null"/> on every version, and a
+    /// null port is rejected as missing. No <c>#if</c>, no per-framework reading.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    // The key is simply not there.
+    [InlineData("""{ "AmsNetId": "1.2.3.4.5.6" }""")]
+    // Written, but null.
+    [InlineData("""{ "AmsNetId": "1.2.3.4.5.6", "Port": null }""")]
+    // Written, but blank.
+    [InlineData("""{ "AmsNetId": "1.2.3.4.5.6", "Port": "" }""")]
+    public void SeedEntryWithNoPort_FailsAtStartupNamingIt(string entryLiteral)
+    {
+        var json = $$"""
+            {
+              "PlcTargets": { "plc1": { "AmsNetId": "1.2.3.4.5.6" } },
+              "RawChannels": { "Mode": "Simulated", "Seed": [ {{entryLiteral}} ] }
+            }
+            """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var configuration = new ConfigurationBuilder().AddJsonStream(stream).Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAds(configuration);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<TwinCatAdsOptions>>();
+
+        var ex = Assert.Throws<OptionsValidationException>(() => _ = options.Value);
+
         Assert.Contains(
             ex.Failures,
-            f => f.Contains("RawChannels:Seed:0:Slots") && f.Contains("DISCARDED"));
+            f => f.Contains("RawChannels:Seed:0:Port") && f.Contains("is required"));
+    }
+
+    /// <summary>
+    /// Port <c>0</c> is a typo wherever it appears, and is now rejected for a seed entry exactly
+    /// as it always has been for a PLC target.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from the missing-port case above and reported differently, because they are
+    /// different mistakes: this operator named a target and got the number wrong, and telling
+    /// them a port "is required" would send them looking for a line they already wrote.
+    /// </remarks>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(65536)]
+    public void SeedEntryWithAnOutOfRangePort_FailsAtStartup(int port)
+    {
+        var json = $$"""
+            {
+              "PlcTargets": { "plc1": { "AmsNetId": "1.2.3.4.5.6" } },
+              "RawChannels": {
+                "Mode": "Simulated",
+                "Seed": [ { "AmsNetId": "1.2.3.4.5.6", "Port": {{port}} } ]
+              }
+            }
+            """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var configuration = new ConfigurationBuilder().AddJsonStream(stream).Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTwinCatAds(configuration);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<TwinCatAdsOptions>>();
+
+        var ex = Assert.Throws<OptionsValidationException>(() => _ = options.Value);
+
+        Assert.Contains(
+            ex.Failures,
+            f => f.Contains("RawChannels:Seed:0:Port") && f.Contains("[1, 65535]"));
     }
 
     /// <summary>

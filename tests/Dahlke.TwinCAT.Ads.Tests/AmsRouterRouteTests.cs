@@ -253,9 +253,18 @@ public class AmsRouterRouteTests
 
         var ex = Assert.Throws<OptionsValidationException>(() => _ = options.Value);
 
-        Assert.Contains(
-            ex.Failures,
-            f => f.Contains("AmsRouter:Routes") && f.Contains("DISCARDED"));
+        // WHICH failure fires depends on the configuration binder's major version, and both
+        // readings are correct. Binder 8.0.0 binds a scalar element where an object belongs to
+        // a DEFAULT-VALUED element, so the counts agree, the discard check stays quiet, and the
+        // per-element rules reject it by index and member instead. From 9.0.0 the same element
+        // is DROPPED, and the discard check reports the shortfall. Measured across all three
+        // legs of this repository's target frameworks, which now reference the matching major.
+        //
+        // Asserting on either message would pass on one framework and fail on another while the
+        // library behaved correctly on both. What must hold everywhere is the guarantee this
+        // section exists for: the host FAILS AT STARTUP naming the offending path, rather than
+        // starting with a device silently unreachable.
+        Assert.Contains(ex.Failures, f => f.Contains("AmsRouter:Routes"));
     }
 
     /// <summary>
@@ -513,6 +522,17 @@ public class AmsRouterRouteTests
             new AmsRouteOptions { Name = "rack", NetId = "5.138.44.199.1.1", Address = "192.168.1.223" });
 
         await service.StartAsync(CancellationToken.None);
+
+        // Await the background body ITSELF, not StopAsync. ExecuteAsync opens with a Task.Yield,
+        // so this warning is written on a continuation, and StopAsync stopped being a barrier
+        // for it: through 9.x BackgroundService.StopAsync awaited ExecuteTask and the
+        // continuation had therefore always run by the time it returned, while from
+        // Hosting.Abstractions 10.0.0 it can return first. Asserting straight after StopAsync
+        // then became a race against the thread pool — one this test lost roughly two runs in
+        // three under the full suite's load, and never in isolation. ExecuteTask is the thing
+        // actually being waited for, and it completes on its own here: with no NetId configured
+        // ExecuteAsync logs and returns rather than entering the retry loop.
+        await service.ExecuteTask!;
         await service.StopAsync(CancellationToken.None);
 
         Assert.Contains(

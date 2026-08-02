@@ -30,12 +30,16 @@
       WRONG VALUES with no compile error and no test failure — all hardware facts skip without a
       PLC, and the unit tests decode against stubs this library defines itself. The ceiling turns
       that into a restore-time failure a maintainer can evaluate deliberately.
+
+      The Microsoft.Extensions references below are deliberately NOT bracketed, and that is a
+      stated policy rather than an oversight: src/Directory.Build.props says why, and sets the
+      per-target-framework version these resolve to.
     -->
     <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="[7.0.292,8.0.0)" />
     <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="[7.0.292,8.0.0)" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="8.*" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.*" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.*" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="$(MicrosoftExtensionsVersion)" />
   </ItemGroup>
 
 </Project>
