@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Dahlke.TwinCAT.Ads.Tests;
 
@@ -71,6 +72,42 @@ public class AdsConnectionPoolBuilderTests
 
         Assert.NotNull(pool.RawChannels);
         Assert.Same(pool.Services.GetRequiredService<IAdsRawChannelFactory>(), pool.RawChannels);
+    }
+
+    [Fact]
+    public async Task ConfigureServices_HostedService_StartsAfterThePoolIsAlreadyConnected()
+    {
+        // A ConfigureServices delegate runs BEFORE AddTwinCatAds... internally (so its
+        // TryAdd defaults, e.g. a custom ILoggerFactory, can win) — but any IHostedService
+        // it registers must still START after router/pool/raw-channels, exactly as a
+        // companion package's hosted service (e.g. AddTwinCatAdsAlarms's monitor) would on
+        // a generic host via AddTwinCatAds(...).AddTwinCatAdsAlarms(...). Registration
+        // order and start order are not the same axis, and this pins that they aren't.
+        await using var pool = await AdsConnectionPoolBuilder.CreateSimulation()
+            .AddTarget("plc1", o => o.DisplayName = "Simulated PLC")
+            .ConfigureServices(services => services.AddHostedService<ConnectedAtStartProbe>())
+            .BuildAndStartAsync();
+
+        var probe = pool.Services.GetServices<IHostedService>().OfType<ConnectedAtStartProbe>().Single();
+        Assert.True(probe.WasConnectedAtStart);
+    }
+
+    /// <summary>
+    /// Records, at <see cref="StartAsync"/> time, whether the pool it depends on already
+    /// reports its target as connected — the probe for
+    /// <see cref="ConfigureServices_HostedService_StartsAfterThePoolIsAlreadyConnected"/>.
+    /// </summary>
+    private sealed class ConnectedAtStartProbe(IAdsConnectionPool pool) : IHostedService
+    {
+        public bool WasConnectedAtStart { get; private set; }
+
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            WasConnectedAtStart = pool.GetConnection("plc1").IsConnected;
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     [Fact]

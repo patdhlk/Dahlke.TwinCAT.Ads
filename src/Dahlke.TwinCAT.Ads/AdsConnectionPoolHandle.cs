@@ -27,6 +27,8 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     private readonly ServiceProvider _provider;
     private readonly IReadOnlyList<IHostedService> _started;
     private readonly IAdsConnectionPool _pool;
+    private readonly IAdsRawChannelFactory _rawChannels;
+    private readonly ILogger<AdsConnectionPoolHandle> _logger;
     private int _disposed;
 
     /// <param name="provider">The provider this handle owns and will dispose.</param>
@@ -37,7 +39,12 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     {
         _provider = provider;
         _started = started;
+        // Both are singletons already constructed by the time this ctor runs — resolved
+        // once here, like _pool, rather than per-get, so RawChannels and GetConnection
+        // share the same post-disposal failure mode.
         _pool = provider.GetRequiredService<IAdsConnectionPool>();
+        _rawChannels = provider.GetRequiredService<IAdsRawChannelFactory>();
+        _logger = provider.GetRequiredService<ILogger<AdsConnectionPoolHandle>>();
     }
 
     /// <summary>
@@ -50,7 +57,7 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     /// <summary>
     /// The raw ADS channel factory, for targets the symbol API cannot reach.
     /// </summary>
-    public IAdsRawChannelFactory RawChannels => _provider.GetRequiredService<IAdsRawChannelFactory>();
+    public IAdsRawChannelFactory RawChannels => _rawChannels;
 
     /// <inheritdoc/>
     public IAdsConnection GetConnection(string plcId) => _pool.GetConnection(plcId);
@@ -77,16 +84,26 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     /// Idempotent — a second call is a no-op.
     /// </summary>
     /// <remarks>
-    /// A service that throws on stop does not prevent the remaining ones from stopping or
-    /// the provider from being disposed; the failures are collected and rethrown together
-    /// afterwards, so a botched shutdown is neither silent nor a resource leak.
+    /// <para>
+    /// <b>Never throws.</b> A service that fails to stop is logged as an error — through
+    /// the logger factory supplied via
+    /// <see cref="AdsConnectionPoolBuilder.UseLoggerFactory"/>, or silently swallowed by
+    /// the null logger if none was supplied — rather than thrown; the remaining services
+    /// still stop, in order, and the provider is still disposed either way.
+    /// </para>
+    /// <para>
+    /// <c>await using</c> lowers to a <c>try/finally</c>, and an exception thrown from a
+    /// <c>finally</c> block REPLACES whatever exception was already propagating out of the
+    /// <c>try</c>. A body that fails and then hits a botched shutdown on the way out would
+    /// therefore surface the shutdown failure and lose the real one — the fault the caller
+    /// actually needs to see. The generic host makes the same choice for the same reason:
+    /// <c>Host.StopAsync</c> may throw; <c>Host.DisposeAsync</c> does not.
+    /// </para>
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
-
-        List<Exception>? failures = null;
 
         for (var i = _started.Count - 1; i >= 0; i--)
         {
@@ -96,15 +113,13 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
             }
             catch (Exception ex)
             {
-                (failures ??= []).Add(ex);
+                _logger.LogError(
+                    ex,
+                    "{ServiceType} failed to stop while disposing the ADS connection pool.",
+                    _started[i].GetType().Name);
             }
         }
 
         await _provider.DisposeAsync().ConfigureAwait(false);
-
-        if (failures is not null)
-            throw new AggregateException(
-                "One or more services failed to stop while disposing the ADS connection pool.",
-                failures);
     }
 }

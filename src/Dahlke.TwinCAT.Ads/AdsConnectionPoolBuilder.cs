@@ -135,9 +135,17 @@ public sealed class AdsConnectionPoolBuilder
     /// <remarks>
     /// An <see cref="IHostedService"/> registered here is started and stopped with
     /// everything else, which is what lets a console app call
-    /// <c>AddPlcAlarms</c> and resolve the monitor from
+    /// <c>AddTwinCatAdsAlarms</c> and resolve the monitor from
     /// <see cref="AdsConnectionPoolHandle.Services"/>. These delegates run BEFORE the
-    /// library's own registrations, so a logging stack registered here is picked up.
+    /// library's own registrations for everything EXCEPT hosted-service start order — a
+    /// logging stack registered here is picked up by the TryAdd defaults below, but any
+    /// <see cref="IHostedService"/> registered here is moved to start AFTER router, pool
+    /// and raw channels (see <see cref="BuildAndStartAsync"/>), so a companion package's
+    /// hosted service can
+    /// assume the pool it depends on is already connected by the time its
+    /// <c>StartAsync</c> runs — exactly as it would calling
+    /// <c>AddTwinCatAds(...).AddTwinCatAdsAlarms(...)</c> on a generic host, where the
+    /// second call's hosted service naturally starts after the first's.
     /// </remarks>
     /// <param name="configure">Applied to the service collection, in call order.</param>
     /// <returns>The same builder, for chaining.</returns>
@@ -177,13 +185,28 @@ public sealed class AdsConnectionPoolBuilder
 
         // Logging: silent unless asked for. TryAdd so a ConfigureServices AddLogging wins;
         // Logger<T> lives in Logging.Abstractions, so the open generic costs no reference
-        // and no adapter — and it is what lets AddPlcAlarms (ILogger<PlcAlarmMonitor>) resolve.
+        // and no adapter — and it is what lets AddTwinCatAdsAlarms (ILogger<PlcAlarmMonitor>)
+        // resolve.
         services.TryAddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
         services.TryAdd(ServiceDescriptor.Singleton(typeof(ILogger<>), typeof(Logger<>)));
 
         // An explicit UseLoggerFactory beats both: last registration wins for a single resolve.
         if (_loggerFactory is not null)
             services.AddSingleton(_loggerFactory);
+
+        // Snapshot any IHostedService the caller registered via ConfigureServices BEFORE the
+        // library's own AddTwinCatAds.../AddTwinCatAdsSimulation... call below adds router,
+        // pool and raw channels. Registering the caller's services first (above) is right for
+        // TryAdd precedence, but it is WRONG for hosted-service START ORDER: left alone, a
+        // caller's IHostedService — the alarm monitor AddTwinCatAdsAlarms registers — would
+        // run its StartAsync before the pool it depends on even exists. On a generic host the
+        // caller avoids that themselves by calling AddTwinCatAds(...) before
+        // AddTwinCatAdsAlarms(...); here ConfigureServices always runs first, so that
+        // ordering choice is not available to them. The descriptors captured here are moved
+        // to the end, after the library's own, once the call below has run.
+        var callerHostedServices = services
+            .Where(d => d.ServiceType == typeof(IHostedService))
+            .ToList();
 
         void ComposedConfigure(TwinCatAdsOptions o)
         {
@@ -206,20 +229,32 @@ public sealed class AdsConnectionPoolBuilder
                 services.AddTwinCatAds(_configuration, ComposedConfigure);
         }
 
+        // Move each snapshotted descriptor to the end, in its original relative order — a
+        // stable move, not a re-sort — so router, pool and raw channels (just registered
+        // above) start FIRST and any caller-registered hosted service starts only once the
+        // pool it depends on is already connected.
+        foreach (var descriptor in callerHostedServices)
+        {
+            services.Remove(descriptor);
+            services.Add(descriptor);
+        }
+
         var provider = services.BuildServiceProvider();
         var started = new List<IHostedService>();
 
         try
         {
             // What Host.StartAsync does, and the single easiest thing to omit here.
-            // ValidateOnStart only QUEUES validation; IStartupValidator runs it. Without
-            // this line a malformed AMS Net ID that a hosted app rejects at startup would
-            // be accepted, and would surface later as a connection failure pointing at the
-            // network rather than at the configuration.
+            // ValidateOnStart only QUEUES validation; IStartupValidator runs it. In THIS
+            // codebase AdsConnectionPool and AdsRouterService both read IOptions<T>.Value
+            // eagerly in their constructors, so a malformed AMS Net ID is already caught the
+            // moment GetServices<IHostedService>() below materialises them, with or without
+            // this line. It stays anyway: it is what Host.StartAsync does, and it is what
+            // would catch a bad options type nothing else resolves eagerly, now or later.
             provider.GetService<IStartupValidator>()?.Validate();
 
-            // Registration order is start order: router, pool, raw channels — plus any
-            // hosted service a ConfigureServices delegate added.
+            // Registration order is start order: router, pool, raw channels, THEN any
+            // ConfigureServices-registered hosted service — moved to the end above.
             foreach (var hosted in provider.GetServices<IHostedService>())
             {
                 await hosted.StartAsync(ct).ConfigureAwait(false);
