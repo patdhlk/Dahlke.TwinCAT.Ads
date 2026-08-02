@@ -37,6 +37,14 @@ Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Simulated.get -> Dahlke.TwinCAT.Ads.Sim
 Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Write(string! symbolPath, object? value) -> void
 Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Writes.get -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.Testing.PlcWrite!>!
 Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.WritesTo(string! symbolPath) -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.Testing.PlcWrite!>!
+Dahlke.TwinCAT.Ads.Testing.PlcAssertionException
+Dahlke.TwinCAT.Ads.Testing.PlcAssertionException.PlcAssertionException() -> void
+Dahlke.TwinCAT.Ads.Testing.PlcAssertionException.PlcAssertionException(string! message) -> void
+Dahlke.TwinCAT.Ads.Testing.PlcAssertionException.PlcAssertionException(string! message, System.Exception! innerException) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.AssertNotWritten(string! symbolPath) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.AssertWriteCount(string! symbolPath, int expected) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.AssertWritten(string! symbolPath) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.AssertWritten(string! symbolPath, object? expected) -> void
 override Dahlke.TwinCAT.Ads.Testing.PlcWrite.Equals(object? obj) -> bool
 override Dahlke.TwinCAT.Ads.Testing.PlcWrite.GetHashCode() -> int
 override Dahlke.TwinCAT.Ads.Testing.PlcWrite.ToString() -> string!

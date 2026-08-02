@@ -1,3 +1,4 @@
+using System.Globalization;
 using TwinCAT.Ads;
 
 namespace Dahlke.TwinCAT.Ads.Testing;
@@ -309,6 +310,118 @@ public sealed class TestPlcTarget : IDisposable
     /// <param name="handler">Invoked with the caller's arguments.</param>
     public void SetRpc(string symbolPath, string methodName, Func<object?[], AdsRpcResult> handler)
         => _simulated.SetRpcHandler(symbolPath, methodName, handler);
+
+    /// <summary>
+    /// Asserts the code under test wrote to <paramref name="symbolPath"/> at least once,
+    /// with any value.
+    /// </summary>
+    /// <param name="symbolPath">The path that should have been written.</param>
+    /// <exception cref="PlcAssertionException">No write to that path was recorded.</exception>
+    public void AssertWritten(string symbolPath)
+    {
+        ArgumentNullException.ThrowIfNull(symbolPath);
+
+        if (WritesTo(symbolPath).Count > 0)
+            return;
+
+        throw new PlcAssertionException(
+            $"Expected a write to \"{symbolPath}\" on {PlcId}, but {DescribeRecorded(symbolPath)}");
+    }
+
+    /// <summary>
+    /// Asserts the code under test wrote <paramref name="expected"/> to
+    /// <paramref name="symbolPath"/> at least once.
+    /// </summary>
+    /// <param name="symbolPath">The path that should have been written.</param>
+    /// <param name="expected">
+    /// The value expected. Compared with <see cref="object.Equals(object, object)"/>, which
+    /// for boxed values is TYPE-SENSITIVE: a boxed <see cref="float"/> 23.5 does not equal
+    /// a boxed <see cref="double"/> 23.5. That is the same rule the simulated connection
+    /// uses to decide whether a write is a change, so the two agree — and it is why a
+    /// failure message names the CLR type of everything it prints.
+    /// </param>
+    /// <exception cref="PlcAssertionException">No matching write was recorded.</exception>
+    public void AssertWritten(string symbolPath, object? expected)
+    {
+        ArgumentNullException.ThrowIfNull(symbolPath);
+
+        var writes = WritesTo(symbolPath);
+        if (writes.Any(w => Equals(w.Value, expected)))
+            return;
+
+        throw new PlcAssertionException(
+            $"Expected a write of {Describe(expected)} to \"{symbolPath}\" on {PlcId}, "
+            + $"but {DescribeRecorded(symbolPath)}");
+    }
+
+    /// <summary>
+    /// Asserts the code under test never wrote to <paramref name="symbolPath"/>.
+    /// </summary>
+    /// <param name="symbolPath">The path that should not have been written.</param>
+    /// <exception cref="PlcAssertionException">At least one write was recorded.</exception>
+    public void AssertNotWritten(string symbolPath)
+    {
+        ArgumentNullException.ThrowIfNull(symbolPath);
+
+        var writes = WritesTo(symbolPath);
+        if (writes.Count == 0)
+            return;
+
+        throw new PlcAssertionException(
+            $"Expected no write to \"{symbolPath}\" on {PlcId}, but {DescribeRecorded(symbolPath)}");
+    }
+
+    /// <summary>
+    /// Asserts the code under test wrote to <paramref name="symbolPath"/> exactly
+    /// <paramref name="expected"/> times.
+    /// </summary>
+    /// <param name="symbolPath">The path to count writes for.</param>
+    /// <param name="expected">The exact number of writes expected.</param>
+    /// <exception cref="PlcAssertionException">A different number was recorded.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="expected"/> is negative.</exception>
+    public void AssertWriteCount(string symbolPath, int expected)
+    {
+        ArgumentNullException.ThrowIfNull(symbolPath);
+        ArgumentOutOfRangeException.ThrowIfNegative(expected);
+
+        var writes = WritesTo(symbolPath);
+        if (writes.Count == expected)
+            return;
+
+        throw new PlcAssertionException(
+            $"Expected exactly {expected} write(s) to \"{symbolPath}\" on {PlcId}, "
+            + $"but {DescribeRecorded(symbolPath)}");
+    }
+
+    /// <summary>
+    /// Renders a value with its CLR type. Without the type, a Single/Double mismatch prints
+    /// as "expected 23.5, got 23.5" — which is the most confusing possible message for the
+    /// most common possible cause. Formatted with <see cref="CultureInfo.InvariantCulture"/>
+    /// rather than the current culture, so e.g. 23.5 always renders with a period rather than
+    /// a comma on a host whose locale uses one — the message is for a developer reading test
+    /// output, not for end-user display.
+    /// </summary>
+    private static string Describe(object? value) =>
+        value is null
+            ? "null"
+            : $"{string.Format(CultureInfo.InvariantCulture, "{0}", value)} ({value.GetType().Name})";
+
+    /// <summary>
+    /// Renders the recorded writes for a path, for the tail of every failure message.
+    /// Harness writes are excluded from the log, so this reports only what the code under
+    /// test did — which is exactly what the assertion is about.
+    /// </summary>
+    private string DescribeRecorded(string symbolPath)
+    {
+        var writes = WritesTo(symbolPath);
+        if (writes.Count == 0)
+            return "no writes to that path were recorded. Note that writes made through "
+                + "TestPlcTarget.Write drive the PLC side and are deliberately not recorded — "
+                + "only writes made by the code under test are.";
+
+        var lines = writes.Select((w, i) => $"{Environment.NewLine}  [{i}] {Describe(w.Value)}");
+        return $"{writes.Count} write(s) were recorded:{string.Concat(lines)}";
+    }
 
     private void OnValueWritten(object? sender, SimulatedWriteEventArgs e)
     {
