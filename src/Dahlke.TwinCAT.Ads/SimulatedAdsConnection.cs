@@ -80,6 +80,13 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     private readonly Dictionary<string, IReadOnlyList<AdsEnumMember>> _enumMembers
         = new(StringComparer.OrdinalIgnoreCase);
 
+    // Seeded declaration attributes (pragmas), keyed case-insensitively on symbol path — the
+    // simulation counterpart of PlcTargetOptions.SymbolAttributes, from which this is populated.
+    // Guarded by locking on the dictionary itself, like _rpcHandlers and _enumMembers: seeding is
+    // a test-setup operation, so the contention a ConcurrentDictionary would relieve does not exist.
+    private readonly Dictionary<string, Dictionary<string, string>> _symbolAttributes
+        = new(StringComparer.OrdinalIgnoreCase);
+
     /// <inheritdoc />
     public string PlcId { get; }
 
@@ -701,6 +708,29 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
             },
             ct);
 
+    /// <summary>Seeds declaration attributes (pragmas) for simulated symbols, keyed by symbol path.</summary>
+    /// <param name="attributes">
+    /// Attributes to attach, keyed by symbol path then attribute name. Seeding the same path again
+    /// replaces its previous attributes entirely (not merged).
+    /// </param>
+    /// <remarks>
+    /// The simulation counterpart of what <see cref="AdsConnection"/> reads from a live PLC's
+    /// declarations — see <see cref="PlcTargetOptions.SymbolAttributes"/>, which normally supplies
+    /// this. Both the path and every inner attribute name are matched case-insensitively, regardless
+    /// of the comparer used by the dictionaries passed in. A path with no seeded entry reports an
+    /// empty attribute set from <see cref="GetSymbolTreeAsync"/>, <see cref="GetSymbolsAsync(string?, bool, CancellationToken)"/>
+    /// and <see cref="SearchSymbolsAsync"/>, never <see langword="null"/>, because simulation always
+    /// "collects" attributes even when there are none.
+    /// </remarks>
+    public void SetSymbolAttributes(IReadOnlyDictionary<string, Dictionary<string, string>> attributes)
+    {
+        lock (_symbolAttributes)
+        {
+            foreach (var (path, forSymbol) in attributes)
+                _symbolAttributes[path] = forSymbol;
+        }
+    }
+
     /// <inheritdoc />
     /// <remarks>
     /// The simulated store is a flat map of dotted paths, so the symbol tree is derived from the
@@ -727,7 +757,8 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(SimulatedSymbolTree.GetSymbols(_store, parentPath, includeChildren));
+        lock (_symbolAttributes)
+            return Task.FromResult(SimulatedSymbolTree.GetSymbols(_store, _symbolAttributes, parentPath, includeChildren));
     }
 
     /// <inheritdoc />
@@ -740,7 +771,8 @@ public sealed class SimulatedAdsConnection : IAdsConnection, IManagedConnection
     public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(SimulatedSymbolTree.Search(_store, pattern, includeChildren));
+        lock (_symbolAttributes)
+            return Task.FromResult(SimulatedSymbolTree.Search(_store, _symbolAttributes, pattern, includeChildren));
     }
 
     void IManagedConnection.Connect() { }

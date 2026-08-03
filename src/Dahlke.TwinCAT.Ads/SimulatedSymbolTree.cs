@@ -16,6 +16,11 @@ namespace Dahlke.TwinCAT.Ads;
 /// case-insensitively (PLC symbol paths are case-insensitive), and a mis-cased
 /// lookup reports <see cref="AdsSymbolInfo.InstancePath"/> in the casing the
 /// symbol was actually seeded with, never echoing the caller's spelling.
+/// Every built <see cref="AdsSymbolInfo.Attributes"/> comes from the caller-supplied
+/// attribute map — this module reads it but never stores it, so it stays a pure
+/// function of its inputs. A path absent from that map reports an empty attribute
+/// set, never <see langword="null"/>, matching the "simulation always collects"
+/// contract documented on <see cref="PlcTargetOptions.SymbolAttributes"/>.
 /// </remarks>
 internal static class SimulatedSymbolTree
 {
@@ -28,7 +33,9 @@ internal static class SimulatedSymbolTree
     /// stored at or beneath <paramref name="parentPath"/>.
     /// </exception>
     public static IReadOnlyList<AdsSymbolInfo> GetSymbols(
-        InMemoryPlcStore<string, object?> store, string? parentPath, bool includeChildren)
+        InMemoryPlcStore<string, object?> store,
+        IReadOnlyDictionary<string, Dictionary<string, string>> attributes,
+        string? parentPath, bool includeChildren)
     {
         var prefix = string.Empty;
         if (!string.IsNullOrEmpty(parentPath))
@@ -40,7 +47,7 @@ internal static class SimulatedSymbolTree
         }
 
         return ChildNames(store, prefix)
-            .Select(name => BuildSymbolInfo(store, prefix + name, includeChildren))
+            .Select(name => BuildSymbolInfo(store, attributes, prefix + name, includeChildren))
             .ToList();
     }
 
@@ -50,11 +57,13 @@ internal static class SimulatedSymbolTree
     /// stored symbols.
     /// </summary>
     public static IReadOnlyList<AdsSymbolInfo> Search(
-        InMemoryPlcStore<string, object?> store, string pattern, bool includeChildren)
+        InMemoryPlcStore<string, object?> store,
+        IReadOnlyDictionary<string, Dictionary<string, string>> attributes,
+        string pattern, bool includeChildren)
         => AllPaths(store)
             .Where(p => p.Contains(pattern, StringComparison.OrdinalIgnoreCase))
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-            .Select(p => BuildSymbolInfo(store, p, includeChildren))
+            .Select(p => BuildSymbolInfo(store, attributes, p, includeChildren))
             .ToList();
 
     /// <summary>
@@ -97,7 +106,9 @@ internal static class SimulatedSymbolTree
             .ToList();
 
     private static AdsSymbolInfo BuildSymbolInfo(
-        InMemoryPlcStore<string, object?> store, string path, bool includeChildren)
+        InMemoryPlcStore<string, object?> store,
+        IReadOnlyDictionary<string, Dictionary<string, string>> attributes,
+        string path, bool includeChildren)
     {
         var isLeaf = store.TryRead(path, out var value);
         var (typeName, category) = isLeaf
@@ -110,10 +121,20 @@ internal static class SimulatedSymbolTree
             var childNames = ChildNames(store, path + ".");
             if (childNames.Count > 0)
                 children = childNames
-                    .Select(n => BuildSymbolInfo(store, path + "." + n, includeChildren: true))
+                    .Select(n => BuildSymbolInfo(store, attributes, path + "." + n, includeChildren: true))
                     .ToList();
         }
 
-        return new AdsSymbolInfo(path, typeName, category, ByteSize: 0, Comment: null, children);
+        return new AdsSymbolInfo(path, typeName, category, ByteSize: 0, Comment: null, children)
+        {
+            Attributes = attributes.TryGetValue(path, out var forSymbol)
+                ? new Dictionary<string, string>(forSymbol, StringComparer.OrdinalIgnoreCase)
+                : EmptyAttributes,
+        };
     }
+
+    /// <summary>Shared empty result for a symbol with no seeded attributes — simulation always
+    /// "collects" attributes, so this is reported instead of <see langword="null"/>.</summary>
+    private static readonly IReadOnlyDictionary<string, string> EmptyAttributes =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }

@@ -89,6 +89,18 @@ public sealed class PlcTargetOptions
     public Dictionary<string, object?> InitialValues { get; set; } = new();
 
     /// <summary>
+    /// Declaration attributes to attach to simulated symbols, keyed by symbol path then attribute name.
+    /// </summary>
+    /// <remarks>
+    /// The simulation counterpart of the attributes a real connection reads from the PLC. Without it,
+    /// any consumer whose behaviour depends on pragmas — OPC UA symbol release, for one — can only be
+    /// tested against hardware. Paths are matched case-insensitively, as elsewhere in this type.
+    /// Simulated symbols with no entry report an empty attribute set, never <see langword="null"/>,
+    /// because simulation always "collects" attributes even when there are none.
+    /// </remarks>
+    public Dictionary<string, Dictionary<string, string>> SymbolAttributes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Problems found while re-binding <see cref="InitialValues"/> from configuration,
     /// surfaced as options-validation failures by <see cref="TwinCatAdsOptionsValidator"/>.
     /// </summary>
