@@ -451,6 +451,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ExecuteAsync` to finish. One test had leaned on it as a completion barrier and became a race
   against the thread pool; it awaits `ExecuteTask` directly now.
 
+- **`AdsConnectionBase.SetConnectionState` no longer strands a handler that subscribes while it is
+  running.** ([#56](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/56)) It snapshotted
+  `ConnectionStateChanged` — and resolved `PlcId` from it — before the interlocked exchange that
+  commits the new state, then dispatched to that snapshot alone. A handler that subscribed in the
+  window between the snapshot and the exchange was never told about the transition it had just
+  subscribed for, and that window is exactly where `AdsConnectionExtensions.WaitForConnectedAsync`
+  lands: it subscribes, then re-reads `IsConnected` before awaiting anything. A double moving from
+  disconnected to connected while a caller was inside that method could leave the caller waiting
+  out its entire timeout and reporting `false` on a connection that, by then, was connected.
+  Subscribers are now read again after the exchange, matching what
+  `AdsConnectionFacade.OnStateChanged` has always done — commit the state, then read subscribers —
+  for the same reason.
+
 ## [0.8.0] - 2026-08-01
 
 ### Changed
