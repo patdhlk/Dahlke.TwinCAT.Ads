@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using TwinCAT;
 using TwinCAT.Ads;
@@ -21,6 +22,7 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// silently passing on a default.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Since Task 10, <see cref="NotificationPayload"/> is a third consumer, and it reads three more
 /// members: <see cref="IsStatic"/>, <see cref="IsProperty"/> and <see cref="DataType"/> — the
 /// inputs to Beckhoff's <c>HasExternalDataReferences()</c>, which decides whether a notification
@@ -28,6 +30,13 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// to "no external data references" (<see langword="false"/>, <see langword="false"/>,
 /// <see langword="null"/> — a null <c>DataType</c> makes that predicate return
 /// <see langword="false"/> without needing an <see cref="IDataType"/> fake).
+/// </para>
+/// <para>
+/// Since the attribute-mapping task, <c>AdsConnection.MapSymbol</c> genuinely reads
+/// <see cref="Attributes"/> for every symbol it maps, so it can no longer throw by default — it
+/// answers an empty <see cref="StubTypeAttributeCollection"/> instead, describing a symbol with no
+/// declared pragmas.
+/// </para>
 /// </remarks>
 internal class StubSymbol : ISymbol
 {
@@ -88,7 +97,7 @@ internal class StubSymbol : ISymbol
     public bool IsByteAligned => throw new NotSupportedException();
     public int Size => throw new NotSupportedException();
     public int BitSize => throw new NotSupportedException();
-    public ITypeAttributeCollection Attributes => throw new NotSupportedException();
+    public ITypeAttributeCollection Attributes { get; set; } = new StubTypeAttributeCollection();
     public Encoding ValueEncoding => throw new NotSupportedException();
 }
 
@@ -339,6 +348,42 @@ internal sealed class StubDataType(DataTypeCategory category) : IDataType
     public int BitSize => throw new NotSupportedException();
     public bool IsBitType => throw new NotSupportedException();
     public bool IsByteAligned => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Empty <see cref="ITypeAttributeCollection"/> stub — the default for
+/// <see cref="StubSymbol.Attributes"/>, describing a symbol declared with no pragmas.
+/// <c>AdsConnection.MergeAttributes</c> only enumerates the collection (via LINQ's
+/// <c>Select</c>), which for an empty <see cref="Count"/> never touches the indexer, so
+/// everything else can still throw.
+/// </summary>
+internal sealed class StubTypeAttributeCollection : ITypeAttributeCollection
+{
+    public int Count => 0;
+
+    public IEnumerator<ITypeAttribute> GetEnumerator() => Enumerable.Empty<ITypeAttribute>().GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    // --- Not consumed by AdsConnection.MergeAttributes -----------------------
+    public bool IsReadOnly => throw new NotSupportedException();
+    public ITypeAttribute this[int index]
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+    public string[] this[string name] => throw new NotSupportedException();
+    public void Add(ITypeAttribute item) => throw new NotSupportedException();
+    public void Clear() => throw new NotSupportedException();
+    public bool Contains(ITypeAttribute item) => throw new NotSupportedException();
+    public bool Contains(string name) => throw new NotSupportedException();
+    public void CopyTo(ITypeAttribute[] array, int arrayIndex) => throw new NotSupportedException();
+    public int IndexOf(ITypeAttribute item) => throw new NotSupportedException();
+    public void Insert(int index, ITypeAttribute item) => throw new NotSupportedException();
+    public bool Remove(ITypeAttribute item) => throw new NotSupportedException();
+    public void RemoveAt(int index) => throw new NotSupportedException();
+    public bool TryGetAttribute(string name, [NotNullWhen(true)] out ITypeAttribute[]? attributes) => throw new NotSupportedException();
+    public bool TryGetValue(string name, [NotNullWhen(true)] out string[]? values) => throw new NotSupportedException();
+    public bool TryGetSingleValue(string name, [NotNullWhen(true)] out string? value) => throw new NotSupportedException();
 }
 
 internal sealed class StubSymbolCollection(IReadOnlyList<ISymbol> symbols) : ISymbolCollection<ISymbol>
