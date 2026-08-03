@@ -286,6 +286,116 @@ public class AdsConnectionBaseTests
         public void Move(ConnectionState state) => SetConnectionState(state);
     }
 
+    // =========================================================================
+    // The subscribe-in-the-window race: a handler that attaches from inside the
+    // PlcId getter — i.e. strictly between the pre-exchange handler snapshot and
+    // the Interlocked.Exchange — must still be told about the transition it landed
+    // inside. Both doubles below exploit the same window PlcId is read in; if a
+    // future edit moves that read outside the window between the snapshot and the
+    // exchange, both tests stop exercising the race they claim to and would pass
+    // vacuously instead of failing loudly.
+    // =========================================================================
+
+    /// <summary>
+    /// A second handler subscribes itself from inside the PlcId getter — landing exactly in the
+    /// window between the handler snapshot and the exchange in SetConnectionState.
+    /// </summary>
+    private sealed class SubscribesSecondHandlerFromPlcId : AdsConnectionBase
+    {
+        public EventHandler<ConnectionStateChangedEventArgs>? SecondHandler;
+
+        public override string PlcId
+        {
+            get
+            {
+                if (SecondHandler is not null)
+                    ConnectionStateChanged += SecondHandler;
+                return "plc1";
+            }
+        }
+
+        public void Move(ConnectionState state) => SetConnectionState(state);
+    }
+
+    [Fact]
+    public void SetConnectionState_NotifiesAHandlerThatSubscribedFromWithinThePlcIdGetter()
+    {
+        // Exploits the window between the handler snapshot (which decides whether PlcId needs
+        // reading at all) and the Interlocked.Exchange that commits the new state: PlcId is read
+        // strictly inside that window, so a getter that subscribes a second handler lands it
+        // exactly where AdsConnectionExtensions.WaitForConnectedAsync's subscribe-then-recheck
+        // pattern lands too. This test depends on PlcId being read between the snapshot and the
+        // exchange — if a future edit moves that read outside the window, this test stops
+        // exercising the race it claims to.
+        var conn = new SubscribesSecondHandlerFromPlcId();
+        var h2Invoked = false;
+        conn.SecondHandler = (_, _) => h2Invoked = true;
+
+        // H1 subscribed first: without a subscriber, handlers is null and PlcId is never read, so
+        // H2 never gets the chance to subscribe.
+        conn.ConnectionStateChanged += (_, _) => { };
+
+        conn.Move(ConnectionState.Disconnected);
+
+        Assert.True(
+            h2Invoked,
+            "H2 subscribed from the PlcId getter, inside the window between the snapshot and the " +
+            "exchange, and must still be told about the transition it landed inside.");
+    }
+
+    /// <summary>
+    /// The PlcId getter starts <see cref="AdsConnectionExtensions.WaitForConnectedAsync"/> without
+    /// awaiting it. That method subscribes to <see cref="IAdsConnection.ConnectionStateChanged"/>
+    /// synchronously before its first await, so the subscription lands in the same window as
+    /// <see cref="SubscribesSecondHandlerFromPlcId"/> above — this is the user-visible symptom that
+    /// double exercises directly.
+    /// </summary>
+    private sealed class StartsWaitForConnectedAsyncFromPlcId : AdsConnectionBase
+    {
+        public Task<bool>? WaitTask;
+
+        public override string PlcId
+        {
+            get
+            {
+                WaitTask ??= this.WaitForConnectedAsync(TimeSpan.FromSeconds(2));
+                return "plc1";
+            }
+        }
+
+        public void Move(ConnectionState state) => SetConnectionState(state);
+    }
+
+    [Fact]
+    public async Task SetConnectionState_LetsWaitForConnectedAsyncObserveATransitionItSubscribedToFromThePlcIdGetter()
+    {
+        // Same window as the unit-level test above, exercised end to end through
+        // AdsConnectionExtensions.WaitForConnectedAsync. That method's subscribe-then-recheck
+        // pattern subscribes to ConnectionStateChanged synchronously before its first await, so
+        // starting it (unawaited) from the PlcId getter lands its subscription strictly between the
+        // handler snapshot and the Interlocked.Exchange in SetConnectionState. This test depends on
+        // PlcId being read inside that window — if a future edit moves the read outside it, this
+        // test stops exercising the race it claims to and would pass vacuously instead of failing.
+        var conn = new StartsWaitForConnectedAsyncFromPlcId();
+
+        // Moved to Disconnected first, with nobody subscribed yet, so this does not itself read
+        // PlcId — only the Move below does, once H1 is attached.
+        conn.Move(ConnectionState.Disconnected);
+
+        // H1: any subscriber at all makes ConnectionStateChanged non-null, which is what makes
+        // SetConnectionState read PlcId — and so call into the getter above — on the next Move.
+        conn.ConnectionStateChanged += (_, _) => { };
+
+        conn.Move(ConnectionState.Connected);
+
+        Assert.NotNull(conn.WaitTask);
+        Assert.True(
+            await conn.WaitTask,
+            "WaitForConnectedAsync subscribed from inside the PlcId getter and must still observe " +
+            "the transition it landed inside of, rather than waiting out its timeout on a " +
+            "connection that is already connected.");
+    }
+
     [Fact]
     public void SetConnectionState_RejectsAnUndefinedState()
     {

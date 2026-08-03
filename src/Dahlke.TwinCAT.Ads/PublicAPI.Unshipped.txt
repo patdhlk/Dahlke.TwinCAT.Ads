@@ -110,6 +110,7 @@ Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.Configure(System.Action<Dahlke.TwinC
 Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.ConfigureServices(System.Action<Microsoft.Extensions.DependencyInjection.IServiceCollection!>! configure) -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
 Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.UseConfiguration(Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
 Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.UseLoggerFactory(Microsoft.Extensions.Logging.ILoggerFactory! loggerFactory) -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
+Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.UseShutdownTimeout(System.TimeSpan timeout) -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
 Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle
 Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.DisposeAsync() -> System.Threading.Tasks.ValueTask
 Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.ForceReconnect(string! plcId) -> void

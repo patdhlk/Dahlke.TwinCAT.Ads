@@ -26,6 +26,7 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
 {
     private readonly ServiceProvider _provider;
     private readonly IReadOnlyList<IHostedService> _started;
+    private readonly TimeSpan _shutdownTimeout;
     private readonly IAdsConnectionPool _pool;
     private readonly IAdsRawChannelFactory _rawChannels;
     private readonly ILogger<AdsConnectionPoolHandle> _logger;
@@ -35,10 +36,18 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     /// <param name="started">
     /// The hosted services that started successfully, in start order. Stopped in reverse.
     /// </param>
-    internal AdsConnectionPoolHandle(ServiceProvider provider, IReadOnlyList<IHostedService> started)
+    /// <param name="shutdownTimeout">
+    /// The shared budget <see cref="DisposeAsync"/> gives the whole stop loop — see
+    /// <see cref="AdsConnectionPoolBuilder.UseShutdownTimeout"/>.
+    /// </param>
+    internal AdsConnectionPoolHandle(
+        ServiceProvider provider,
+        IReadOnlyList<IHostedService> started,
+        TimeSpan shutdownTimeout)
     {
         _provider = provider;
         _started = started;
+        _shutdownTimeout = shutdownTimeout;
         // Both are singletons already constructed by the time this ctor runs — resolved
         // once here, like _pool, rather than per-get, so RawChannels and GetConnection
         // share the same post-disposal failure mode.
@@ -58,6 +67,16 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     /// The raw ADS channel factory, for targets the symbol API cannot reach.
     /// </summary>
     public IAdsRawChannelFactory RawChannels => _rawChannels;
+
+    /// <summary>
+    /// Test-only seam: the shutdown timeout <see cref="DisposeAsync"/> was built with.
+    /// Internal — reachable only from <c>Dahlke.TwinCAT.Ads.Tests</c> via
+    /// <c>InternalsVisibleTo</c>, mirroring <c>AdsConnection.SetSymbolLoaderForTesting</c>.
+    /// Production code has no use for reading this back; it exists so a test pinning what
+    /// <see cref="AdsConnectionPoolBuilder.UseShutdownTimeout"/> plumbed through fails to
+    /// BUILD rather than fails a confusing runtime assertion if this field is ever renamed.
+    /// </summary>
+    internal TimeSpan ShutdownTimeoutForTesting => _shutdownTimeout;
 
     /// <inheritdoc/>
     public IAdsConnection GetConnection(string plcId) => _pool.GetConnection(plcId);
@@ -110,14 +129,25 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     /// ordinary, recoverable shutdown condition; a disposal failure is not.
     /// </para>
     /// <para>
-    /// <b>Stopping is unbounded.</b> Each <c>StopAsync</c> is passed
-    /// <see cref="CancellationToken.None"/>, where a generic host would pass a token
-    /// cancelled after <c>HostOptions.ShutdownTimeout</c> (30 seconds by default). A
-    /// hosted service that hangs in <c>StopAsync</c> therefore hangs this call
-    /// indefinitely, with nothing to break the wait. A deliberate current limitation, and
-    /// the one an application that registers its own hosted services through
-    /// <see cref="AdsConnectionPoolBuilder.ConfigureServices"/> should know about; a
-    /// shutdown-timeout knob can be added later without a breaking change.
+    /// <b>Stopping is bounded by one shared timeout</b> — 30 seconds by default, matching
+    /// <c>HostOptions.ShutdownTimeout</c>, and set via
+    /// <see cref="AdsConnectionPoolBuilder.UseShutdownTimeout"/>. For a finite timeout, a
+    /// single <see cref="CancellationTokenSource"/> is created here, before the loop below
+    /// runs, and its token — not a fresh one per service — is passed to every
+    /// <c>StopAsync</c>, exactly as <c>Host.StopAsync</c> shares one budget across its own
+    /// stop loop rather than resetting it per service. <see cref="Timeout.InfiniteTimeSpan"/>
+    /// skips the source entirely and passes <see cref="CancellationToken.None"/> instead —
+    /// not merely an equivalent, since a <see cref="CancellationTokenSource"/> constructed
+    /// with <see cref="Timeout.InfiniteTimeSpan"/> still allocates and arms a timer even
+    /// though that timer will never fire; a caller who explicitly opted out of bounding
+    /// should not pay for one on every dispose. The bound is cooperative, not preemptive: a
+    /// hosted service that never observes the token it is given keeps this call waiting
+    /// exactly as it always has, which is the same limit a generic host has. A service that
+    /// DOES observe the token and is cancelled by it is treated as a stop failure like any
+    /// other — logged and stepped over so the remaining services still get their turn and
+    /// the provider is still disposed — but logged distinguishably from a service that
+    /// threw for some other reason, so a caller reading logs can tell a timeout from a
+    /// fault.
     /// </para>
     /// </remarks>
     public async ValueTask DisposeAsync()
@@ -125,13 +155,29 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
 
+        // One CancellationTokenSource for the whole loop, not one per service — the shared
+        // budget described in this method's remarks. Infinite skips the source entirely
+        // rather than constructing one with Timeout.InfiniteTimeSpan: that constructor
+        // still allocates and arms a timer that will simply never fire, a cost the opt-out
+        // should not pay.
+        using var cts = _shutdownTimeout == Timeout.InfiniteTimeSpan
+            ? null
+            : new CancellationTokenSource(_shutdownTimeout);
+        var stopToken = cts?.Token ?? CancellationToken.None;
+
         for (var i = _started.Count - 1; i >= 0; i--)
         {
             try
             {
-                // CancellationToken.None, not a timeout token: unbounded on purpose, and
-                // a documented limitation — see this method's remarks.
-                await _started[i].StopAsync(CancellationToken.None).ConfigureAwait(false);
+                await _started[i].StopAsync(stopToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException ex) when (cts is not null && ex.CancellationToken == cts.Token)
+            {
+                _logger.LogError(
+                    "{ServiceType} did not stop within the {ShutdownTimeout} shutdown " +
+                    "timeout while disposing the ADS connection pool.",
+                    _started[i].GetType().Name,
+                    _shutdownTimeout);
             }
             catch (Exception ex)
             {

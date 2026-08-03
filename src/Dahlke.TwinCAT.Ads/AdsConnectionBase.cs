@@ -137,10 +137,13 @@ public abstract class AdsConnectionBase : IAdsConnection
     /// <paramref name="state"/> is not a defined <see cref="ConnectionState"/> value.
     /// </exception>
     /// <exception cref="NotSupportedException">
-    /// A handler is attached and <see cref="PlcId"/> has not been overridden. The event args name
-    /// the target, so a double that TELLS anyone about a transition has to say which one it is —
-    /// but a double with no subscribers never needs an identity to move its own state, and the
-    /// throw comes before the move, so it never leaves the connection half-transitioned.
+    /// <see cref="PlcId"/> has not been overridden and a handler needs it. In the common case this
+    /// throws BEFORE the state moves: a handler was already attached when the call started, the
+    /// event args need to name the target, and a double with no subscribers at that point never
+    /// needs an identity to move its own state. If a handler instead subscribes CONCURRENTLY — in
+    /// the window between that first check and the exchange below — <see cref="PlcId"/> is read
+    /// again afterwards to tell it, and this can then throw with the state already moved; that
+    /// ordering is unavoidable and only happens under exactly that race.
     /// </exception>
     /// <exception cref="AggregateException">
     /// One or more handlers threw. Every handler still ran (see remarks).
@@ -164,9 +167,19 @@ public abstract class AdsConnectionBase : IAdsConnection
     /// an <see cref="AggregateException"/> at this call site.
     /// </para>
     /// <para>
-    /// <b><see cref="PlcId"/> is read only when there is a handler to tell.</b> A double that moves
-    /// its own state so the code under test sees <see cref="IsConnected"/> go false — with nobody
-    /// subscribed — needs no identity, and is not made to invent one.
+    /// <b><see cref="PlcId"/> is read only when there is a handler to tell — but subscribers are
+    /// read on BOTH sides of the exchange, not just before it.</b> The pre-exchange read decides
+    /// whether an identity is needed yet and, if a double never overrode <see cref="PlcId"/>, fails
+    /// fast with the state still where it was. Subscribers are then read again after the exchange,
+    /// because a handler can attach in the window between the two reads — and a caller using
+    /// <see cref="AdsConnectionExtensions.WaitForConnectedAsync"/>'s subscribe-then-recheck pattern
+    /// lands exactly there: it re-reads <see cref="IsConnected"/> immediately after subscribing, so
+    /// if this method only ever consulted its first, pre-exchange snapshot, that caller's handler
+    /// would never be told and it would wait out its full timeout on a connection that had already
+    /// moved. A double moving its own state with nobody subscribed at all still needs no identity,
+    /// on either read. Internally, <see cref="AdsConnectionFacade.OnStateChanged"/> has always
+    /// committed its state before reading subscribers for the same reason; this method now agrees
+    /// with it instead of racing against the same class of caller it does.
     /// </para>
     /// <para>
     /// <b>Concurrent callers.</b> The transition is applied with an interlocked exchange, so each
@@ -181,15 +194,28 @@ public abstract class AdsConnectionBase : IAdsConnection
         if (!Enum.IsDefined(state))
             throw new ArgumentOutOfRangeException(nameof(state), state, "Not a defined ConnectionState value.");
 
-        // Snapshot the subscribers and resolve the identity BEFORE the exchange: a double that
-        // never overrode PlcId throws here, with its state still where it was, rather than landing
-        // in the new state having told nobody it got there.
-        var handlers = ConnectionStateChanged;
-        var plcId = handlers is null ? null : PlcId;
+        // Read the subscribers before the exchange ONLY to decide whether identity is needed: a
+        // double that never overrode PlcId still throws here, with its state still where it was,
+        // rather than landing in the new state having told nobody it got there.
+        var handlersBefore = ConnectionStateChanged;
+        var plcId = handlersBefore is null ? null : PlcId;
 
         var previous = (ConnectionState)Interlocked.Exchange(ref _state, (int)state);
-        if (previous == state || handlers is null)
+        if (previous == state)
             return;
+
+        // Re-read AFTER the exchange: a handler that subscribed in the window between the read
+        // above and this exchange would otherwise never be told, and that window is exactly where
+        // a subscribe-then-recheck waiter — see AdsConnectionExtensions.WaitForConnectedAsync —
+        // lands.
+        var handlers = ConnectionStateChanged;
+        if (handlers is null)
+            return;
+
+        // May not have been resolved above (no subscriber then, one now). If a handler subscribed
+        // concurrently, this reads PlcId AFTER the state already moved — see the NotSupportedException
+        // remarks on this method for why that is unavoidable.
+        plcId ??= PlcId;
 
         // Invoke each handler individually so one throwing handler does not skip the rest — the
         // multicast delegate would abort the chain on the first exception. Same shape as the
