@@ -68,6 +68,16 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     /// </summary>
     public IAdsRawChannelFactory RawChannels => _rawChannels;
 
+    /// <summary>
+    /// Test-only seam: the shutdown timeout <see cref="DisposeAsync"/> was built with.
+    /// Internal — reachable only from <c>Dahlke.TwinCAT.Ads.Tests</c> via
+    /// <c>InternalsVisibleTo</c>, mirroring <c>AdsConnection.SetSymbolLoaderForTesting</c>.
+    /// Production code has no use for reading this back; it exists so a test pinning what
+    /// <see cref="AdsConnectionPoolBuilder.UseShutdownTimeout"/> plumbed through fails to
+    /// BUILD rather than fails a confusing runtime assertion if this field is ever renamed.
+    /// </summary>
+    internal TimeSpan ShutdownTimeoutForTesting => _shutdownTimeout;
+
     /// <inheritdoc/>
     public IAdsConnection GetConnection(string plcId) => _pool.GetConnection(plcId);
 
@@ -121,14 +131,19 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
     /// <para>
     /// <b>Stopping is bounded by one shared timeout</b> — 30 seconds by default, matching
     /// <c>HostOptions.ShutdownTimeout</c>, and set via
-    /// <see cref="AdsConnectionPoolBuilder.UseShutdownTimeout"/>. A single
-    /// <see cref="CancellationTokenSource"/> is created here, before the loop below runs,
-    /// and its token — not a fresh one per service — is passed to every <c>StopAsync</c>,
-    /// exactly as <c>Host.StopAsync</c> shares one budget across its own stop loop rather
-    /// than resetting it per service. The bound is cooperative, not preemptive: a hosted
-    /// service that never observes the token it is given keeps this call waiting exactly
-    /// as it always has, which is the same limit a generic host has. A service that DOES
-    /// observe the token and is cancelled by it is treated as a stop failure like any
+    /// <see cref="AdsConnectionPoolBuilder.UseShutdownTimeout"/>. For a finite timeout, a
+    /// single <see cref="CancellationTokenSource"/> is created here, before the loop below
+    /// runs, and its token — not a fresh one per service — is passed to every
+    /// <c>StopAsync</c>, exactly as <c>Host.StopAsync</c> shares one budget across its own
+    /// stop loop rather than resetting it per service. <see cref="Timeout.InfiniteTimeSpan"/>
+    /// skips the source entirely and passes <see cref="CancellationToken.None"/> instead —
+    /// not merely an equivalent, since a <see cref="CancellationTokenSource"/> constructed
+    /// with <see cref="Timeout.InfiniteTimeSpan"/> still allocates and arms a timer even
+    /// though that timer will never fire; a caller who explicitly opted out of bounding
+    /// should not pay for one on every dispose. The bound is cooperative, not preemptive: a
+    /// hosted service that never observes the token it is given keeps this call waiting
+    /// exactly as it always has, which is the same limit a generic host has. A service that
+    /// DOES observe the token and is cancelled by it is treated as a stop failure like any
     /// other — logged and stepped over so the remaining services still get their turn and
     /// the provider is still disposed — but logged distinguishably from a service that
     /// threw for some other reason, so a caller reading logs can tell a timeout from a
@@ -141,18 +156,22 @@ public sealed class AdsConnectionPoolHandle : IAdsConnectionPool, IAsyncDisposab
             return;
 
         // One CancellationTokenSource for the whole loop, not one per service — the shared
-        // budget described in this method's remarks. CancellationTokenSource(TimeSpan)
-        // treats Timeout.InfiniteTimeSpan as "never cancel", which is exactly the opt-out
-        // UseShutdownTimeout documents.
-        using var cts = new CancellationTokenSource(_shutdownTimeout);
+        // budget described in this method's remarks. Infinite skips the source entirely
+        // rather than constructing one with Timeout.InfiniteTimeSpan: that constructor
+        // still allocates and arms a timer that will simply never fire, a cost the opt-out
+        // should not pay.
+        using var cts = _shutdownTimeout == Timeout.InfiniteTimeSpan
+            ? null
+            : new CancellationTokenSource(_shutdownTimeout);
+        var stopToken = cts?.Token ?? CancellationToken.None;
 
         for (var i = _started.Count - 1; i >= 0; i--)
         {
             try
             {
-                await _started[i].StopAsync(cts.Token).ConfigureAwait(false);
+                await _started[i].StopAsync(stopToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException ex) when (ex.CancellationToken == cts.Token)
+            catch (OperationCanceledException ex) when (cts is not null && ex.CancellationToken == cts.Token)
             {
                 _logger.LogError(
                     "{ServiceType} did not stop within the {ShutdownTimeout} shutdown " +

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -10,8 +9,10 @@ namespace Dahlke.TwinCAT.Ads.Tests;
 /// test file catches: that the hosted-service stop loop actually runs in the exact reverse
 /// of start order (<see cref="AdsConnectionPoolBuilderTests.DisposeAsync_StopsThePool_AndIsIdempotent"/>
 /// would pass even with that loop deleted, since disposing the provider disconnects the pool
-/// on its own), and the <see cref="AdsConnectionPoolBuilder.UseShutdownTimeout"/> knob that
-/// bounds it.
+/// on its own), and that <see cref="AdsConnectionPoolBuilder.UseShutdownTimeout"/> actually
+/// bounds it — the shared budget, the timeout/fault log distinction, and that
+/// <see cref="Timeout.InfiniteTimeSpan"/> genuinely never cancels rather than merely being
+/// stored unread.
 /// </summary>
 public class AdsConnectionPoolHandleDisposeAsyncTests
 {
@@ -76,12 +77,47 @@ public class AdsConnectionPoolHandleDisposeAsyncTests
         public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
     }
 
-    private static TimeSpan GetPlumbedShutdownTimeout(AdsConnectionPoolHandle pool)
+    /// <summary>
+    /// Captures the token its <see cref="StopAsync"/> is given and returns immediately —
+    /// no blocking, no wall-clock dependency. Proves what token DisposeAsync handed out,
+    /// not how long anything took.
+    /// </summary>
+    private sealed class TokenCapturingHostedService : IHostedService
     {
-        var field = typeof(AdsConnectionPoolHandle)
-            .GetField("_shutdownTimeout", BindingFlags.NonPublic | BindingFlags.Instance);
-        Assert.NotNull(field);
-        return (TimeSpan)field!.GetValue(pool)!;
+        public CancellationToken CapturedToken { get; private set; }
+
+        public Task StartAsync(CancellationToken ct) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken ct)
+        {
+            CapturedToken = ct;
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Blocks in <see cref="StopAsync"/> until <see cref="Release"/> is called, capturing
+    /// the token it was given so a test can inspect whether — and when — it gets cancelled.
+    /// Unlike <see cref="BlockingUntilCancelledHostedService"/>, this does not rely on its
+    /// own token ever being cancelled to unblock: that is what makes it usable to prove the
+    /// NEGATIVE case, that a given timeout configuration never cancels it at all.
+    /// </summary>
+    private sealed class ReleasableBlockingHostedService : IHostedService
+    {
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public CancellationToken CapturedToken { get; private set; }
+
+        public Task StartAsync(CancellationToken ct) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken ct)
+        {
+            CapturedToken = ct;
+            return _release.Task.WaitAsync(ct);
+        }
+
+        public void Release() => _release.TrySetResult();
     }
 
     [Fact]
@@ -98,12 +134,22 @@ public class AdsConnectionPoolHandleDisposeAsyncTests
             .AddTarget("plc1", o => o.DisplayName = "Simulated PLC")
             .BuildAndStartAsync();
 
-        // Caller-registered hosted services are stable-moved to the end of the collection
-        // (see AdsConnectionPoolBuilder.ConfigureServices's remarks), so both probes start
-        // after router/pool/raw-channels and in their own registration order.
-        Assert.Equal(["P1:start", "P2:start"], events);
-
-        await pool.DisposeAsync();
+        try
+        {
+            // Caller-registered hosted services are stable-moved to the end of the
+            // collection (see AdsConnectionPoolBuilder.ConfigureServices's remarks), so
+            // both probes start after router/pool/raw-channels and in their own
+            // registration order.
+            Assert.Equal(["P1:start", "P2:start"], events);
+        }
+        finally
+        {
+            // In a finally, not after the assert: if the assert above ever fails — the
+            // regression this test exists to catch, among others — the pool must still be
+            // disposed, or its AdsRouterService BackgroundService loop keeps running for
+            // the rest of this (shared) test process.
+            await pool.DisposeAsync();
+        }
 
         // If the stop loop were deleted, only the two ":start" entries above would exist.
         // If the loop iterated forwards instead of backwards, the tail would read
@@ -158,18 +204,42 @@ public class AdsConnectionPoolHandleDisposeAsyncTests
             .AddTarget("plc1", o => o.DisplayName = "Simulated PLC")
             .BuildAndStartAsync();
 
-        Assert.Equal(TimeSpan.FromSeconds(30), GetPlumbedShutdownTimeout(pool));
+        Assert.Equal(TimeSpan.FromSeconds(30), pool.ShutdownTimeoutForTesting);
     }
 
     [Fact]
-    public async Task UseShutdownTimeout_PlumbsInfiniteTimeSpan()
+    public async Task UseShutdownTimeout_Infinite_NeverCancelsAHangingService()
     {
-        await using var pool = await AdsConnectionPoolBuilder.CreateSimulation()
+        // Proves consumption, not just plumbing: a probe that captures its token and
+        // blocks until released externally. A bug that silently substituted some finite
+        // duration for Infinite (see AdsConnectionPoolHandle.DisposeAsync's remarks for why
+        // Infinite gets its own branch rather than just being handed to
+        // CancellationTokenSource(TimeSpan)) would cancel the captured token during the
+        // settle window below; reflecting the plumbed field alone could never catch that,
+        // because the field would still faithfully read Infinite.
+        var blocking = new ReleasableBlockingHostedService();
+
+        var pool = await AdsConnectionPoolBuilder.CreateSimulation()
             .UseShutdownTimeout(Timeout.InfiniteTimeSpan)
+            .ConfigureServices(s => s.AddSingleton<IHostedService>(blocking))
             .AddTarget("plc1", o => o.DisplayName = "Simulated PLC")
             .BuildAndStartAsync();
 
-        Assert.Equal(Timeout.InfiniteTimeSpan, GetPlumbedShutdownTimeout(pool));
+        Assert.Equal(Timeout.InfiniteTimeSpan, pool.ShutdownTimeoutForTesting);
+
+        var disposeTask = pool.DisposeAsync().AsTask();
+
+        // Long enough for DisposeAsync to have reached StopAsync and for any finite timeout
+        // masquerading as Infinite to have already fired.
+        await Task.Delay(TimeSpan.FromMilliseconds(300));
+        Assert.False(blocking.CapturedToken.IsCancellationRequested);
+        Assert.False(disposeTask.IsCompleted);
+
+        blocking.Release();
+
+        // The hard bound: if Release() somehow did not unblock StopAsync, this fails red
+        // instead of wedging CI.
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     [Fact]
@@ -214,31 +284,31 @@ public class AdsConnectionPoolHandleDisposeAsyncTests
     }
 
     [Fact]
-    public async Task DisposeAsync_SharesOneTimeoutBudget_AcrossMultipleHangingServices()
+    public async Task DisposeAsync_SharesOneCancellationTokenSource_AcrossTheWholeStopLoop()
     {
-        // Two independently-hanging services under one 400ms budget. A correct
-        // implementation spends ~400ms total (the loop moves to the second service with an
-        // already-cancelled token, which returns immediately) plus whatever the pool itself
-        // takes to stop. A per-service timeout (the bug this test catches) would spend
-        // ~800ms — two full budgets back to back. 700ms sits between the two with margin on
-        // both sides for CI jitter.
+        // "One shared budget, not a fresh timeout per service" is a claim about WHICH
+        // token gets handed to StopAsync, not about how long anything takes — so it is
+        // proved directly by comparing the tokens two probes are given, with zero
+        // wall-clock dependency. An earlier version of this test asserted an elapsed-time
+        // upper bound instead (expecting ~1x the timeout rather than ~2x); that carried
+        // only ~1.75x headroom against CI jitter on a shared runner and was rejected in
+        // review as a second flake waiting to happen. Neither probe here needs to block.
+        var probe1 = new TokenCapturingHostedService();
+        var probe2 = new TokenCapturingHostedService();
+
         var pool = await AdsConnectionPoolBuilder.CreateSimulation()
-            .UseShutdownTimeout(TimeSpan.FromMilliseconds(400))
+            .UseShutdownTimeout(TimeSpan.FromMilliseconds(200))
             .ConfigureServices(s =>
             {
-                s.AddSingleton<IHostedService, BlockingUntilCancelledHostedService>();
-                s.AddSingleton<IHostedService, BlockingUntilCancelledHostedService>();
+                s.AddSingleton<IHostedService>(probe1);
+                s.AddSingleton<IHostedService>(probe2);
             })
             .AddTarget("plc1", o => o.DisplayName = "Simulated PLC")
             .BuildAndStartAsync();
 
-        var sw = Stopwatch.StartNew();
         await pool.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
-        sw.Stop();
 
-        Assert.True(
-            sw.Elapsed < TimeSpan.FromMilliseconds(700),
-            $"DisposeAsync took {sw.Elapsed}; a shared timeout budget must not multiply per hanging service.");
+        Assert.Equal(probe1.CapturedToken, probe2.CapturedToken);
     }
 
     [Fact]
@@ -261,9 +331,16 @@ public class AdsConnectionPoolHandleDisposeAsyncTests
             .AddTarget("plc1", o => o.DisplayName = "Simulated PLC")
             .BuildAndStartAsync();
 
-        Assert.True(probe.Started);
-
-        await pool.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            Assert.True(probe.Started);
+        }
+        finally
+        {
+            // In a finally for the same reason as DisposeAsync_StopsInExactReverseOfStartOrder
+            // above: an assert failure here must not leak the pool.
+            await pool.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        }
 
         Assert.True(probe.Stopped);
     }
