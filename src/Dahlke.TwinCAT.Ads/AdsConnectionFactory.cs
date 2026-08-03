@@ -8,6 +8,7 @@ internal sealed class AdsConnectionFactory(ILoggerFactory loggerFactory) : IAdsC
         {
             var simulated = new SimulatedAdsConnection(plcId, options.DisplayName, loggerFactory);
             simulated.SetInitialValues(options.InitialValues);
+            simulated.SetSymbolAttributes(options.SymbolAttributes);
             return simulated;
         }
 

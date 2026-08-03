@@ -374,6 +374,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The bound is cooperative, not preemptive, exactly as a generic host's is: a hosted service that
   never observes the token it is given keeps `DisposeAsync` waiting exactly as it always has.
 
+- **`AdsSymbolInfo.Attributes` surfaces a symbol's TwinCAT declaration attributes — the pragmas
+  TF6100 writes as `{attribute 'OPC.UA.DA' := '1'}` — without pulling any Beckhoff type into a
+  consumer's code.** A consumer whose behaviour depends on a pragma, an OPC UA server deciding
+  which symbols to release being the motivating case, had no way to read one through this
+  library's neutral symbol model at all; the only route was the Beckhoff type system this
+  library exists to keep out of a consumer's code.
+
+  ```csharp
+  var motor = await conn.GetSymbolTreeAsync("MAIN.Motor");
+  if (motor.Attributes?.TryGetValue("OPC.UA.DA", out var value) == true)
+  {
+      // "MAIN.Motor" carries the OPC.UA.DA pragma
+  }
+  ```
+
+  **`null` means attributes were not collected for this symbol; an empty dictionary means they
+  were collected and the symbol carries none.** A consumer that treats an attribute's absence as
+  a decision must check for `null` first, because "not collected" is not "not present." A real
+  connection always collects, so `Attributes` never comes back `null` from hardware today — the
+  distinction is part of the contract regardless.
+
+  TwinCAT declares a pragma in two places, and both are now read: on a struct's or
+  function-block's type definition, where it releases every instance, and on one instance, where
+  it releases only that instance. `IDataType.Attributes` and `ISymbol.Attributes` are merged,
+  **instance winning on conflict**, since the more specific declaration is the more intentional
+  one — reading only the instance side would have silently dropped every type-level pragma.
+  Attribute names are matched case-insensitively; values are plain strings.
+
+  `PlcTargetOptions.SymbolAttributes` is the simulation counterpart, keyed by symbol path then
+  attribute name, so pragma-driven behaviour can be tested without hardware:
+
+  ```jsonc
+  "PlcTargets": {
+    "plc1": {
+      "SymbolAttributes": {
+        "MAIN.Motor": { "OPC.UA.DA": "1" }
+      }
+    }
+  }
+  ```
+
+  `SimulatedAdsConnection.SetSymbolAttributes` is the code-first seam for the same thing,
+  matching the file's existing `SetInitialValues`/`SetRpcHandler`/`SetEnumMembers` convention.
+  Both the symbol-path key and the attribute name are case-insensitive, in configuration and in
+  code. A simulated symbol with no seeded entry reports an empty dictionary, never `null` —
+  simulation always "collects," even when there is nothing to find.
+
 ### Changed
 
 - **BREAKING: `AdsRawChannelSeed.Port` is now `int?`, and required.** A seed entry names its

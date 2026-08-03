@@ -70,6 +70,11 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     private readonly InMemoryPlcStore<string, object?> _store = new(StringComparer.OrdinalIgnoreCase);
     private readonly SubscriberRegistry<string, object?> _subscribers = new(StringComparer.OrdinalIgnoreCase);
 
+    // This double has no PlcTargetOptions.SymbolAttributes to seed from, so every symbol it builds
+    // takes the "unseeded" branch of SimulatedSymbolTree.BuildSymbolInfo — an empty attribute set,
+    // never null, matching what an unconfigured SimulatedAdsConnection reports for the same reason.
+    private static readonly Dictionary<string, Dictionary<string, string>> NoSymbolAttributes = new(StringComparer.OrdinalIgnoreCase);
+
     // Written by WriteControlAsync, read by GetAdsStateAsync — volatile mirrors
     // SimulatedAdsConnection's equivalent field so the contract fact holds here too.
     private volatile AdsState _adsState = AdsState.Run;
@@ -298,14 +303,14 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolsAsync(string? parentPath, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(SimulatedSymbolTree.GetSymbols(_store, parentPath, includeChildren));
+        return Task.FromResult(SimulatedSymbolTree.GetSymbols(_store, NoSymbolAttributes, parentPath, includeChildren));
     }
 
     /// <inheritdoc cref="GetSymbolsAsync"/>
     public Task<IReadOnlyList<AdsSymbolInfo>> SearchSymbolsAsync(string pattern, bool includeChildren, CancellationToken ct, TimeSpan? timeout = null)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(SimulatedSymbolTree.Search(_store, pattern, includeChildren));
+        return Task.FromResult(SimulatedSymbolTree.Search(_store, NoSymbolAttributes, pattern, includeChildren));
     }
 
     // ---- Lifecycle no-ops ------------------------------------------------

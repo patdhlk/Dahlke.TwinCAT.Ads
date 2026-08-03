@@ -1503,7 +1503,60 @@ internal sealed class AdsConnection : IManagedConnection
             symbol.Category.ToString(),
             symbol.ByteSize,
             string.IsNullOrEmpty(symbol.Comment) ? null : symbol.Comment,
-            children);
+            children)
+        {
+            Attributes = MergeAttributes(symbol),
+        };
+    }
+
+    /// <summary>
+    /// Merges a symbol's data-type attributes with its instance attributes, instance winning.
+    /// </summary>
+    /// <remarks>
+    /// TwinCAT declares pragmas in two places, and the OPC UA server semantics distinguish them: a
+    /// pragma on a struct or function-block definition releases every instance of that type, while one
+    /// on an instance releases only that instance. Reading only <see cref="IAttributedInstance.Attributes"/>
+    /// would silently drop every type-level release.
+    /// <para>
+    /// Takes name/value pairs rather than <c>ITypeAttribute</c> so the merge rule is unit-testable
+    /// without constructing a live symbol.
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyDictionary<string, string> MergeAttributeSources(
+        IEnumerable<(string Name, string Value)> typeAttributes,
+        IEnumerable<(string Name, string Value)> instanceAttributes)
+    {
+        var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (name, value) in typeAttributes)
+            merged[name] = value;
+
+        foreach (var (name, value) in instanceAttributes)
+            merged[name] = value;
+
+        return merged;
+    }
+
+    /// <summary>
+    /// Collects the merged attribute set for one live symbol.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="IInstance.DataType"/> can be <see langword="null"/> for an unresolved type, in which
+    /// case only the instance's own attributes apply. Neither <see cref="ISymbol"/> nor
+    /// <see cref="IDataType"/> needs a cast to <see cref="IAttributedInstance"/>: <see cref="ISymbol"/>
+    /// already extends it, and <see cref="IDataType"/> declares its own
+    /// <see cref="IDataType.Attributes"/> property directly.
+    /// </remarks>
+    private static IReadOnlyDictionary<string, string> MergeAttributes(ISymbol symbol)
+    {
+        static IEnumerable<(string, string)> Pairs(ITypeAttributeCollection? attributes)
+            => attributes is null
+                ? []
+                : attributes.Select(a => (a.Name, a.Value));
+
+        return MergeAttributeSources(
+            Pairs(symbol.DataType?.Attributes),
+            Pairs(symbol.Attributes));
     }
 
     /// <summary>

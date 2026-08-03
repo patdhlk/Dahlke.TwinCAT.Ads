@@ -123,3 +123,8 @@ Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.TryGetConnection(string! plcId, out D
 Dahlke.TwinCAT.Ads.AdsConnectionPoolHandle.TryGetSimulatedConnection(string! plcId, out Dahlke.TwinCAT.Ads.SimulatedAdsConnection? simulated) -> bool
 static Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.Create() -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
 static Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder.CreateSimulation() -> Dahlke.TwinCAT.Ads.AdsConnectionPoolBuilder!
+Dahlke.TwinCAT.Ads.AdsSymbolInfo.Attributes.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>?
+Dahlke.TwinCAT.Ads.AdsSymbolInfo.Attributes.init -> void
+Dahlke.TwinCAT.Ads.PlcTargetOptions.SymbolAttributes.get -> System.Collections.Generic.Dictionary<string!, System.Collections.Generic.Dictionary<string!, string!>!>!
+Dahlke.TwinCAT.Ads.PlcTargetOptions.SymbolAttributes.set -> void
+Dahlke.TwinCAT.Ads.SimulatedAdsConnection.SetSymbolAttributes(System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.Dictionary<string!, string!>!>! attributes) -> void

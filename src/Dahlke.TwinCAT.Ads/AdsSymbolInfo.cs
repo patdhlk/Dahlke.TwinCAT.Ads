@@ -20,4 +20,18 @@ public sealed record AdsSymbolInfo(
     string Category,
     int ByteSize,
     string? Comment,
-    IReadOnlyList<AdsSymbolInfo>? Children);
+    IReadOnlyList<AdsSymbolInfo>? Children)
+{
+    /// <summary>
+    /// Declaration attributes (PLC pragmas) for this symbol, keyed by attribute name with the
+    /// attribute's value as the entry. Keys and values are plain strings, so the record keeps its
+    /// freedom from any TwinCAT type-system dependency.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> means attributes were not collected for this symbol — an empty
+    /// dictionary means they were collected and the symbol carries none. Consumers that treat the
+    /// absence of an attribute as a decision (for example OPC UA symbol release) must distinguish
+    /// the two, because "not collected" is not "not present".
+    /// </remarks>
+    public IReadOnlyDictionary<string, string>? Attributes { get; init; }
+}
