@@ -41,6 +41,7 @@ public sealed class AdsConnectionPoolBuilder
     private readonly List<Action<IServiceCollection>> _serviceDelegates = [];
     private IConfiguration? _configuration;
     private ILoggerFactory? _loggerFactory;
+    private TimeSpan _shutdownTimeout = TimeSpan.FromSeconds(30);
 
     private AdsConnectionPoolBuilder(bool simulation) => _simulation = simulation;
 
@@ -130,6 +131,41 @@ public sealed class AdsConnectionPoolBuilder
     }
 
     /// <summary>
+    /// Bounds how long <see cref="AdsConnectionPoolHandle.DisposeAsync"/> waits for hosted
+    /// services to stop.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Defaults to 30 seconds when this is never called, matching
+    /// <c>HostOptions.ShutdownTimeout</c> — this entry point's whole premise is behaving
+    /// like a generic host, so its default shutdown budget matches one too.
+    /// </para>
+    /// <para>
+    /// The timeout is one shared budget for the whole stop loop, not a fresh timeout per
+    /// hosted service — see <see cref="AdsConnectionPoolHandle.DisposeAsync"/>'s remarks
+    /// for how that budget is applied and what it can and cannot do.
+    /// </para>
+    /// </remarks>
+    /// <param name="timeout">
+    /// The shared shutdown budget, or <see cref="Timeout.InfiniteTimeSpan"/> to wait for
+    /// every hosted service unconditionally — the behaviour this type had before this
+    /// method existed.
+    /// </param>
+    /// <returns>The same builder, for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="timeout"/> is negative and not <see cref="Timeout.InfiniteTimeSpan"/>.
+    /// </exception>
+    public AdsConnectionPoolBuilder UseShutdownTimeout(TimeSpan timeout)
+    {
+        if (timeout < TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan)
+            throw new ArgumentOutOfRangeException(
+                nameof(timeout), timeout, "The timeout must not be negative.");
+
+        _shutdownTimeout = timeout;
+        return this;
+    }
+
+    /// <summary>
     /// Adds services to the private container — the seam for companion packages.
     /// </summary>
     /// <remarks>
@@ -151,7 +187,7 @@ public sealed class AdsConnectionPoolBuilder
     /// <para>
     /// <b>The private container is a hosted-service runner, not a host.</b> Startup and
     /// shutdown call <see cref="IHostedService.StartAsync"/> and
-    /// <see cref="IHostedService.StopAsync"/> and nothing else. Concretely, four things a
+    /// <see cref="IHostedService.StopAsync"/> and nothing else. Concretely, three things a
     /// generic host would do are absent:
     /// </para>
     /// <list type="bullet">
@@ -172,11 +208,6 @@ public sealed class AdsConnectionPoolBuilder
     ///     <c>ValidateOnBuild</c>, so a captive dependency or an unresolvable registration
     ///     surfaces at first resolve rather than at build.
     ///   </description></item>
-    ///   <item><description>
-    ///     Shutdown is unbounded: there is no equivalent of
-    ///     <c>HostOptions.ShutdownTimeout</c>, so a <c>StopAsync</c> that hangs hangs
-    ///     <see cref="AdsConnectionPoolHandle.DisposeAsync"/> with it.
-    ///   </description></item>
     /// </list>
     /// <para>
     /// The first two are unreachable through this library's own registrations: the pool
@@ -184,8 +215,14 @@ public sealed class AdsConnectionPoolBuilder
     /// with no lifecycle hooks, and <c>AdsRouterService</c> — the one
     /// <see cref="BackgroundService"/> among them — wraps the whole of its
     /// <c>ExecuteAsync</c> in a catch-all, so its task never faults. A service registered
-    /// HERE can reach all four, which is why they are stated in one place rather than
+    /// HERE can reach all three, which is why they are stated in one place rather than
     /// left to be discovered one at a time.
+    /// </para>
+    /// <para>
+    /// Shutdown is NOT one of the three: <see cref="AdsConnectionPoolHandle.DisposeAsync"/>
+    /// bounds the stop loop with a shared timeout — see
+    /// <see cref="UseShutdownTimeout"/> — the same way <c>HostOptions.ShutdownTimeout</c>
+    /// bounds a generic host's.
     /// </para>
     /// </remarks>
     /// <param name="configure">Applied to the service collection, in call order.</param>
@@ -302,7 +339,7 @@ public sealed class AdsConnectionPoolBuilder
                 started.Add(hosted);
             }
 
-            return new AdsConnectionPoolHandle(provider, started);
+            return new AdsConnectionPoolHandle(provider, started, _shutdownTimeout);
         }
         catch
         {

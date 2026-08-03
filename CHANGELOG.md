@@ -351,6 +351,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "did the code write 23.5" must not depend on what the fixture seeded — and does not fire for
   `SetInitialValues`, where seeding deliberately stays silent too.
 
+- **`AdsConnectionPoolBuilder.UseShutdownTimeout` bounds how long `AdsConnectionPoolHandle.DisposeAsync`
+  waits for hosted services to stop.** Previously every `StopAsync` was passed
+  `CancellationToken.None`, so a hosted service that hung in `StopAsync` — one registered through
+  `ConfigureServices`, or a defect in the library's own — hung `DisposeAsync` with it, forever.
+  Defaults to 30 seconds, matching `HostOptions.ShutdownTimeout`, since this entry point's whole
+  premise is behaving like a generic host; `Timeout.InfiniteTimeSpan` opts back into the previous
+  unbounded wait. The budget is one shared `CancellationTokenSource` for the whole stop loop, not a
+  fresh timeout per service, matching what `Host.StopAsync` does — two hanging services under one
+  short timeout do not cost two timeouts' worth of wall clock. A service that is cancelled by the
+  timeout is logged and stepped over exactly like any other stop failure, distinguishably from one
+  that threw for an unrelated reason, so the remaining services still get their turn and the
+  provider is still disposed either way:
+
+  ```csharp
+  await using var pool = await AdsConnectionPoolBuilder.Create()
+      .UseShutdownTimeout(TimeSpan.FromSeconds(5))
+      .AddTarget("plc1", o => { /* ... */ })
+      .BuildAndStartAsync();
+  ```
+
+  The bound is cooperative, not preemptive, exactly as a generic host's is: a hosted service that
+  never observes the token it is given keeps `DisposeAsync` waiting exactly as it always has.
+
 ### Changed
 
 - **BREAKING: `AdsRawChannelSeed.Port` is now `int?`, and required.** A seed entry names its
