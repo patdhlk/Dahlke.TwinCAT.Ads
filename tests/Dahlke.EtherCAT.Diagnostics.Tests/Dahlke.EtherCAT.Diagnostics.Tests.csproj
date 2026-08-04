@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <!--
+      FluentAssertions and NSubstitute are used by no other test project in this repository, which
+      writes plain xunit assertions. They came with this suite when the package was adopted from
+      patdhlk/adsify and are kept deliberately: rewriting working tests during a move is how a move
+      breaks them silently. Both are test-only (IsPackable=false above), so neither reaches a
+      consumer of Dahlke.EtherCAT.Diagnostics.
+    -->
+    <PackageReference Include="FluentAssertions" Version="8.9.0" />
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+    <!--
+      Concrete Microsoft.Extensions.DependencyInjection and Microsoft.Extensions.Logging, not just
+      the Abstractions the library itself references, for the ServiceCollection/ServiceProvider and
+      AddLogging() in SimulatedRawChannelFixture, which builds a real container to exercise
+      EtherCatClient over Dahlke.TwinCAT.Ads's simulated raw channels. Versions and their shape:
+      Directory.Build.props.
+    -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="$(MicrosoftExtensionsVersion)" />
+    <!--
+      PINNED FLAT, deliberately NOT $(MicrosoftExtensionsVersion) like its neighbours, for the same
+      reason the ESI test project pins it: FakeTimeProvider's auto-advance semantics differ across
+      major versions, and this is the version both suites were written against. The comment in
+      Dahlke.EtherCAT.Esi.Tests.csproj records where floating it was measured to break a budget test
+      on net8.0 and net9.0 while passing on net10.0.
+    -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.5.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Dahlke.EtherCAT.Diagnostics\Dahlke.EtherCAT.Diagnostics.csproj" />
+  </ItemGroup>
+
+</Project>
