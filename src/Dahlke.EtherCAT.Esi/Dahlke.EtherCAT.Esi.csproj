@@ -30,7 +30,8 @@
     that talks to a master over ADS.
 
     The per-target-framework version, and the reasoning behind its shape — fixed rather than
-    floating, and unbracketed unlike Beckhoff's: Directory.Build.props.
+    floating, and unbracketed unlike Beckhoff's: the ROOT Directory.Build.props, not the one in
+    src/ beside this file.
   -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(MicrosoftExtensionsVersion)" />

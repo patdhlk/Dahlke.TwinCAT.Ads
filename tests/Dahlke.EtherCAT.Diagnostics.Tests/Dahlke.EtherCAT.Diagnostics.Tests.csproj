@@ -28,11 +28,12 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="$(MicrosoftExtensionsVersion)" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="$(MicrosoftExtensionsVersion)" />
     <!--
-      PINNED FLAT, deliberately NOT $(MicrosoftExtensionsVersion) like its neighbours, for the same
-      reason the ESI test project pins it: FakeTimeProvider's auto-advance semantics differ across
-      major versions, and this is the version both suites were written against. The comment in
-      Dahlke.EtherCAT.Esi.Tests.csproj records where floating it was measured to break a budget test
-      on net8.0 and net9.0 while passing on net10.0.
+      Pinned flat rather than on $(MicrosoftExtensionsVersion) like its neighbours, purely to keep
+      the two adopted EtherCAT suites on ONE version of this package. Unlike in
+      Dahlke.EtherCAT.Esi.Tests, the pin is not load-bearing here: nothing in this project uses
+      FakeTimeProvider.AutoAdvanceAmount — EtherCatClientMasterDiscoveryTests says outright that its
+      clock "never advances on its own" — and floating it was measured to leave all 143 tests green
+      on every framework. The Esi project's pin IS load-bearing, and the comment there says why.
     -->
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.5.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

@@ -36,7 +36,7 @@ public sealed class SlaveNamer(IEsiCatalog catalog)
 
         return result.Status switch
         {
-            EsiStatus.Resolved => result.Device!.Name,
+            EsiStatus.Resolved => result.Device!.NameEn ?? "unnamed device",
             EsiStatus.NotFound => "unknown device",
             _                  => $"lookup failed: {result.Status}",
         };
@@ -44,13 +44,15 @@ public sealed class SlaveNamer(IEsiCatalog catalog)
 }
 ```
 
-`EsiStatus` distinguishes a resolved device from one that is genuinely absent, and both from a lookup that ran out of budget or could not read the directory — so a caller can tell "this device is not in my ESI folder" from "I never finished looking".
+`EsiStatus` separates a resolved device from one that could not be resolved *and why*: `NotConfigured` when no ESI directory is set or it does not exist, `NotFound` when nothing matched, and further members for an identity that was never scanned or a directory that could not be read. So a caller can tell "I have no ESI folder configured" from "I looked and it is not there".
+
+One case deliberately does **not** get its own status: a lookup that exhausts `LookupBudgetMs` reports `NotFound`, the same as genuine absence. It is logged at warning with the budget that was hit, so it is diagnosable — but if your code needs to distinguish "not on the bus" from "I stopped looking", watch the log rather than the status.
 
 ## What it does for you
 
 **Ranks candidates by the type hint.** A real ESI folder holds hundreds of files and the sought identity is in one of them. The hint (typically the slave's type string, e.g. `EL3204`) orders the search so the likely file is opened first, rather than parsing the folder alphabetically.
 
-**Bounds the work.** `LookupBudgetMs` caps a single lookup. The budget is checked *between files*, not once up front, so a large folder cannot be turned into an unbounded scan by one unlucky query — the lookup gives up and reports it rather than blocking a request thread.
+**Bounds the work.** `LookupBudgetMs` caps a single lookup. The budget is checked *between files*, not once up front, so a large folder cannot be turned into an unbounded scan by one unlucky query — the lookup gives up and warns rather than blocking a request thread.
 
 **Parses each device at most once per process, and complains at most once per device.** Both are properties of a single shared instance, which is why `AddEsiCatalog` registers `IEsiCatalog` as a singleton. Any other lifetime silently loses them.
 

@@ -1,10 +1,12 @@
 <Project>
 
   <!--
-    Shared settings for the three shipped packages. Everything here was previously duplicated
-    verbatim in all three csprojs, which is how the Version placeholder came to drift once already
-    (it still read 0.7.0 the day 0.8.0 shipped). Each csproj now declares only what genuinely
-    differs: its PackageId, Description and PackageTags.
+    Shared settings for every shipped package in src/ — six of them now: the four
+    Dahlke.TwinCAT.Ads packages and the two Dahlke.EtherCAT ones. All of this was once duplicated
+    verbatim per csproj, which is how the Version placeholder came to drift once already (it still
+    read 0.7.0 the day 0.8.0 shipped). Each csproj now declares only what genuinely differs: its
+    PackageId, Description and PackageTags — plus, where a package cannot use the shared
+    Microsoft.Extensions version property, the reason stated at the reference itself.
   -->
 
   <Import Project="../Directory.Build.props" />

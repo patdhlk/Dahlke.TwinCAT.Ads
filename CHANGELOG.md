@@ -455,12 +455,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     otherwise, so the four `Dahlke.TwinCAT.Ads` packages are unaffected. A 60 KB document about an
     ADS connection pool would misdescribe an ESI XML parser to the one audience that reads a package
     page before installing.
-  - **`Dahlke.EtherCAT.Diagnostics` pins `Microsoft.Extensions.Logging.Abstractions` per target
-    framework** (8.0.3 / 9.0.0 / 10.0.9) where its neighbours float on the shared property. The
-    floor comes from `Beckhoff.TwinCAT.Ads` 7.0.292, not from this repository, and a direct pin below
-    a floor is an NU1605 downgrade *error*: floating it failed two of the three framework legs.
-    `Beckhoff.TwinCAT.Ads` itself is bracketed `[7.0.292,8.0.0)` to match the ceiling
-    `Dahlke.TwinCAT.Ads` sets on it.
+  - **`Dahlke.EtherCAT.Diagnostics` pins two `Microsoft.Extensions` abstractions per target
+    framework** where its neighbours float on the shared property:
+    `Logging.Abstractions` at 8.0.3 / 9.0.0 / 10.0.9 and `DependencyInjection.Abstractions` at
+    8.0.2 / 9.0.0 / 10.0.9. Neither floor comes from this repository — `Beckhoff.TwinCAT.Ads` 7.0.292
+    sets the first, and `Logging.Abstractions` at that floor then cascades into the second — and a
+    direct pin below a floor is an NU1605 downgrade *error*, so each was a build failure on two of
+    the three framework legs before it was a pin. Both are declared rather than left transitive
+    because both are contracts the package's public surface uses. `Beckhoff.TwinCAT.Ads` itself is
+    bracketed `[7.0.292,8.0.0)` to match the ceiling `Dahlke.TwinCAT.Ads` sets on it.
 
 ### Changed
 

@@ -36,7 +36,8 @@ public sealed class TopologyEndpoint(IEtherCatClient client)
         var slaves = await client.GetConfiguredSlavesAsync(master.AmsNetId, ct);
         var frames = await client.GetFrameStatisticsAsync(master.AmsNetId, ct);
 
-        return $"{master.Name}: {state?.State}, {slaves?.Count} slaves, {frames?.LostFrames} lost";
+        return $"{master.Name}: {state?.State}, {slaves?.Count} slaves, "
+             + $"{frames?.CyclicLostFrames} cyclic frames lost";
     }
 }
 ```

@@ -27,7 +27,7 @@
     <!--
       A ProjectReference now, where the adsify original carried a PackageReference to
       Dahlke.TwinCAT.Ads 0.8.0. That removed SOME of the version pinning the original needed, but
-      not all of it — see the Logging.Abstractions note below, which is the half that survives.
+      not all of it — see the note below the Beckhoff reference for the half that survives, and why.
     -->
     <ProjectReference Include="../Dahlke.TwinCAT.Ads/Dahlke.TwinCAT.Ads.csproj" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="4.14.0">
@@ -38,7 +38,7 @@
       Bracketed to match the ceiling Dahlke.TwinCAT.Ads sets on the same package, so this one cannot
       resolve a Beckhoff version the library it builds on forbids. Why that ceiling exists, and why
       the Microsoft.Extensions references are deliberately NOT bracketed, are in
-      Dahlke.TwinCAT.Ads.csproj and Directory.Build.props respectively.
+      Dahlke.TwinCAT.Ads.csproj and the ROOT Directory.Build.props respectively.
     -->
     <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="[7.0.292,8.0.0)" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
@@ -46,31 +46,47 @@
   </ItemGroup>
 
   <!--
-    Microsoft.Extensions.Logging.Abstractions is the ONE reference here that cannot use
-    $(MicrosoftExtensionsVersion), and the numbers are deliberately not round. Beckhoff.TwinCAT.Ads
-    7.0.292 imposes a transitive FLOOR on it — >= 8.0.3 on net8.0 and >= 10.0.9 on net10.0, read
-    from that package's own nuspec dependency groups — and a direct pin below a floor is an NU1605
-    downgrade ERROR, not a warning. $(MicrosoftExtensionsVersion) is 8.0.0/9.0.0/10.0.0, so two of
-    the three legs fail the build. Measured while adopting this package, not assumed.
+    These two references cannot use $(MicrosoftExtensionsVersion), and their versions are
+    deliberately not round numbers. Both are declared rather than left transitive because both are
+    contracts this package's PUBLIC surface uses directly: AddEtherCatDiagnostics takes and returns
+    IServiceCollection, and the client and monitor take an ILogger.
 
-    Note what this is NOT: the floors survive the move from a PackageReference to a
-    ProjectReference on Dahlke.TwinCAT.Ads, because they come from BECKHOFF rather than from that
-    package. The Dahlke-derived floors the adsify original also had to clear (Hosting.Abstractions
-    >= 8.0.1, Options >= 8.0.2) did go away with the conversion, which is why those two references
-    sit on the shared property above.
+    Beckhoff.TwinCAT.Ads 7.0.292 imposes a transitive FLOOR on Logging.Abstractions — >= 8.0.3 on
+    net8.0 and >= 10.0.9 on net10.0, read from that package's own nuspec dependency groups — and a
+    direct pin below a floor is an NU1605 downgrade ERROR, not a warning. $(MicrosoftExtensionsVersion)
+    is 8.0.0/9.0.0/10.0.0, so two of the three legs fail the build.
 
-    Dahlke.TwinCAT.Ads itself never trips this despite referencing the same Beckhoff package: it
-    uses ILogger without declaring Logging.Abstractions directly, so it has no pin to conflict and
-    NuGet simply resolves Beckhoff's floor. Declaring it is the more honest thing for a package
-    whose public surface takes an ILogger, and the cost is this comment.
+    Then the floor CASCADES: Logging.Abstractions 8.0.3 itself requires
+    DependencyInjection.Abstractions >= 8.0.2, and 10.0.9 requires >= 10.0.9, so declaring that one at
+    the shared version fails the same two legs for a second reason. Both cascade steps were measured
+    while adopting this package — each was a build failure first and a pin second.
+
+    net9.0 is 9.0.0 for both, and that is NOT a floor being cleared: Beckhoff 7.0.292 ships no net9.0
+    dependency group, so net9.0 resolves against the net8.0 one and the floor there is 8.0.3, which
+    9.0.0 clears trivially. The conditional exists so a net9 consumer sees a 9.x floor rather than an
+    8.x one, keeping the per-target-framework policy the root Directory.Build.props states.
+
+    Note what this is NOT: none of it is a consequence of this repository. The floors come from
+    BECKHOFF, so they survived the move from a PackageReference to a ProjectReference on
+    Dahlke.TwinCAT.Ads. The floors that DID go away with that conversion were the Dahlke-derived ones
+    the adsify original also had to clear (Hosting.Abstractions >= 8.0.1, Options >= 8.0.2), which is
+    why those two references sit on the shared property above.
+
+    Dahlke.TwinCAT.Ads itself never trips any of this despite referencing the same Beckhoff package,
+    because it uses ILogger and IServiceCollection without declaring either abstraction directly — it
+    has no pin to conflict, and NuGet simply resolves Beckhoff's floor. Declaring them is the more
+    honest thing for a published package, and this comment is what it costs.
   -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
   </ItemGroup>
 
