@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<EtherCATInfo>
+  <Vendor>
+    <Id>#x00000002</Id>
+    <Name LcId="1033">Beckhoff Automation GmbH &amp; Co. KG</Name>
+  </Vendor>
+  <Descriptions>
+    <Devices>
+      <Device>
+        <Type ProductCode="#x00012c52" RevisionNo="#x00100000">EL0001</Type>
+        <Name LcId="1033">Irrelevant Device</Name>
+      </Device>
+    </Devices>
+  </Descriptions>
+</EtherCATInfo>

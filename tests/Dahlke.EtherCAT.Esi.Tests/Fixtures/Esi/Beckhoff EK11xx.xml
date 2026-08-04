@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<EtherCATInfo>
+  <Vendor>
+    <Id>#x00000002</Id>
+    <Name LcId="1033">Beckhoff Automation GmbH &amp; Co. KG</Name>
+  </Vendor>
+  <Descriptions>
+    <Groups>
+      <Group>
+        <Type>Coupler</Type>
+        <Name LcId="1033">EtherCAT Coupler</Name>
+      </Group>
+    </Groups>
+    <Devices>
+      <Device>
+        <Type ProductCode="#x044c2c52" RevisionNo="#x00100000">EK1100</Type>
+        <Name LcId="1033">EK1100 EtherCAT Coupler</Name>
+        <GroupType>NoSuchGroup</GroupType>
+      </Device>
+    </Devices>
+  </Descriptions>
+</EtherCATInfo>

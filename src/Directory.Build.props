@@ -1,10 +1,12 @@
 <Project>
 
   <!--
-    Shared settings for the three shipped packages. Everything here was previously duplicated
-    verbatim in all three csprojs, which is how the Version placeholder came to drift once already
-    (it still read 0.7.0 the day 0.8.0 shipped). Each csproj now declares only what genuinely
-    differs: its PackageId, Description and PackageTags.
+    Shared settings for every shipped package in src/ — six of them now: the four
+    Dahlke.TwinCAT.Ads packages and the two Dahlke.EtherCAT ones. All of this was once duplicated
+    verbatim per csproj, which is how the Version placeholder came to drift once already (it still
+    read 0.7.0 the day 0.8.0 shipped). Each csproj now declares only what genuinely differs: its
+    PackageId, Description and PackageTags — plus, where a package cannot use the shared
+    Microsoft.Extensions version property, the reason stated at the reference itself.
   -->
 
   <Import Project="../Directory.Build.props" />
@@ -61,8 +63,22 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
-  <ItemGroup>
+  <!--
+    A package documents itself if it ships its own README.md, and falls back to the repository's
+    otherwise. The fallback is right for the four Dahlke.TwinCAT.Ads packages, whose subject IS
+    what that README describes. It is wrong for a package that only lives in this repository —
+    Dahlke.EtherCAT.Esi parses ESI XML and has no ADS concept in it at all, so shipping 60 KB about
+    an ADS connection pool as its nuget.org page would misdescribe it to the one audience that
+    reads a package page before installing.
+
+    Exists() is evaluated per project, so adding a README.md to a package directory is all it takes
+    to opt in; nothing else has to change. The four existing packages have none and are unaffected.
+  -->
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)/README.md')">
     <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)/README.md')">
+    <None Include="README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
 </Project>

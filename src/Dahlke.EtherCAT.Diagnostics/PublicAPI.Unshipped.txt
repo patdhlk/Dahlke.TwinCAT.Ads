@@ -1,0 +1,312 @@
+#nullable enable
+Dahlke.EtherCAT.Diagnostics.CoeFailureReason
+Dahlke.EtherCAT.Diagnostics.CoeFailureReason.AdsError = 3 -> Dahlke.EtherCAT.Diagnostics.CoeFailureReason
+Dahlke.EtherCAT.Diagnostics.CoeFailureReason.NoMailbox = 1 -> Dahlke.EtherCAT.Diagnostics.CoeFailureReason
+Dahlke.EtherCAT.Diagnostics.CoeFailureReason.None = 0 -> Dahlke.EtherCAT.Diagnostics.CoeFailureReason
+Dahlke.EtherCAT.Diagnostics.CoeFailureReason.ObjectNotFound = 2 -> Dahlke.EtherCAT.Diagnostics.CoeFailureReason
+Dahlke.EtherCAT.Diagnostics.CoeReadResult
+Dahlke.EtherCAT.Diagnostics.CoeReadResult.CoeReadResult() -> void
+Dahlke.EtherCAT.Diagnostics.CoeReadResult.Data.get -> byte[]!
+Dahlke.EtherCAT.Diagnostics.CoeReadResult.Data.init -> void
+Dahlke.EtherCAT.Diagnostics.CoeReadResult.Error.get -> string?
+Dahlke.EtherCAT.Diagnostics.CoeReadResult.Error.init -> void
+Dahlke.EtherCAT.Diagnostics.CoeReadResult.Reason.get -> Dahlke.EtherCAT.Diagnostics.CoeFailureReason
+Dahlke.EtherCAT.Diagnostics.CoeReadResult.Reason.init -> void
+Dahlke.EtherCAT.Diagnostics.CoeReadResult.Succeeded.get -> bool
+Dahlke.EtherCAT.Diagnostics.CoeReadResult.Succeeded.init -> void
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.Address.get -> ushort
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.Address.init -> void
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.CrcCount.get -> int
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.CrcCount.init -> void
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.CrcErrorThresholdExceededEvent() -> void
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.MasterId.get -> int
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.MasterId.init -> void
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.Name.get -> string!
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.Name.init -> void
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.Port.get -> string!
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.Port.init -> void
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.Threshold.get -> int
+Dahlke.EtherCAT.Diagnostics.CrcErrorThresholdExceededEvent.Threshold.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterInfo
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterInfo.AmsNetId.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterInfo.AmsNetId.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterInfo.DeviceId.get -> int
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterInfo.DeviceId.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterInfo.EtherCatMasterInfo() -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterInfo.Name.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterInfo.Name.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterState
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterState.CurrentState.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterState.CurrentState.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterState.EtherCatMasterState() -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterState.RequestedState.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterState.RequestedState.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterState.SlaveCount.get -> int
+Dahlke.EtherCAT.Diagnostics.EtherCatMasterState.SlaveCount.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.CoeMaxObjectBytes.get -> int
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.CoeMaxObjectBytes.set -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.CoeTimeoutMs.get -> int
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.CoeTimeoutMs.set -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.CrcErrorThreshold.get -> int
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.CrcErrorThreshold.set -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.EnableNotifications.get -> bool
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.EnableNotifications.set -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.EtherCatOptions() -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.PollCycleBudgetMs.get -> int
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.PollCycleBudgetMs.set -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.PollingIntervalMs.get -> int
+Dahlke.EtherCAT.Diagnostics.EtherCatOptions.PollingIntervalMs.set -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatReads
+Dahlke.EtherCAT.Diagnostics.EtherCatReads.FrameStatistics = 1 -> Dahlke.EtherCAT.Diagnostics.EtherCatReads
+Dahlke.EtherCAT.Diagnostics.EtherCatReads.None = 0 -> Dahlke.EtherCAT.Diagnostics.EtherCatReads
+Dahlke.EtherCAT.Diagnostics.EtherCatReads.ScannedIdentities = 2 -> Dahlke.EtherCAT.Diagnostics.EtherCatReads
+Dahlke.EtherCAT.Diagnostics.EtherCatReads.SlaveDetail = 4 -> Dahlke.EtherCAT.Diagnostics.EtherCatReads
+Dahlke.EtherCAT.Diagnostics.EtherCatReads.SlaveErrorCounters = 8 -> Dahlke.EtherCAT.Diagnostics.EtherCatReads
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.EtherCatScannedSlave() -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.PhysicalAddress.get -> ushort
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.PhysicalAddress.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.ProductCode.get -> uint?
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.ProductCode.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.RevisionNumber.get -> uint?
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.RevisionNumber.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.SerialNumber.get -> uint?
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.SerialNumber.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.VendorId.get -> uint?
+Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave.VendorId.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatServiceCollectionExtensions
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ConfiguredProductCode.get -> uint
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ConfiguredProductCode.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ConfiguredRevisionNumber.get -> uint
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ConfiguredRevisionNumber.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ConfiguredSerialNumber.get -> uint
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ConfiguredSerialNumber.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ConfiguredVendorId.get -> uint
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ConfiguredVendorId.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.EtherCatSlaveDetail() -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.IdentityMatch.get -> bool
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.IdentityMatch.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.InitError.get -> bool
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.InitError.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.Ports.get -> System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Diagnostics.SlavePortInfo!>!
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.Ports.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedProductCode.get -> uint
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedProductCode.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedRevisionNumber.get -> uint
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedRevisionNumber.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedSerialNumber.get -> uint
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedSerialNumber.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedVendorId.get -> uint
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedVendorId.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.AutoIncrementAddress.get -> ushort
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.AutoIncrementAddress.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.CurrentState.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.CurrentState.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.EtherCatSlaveInfo() -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.HasError.get -> bool
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.HasError.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.IsDisabled.get -> bool
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.IsDisabled.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.IsPresent.get -> bool
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.IsPresent.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.Name.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.Name.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.PhysicalAddress.get -> ushort
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.PhysicalAddress.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.RequestedState.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.RequestedState.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.Type.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo.Type.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.AutoIncrementAddress.get -> ushort
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.AutoIncrementAddress.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.CurrentState.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.CurrentState.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.Detail.get -> Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail?
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.Detail.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.ErrorCounters.get -> Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters?
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.ErrorCounters.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.EtherCatSlaveSnapshot() -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.HasError.get -> bool
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.HasError.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.IsDisabled.get -> bool
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.IsDisabled.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.IsPresent.get -> bool
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.IsPresent.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.Name.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.Name.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.PhysicalAddress.get -> ushort
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.PhysicalAddress.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.RequestedState.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.RequestedState.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.Scanned.get -> Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave?
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.Scanned.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.Type.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot.Type.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.EtherCatSnapshot() -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.FrameStatistics.get -> Dahlke.EtherCAT.Diagnostics.FrameStatistics?
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.FrameStatistics.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.IncompleteReads.get -> Dahlke.EtherCAT.Diagnostics.EtherCatReads
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.IncompleteReads.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.MasterAmsNetId.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.MasterAmsNetId.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.MasterDeviceId.get -> int
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.MasterDeviceId.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.MasterName.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.MasterName.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.MasterState.get -> Dahlke.EtherCAT.Diagnostics.EtherCatMasterState!
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.MasterState.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.PlcId.get -> string!
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.PlcId.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.Slaves.get -> System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Diagnostics.EtherCatSlaveSnapshot!>!
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.Slaves.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.SyncUnits.get -> System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Diagnostics.SyncUnitInfo!>!
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.SyncUnits.init -> void
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.Timestamp.get -> System.DateTimeOffset
+Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot.Timestamp.init -> void
+Dahlke.EtherCAT.Diagnostics.FrameStatistics
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.CyclicFramesPerSecond.get -> double?
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.CyclicFramesPerSecond.init -> void
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.CyclicLostFrames.get -> long
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.CyclicLostFrames.init -> void
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.CyclicSendFrames.get -> long
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.CyclicSendFrames.init -> void
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.CyclicTxRxErrors.get -> long
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.CyclicTxRxErrors.init -> void
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.FrameStatistics() -> void
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.QueuedFramesPerSecond.get -> double?
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.QueuedFramesPerSecond.init -> void
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.QueuedLostFrames.get -> long
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.QueuedLostFrames.init -> void
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.QueuedSendFrames.get -> long
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.QueuedSendFrames.init -> void
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.QueuedTxRxErrors.get -> long
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.QueuedTxRxErrors.init -> void
+Dahlke.EtherCAT.Diagnostics.IEtherCatCache
+Dahlke.EtherCAT.Diagnostics.IEtherCatCache.GetSnapshot(string! plcId, int masterDeviceId) -> Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot?
+Dahlke.EtherCAT.Diagnostics.IEtherCatCache.GetSnapshots(string! plcId) -> System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot!>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatCache.HasPlc(string! plcId) -> bool
+Dahlke.EtherCAT.Diagnostics.IEtherCatCache.IsDegraded(string! plcId, int masterDeviceId) -> bool
+Dahlke.EtherCAT.Diagnostics.IEtherCatCache.MarkDegraded(string! plcId, int masterDeviceId) -> void
+Dahlke.EtherCAT.Diagnostics.IEtherCatCache.Update(string! plcId, int masterDeviceId, Dahlke.EtherCAT.Diagnostics.EtherCatSnapshot! snapshot) -> void
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.GetConfiguredSlavesAsync(string! masterAmsNetId, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Diagnostics.EtherCatSlaveInfo!>?>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.GetFrameStatisticsAsync(string! masterAmsNetId, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.EtherCAT.Diagnostics.FrameStatistics?>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.GetMasterStateAsync(string! masterAmsNetId, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.EtherCAT.Diagnostics.EtherCatMasterState?>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.GetMastersAsync(string! amsNetId, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Diagnostics.EtherCatMasterInfo!>!>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.GetScannedSlavesAsync(string! masterAmsNetId, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Diagnostics.EtherCatScannedSlave!>?>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.GetSlaveDetailAsync(string! masterAmsNetId, ushort physicalAddress, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail?>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.GetSlaveErrorCountersAsync(string! masterAmsNetId, ushort physicalAddress, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters?>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.GetSyncUnitsAsync(string! masterAmsNetId, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Diagnostics.SyncUnitInfo!>!>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.ReadCoeObjectAsync(string! masterAmsNetId, ushort physicalAddress, ushort index, byte subIndex, int timeoutMs, int maxBytes, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.EtherCAT.Diagnostics.CoeReadResult!>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.ResetSlaveErrorCountersAsync(string! masterAmsNetId, ushort physicalAddress, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<bool>!
+Dahlke.EtherCAT.Diagnostics.IEtherCatDiagnosticsHandler
+Dahlke.EtherCAT.Diagnostics.IEtherCatDiagnosticsHandler.HandleAsync(string! plcId, Dahlke.EtherCAT.Diagnostics.IEtherCatEvent! evt, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
+Dahlke.EtherCAT.Diagnostics.IEtherCatEvent
+Dahlke.EtherCAT.Diagnostics.IEtherCatEvent.MasterId.get -> int
+Dahlke.EtherCAT.Diagnostics.IEtherCatMonitor
+Dahlke.EtherCAT.Diagnostics.IEtherCatMonitor.ClearCrcNotification(int masterId, ushort address) -> void
+Dahlke.EtherCAT.Diagnostics.IEtherCatOptionsSource
+Dahlke.EtherCAT.Diagnostics.IEtherCatOptionsSource.For(string! plcId) -> Dahlke.EtherCAT.Diagnostics.EtherCatOptions?
+Dahlke.EtherCAT.Diagnostics.MasterDiagnosticsDegradedEvent
+Dahlke.EtherCAT.Diagnostics.MasterDiagnosticsDegradedEvent.Degraded.get -> bool
+Dahlke.EtherCAT.Diagnostics.MasterDiagnosticsDegradedEvent.Degraded.init -> void
+Dahlke.EtherCAT.Diagnostics.MasterDiagnosticsDegradedEvent.MasterDiagnosticsDegradedEvent() -> void
+Dahlke.EtherCAT.Diagnostics.MasterDiagnosticsDegradedEvent.MasterId.get -> int
+Dahlke.EtherCAT.Diagnostics.MasterDiagnosticsDegradedEvent.MasterId.init -> void
+Dahlke.EtherCAT.Diagnostics.MasterDiagnosticsDegradedEvent.MasterName.get -> string!
+Dahlke.EtherCAT.Diagnostics.MasterDiagnosticsDegradedEvent.MasterName.init -> void
+Dahlke.EtherCAT.Diagnostics.MasterDiagnosticsDegradedEvent.Reason.get -> string?
+Dahlke.EtherCAT.Diagnostics.MasterDiagnosticsDegradedEvent.Reason.init -> void
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.CurrentState.get -> string!
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.CurrentState.init -> void
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.MasterId.get -> int
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.MasterId.init -> void
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.MasterName.get -> string!
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.MasterName.init -> void
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.MasterStateChangedEvent() -> void
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.PreviousState.get -> string!
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.PreviousState.init -> void
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.RequestedState.get -> string!
+Dahlke.EtherCAT.Diagnostics.MasterStateChangedEvent.RequestedState.init -> void
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.CrcErrors.get -> int
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.CrcErrors.init -> void
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.ForwardedCrcErrors.get -> int
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.ForwardedCrcErrors.init -> void
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.LostLinkCount.get -> int
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.LostLinkCount.init -> void
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.Port.get -> string!
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.Port.init -> void
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.PortErrorCounters() -> void
+Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters
+Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters.AbnormalStateChanges.get -> int
+Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters.AbnormalStateChanges.init -> void
+Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters.PhysicalAddress.get -> ushort
+Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters.PhysicalAddress.init -> void
+Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters.Ports.get -> System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Diagnostics.PortErrorCounters!>!
+Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters.Ports.init -> void
+Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters.SlaveErrorCounters() -> void
+Dahlke.EtherCAT.Diagnostics.SlavePortInfo
+Dahlke.EtherCAT.Diagnostics.SlavePortInfo.Configured.get -> bool
+Dahlke.EtherCAT.Diagnostics.SlavePortInfo.Configured.init -> void
+Dahlke.EtherCAT.Diagnostics.SlavePortInfo.LinkState.get -> bool
+Dahlke.EtherCAT.Diagnostics.SlavePortInfo.LinkState.init -> void
+Dahlke.EtherCAT.Diagnostics.SlavePortInfo.Physic.get -> string!
+Dahlke.EtherCAT.Diagnostics.SlavePortInfo.Physic.init -> void
+Dahlke.EtherCAT.Diagnostics.SlavePortInfo.Port.get -> string!
+Dahlke.EtherCAT.Diagnostics.SlavePortInfo.Port.init -> void
+Dahlke.EtherCAT.Diagnostics.SlavePortInfo.SlavePortInfo() -> void
+Dahlke.EtherCAT.Diagnostics.SlavePresenceChangedEvent
+Dahlke.EtherCAT.Diagnostics.SlavePresenceChangedEvent.Address.get -> ushort
+Dahlke.EtherCAT.Diagnostics.SlavePresenceChangedEvent.Address.init -> void
+Dahlke.EtherCAT.Diagnostics.SlavePresenceChangedEvent.IsPresent.get -> bool
+Dahlke.EtherCAT.Diagnostics.SlavePresenceChangedEvent.IsPresent.init -> void
+Dahlke.EtherCAT.Diagnostics.SlavePresenceChangedEvent.MasterId.get -> int
+Dahlke.EtherCAT.Diagnostics.SlavePresenceChangedEvent.MasterId.init -> void
+Dahlke.EtherCAT.Diagnostics.SlavePresenceChangedEvent.Name.get -> string!
+Dahlke.EtherCAT.Diagnostics.SlavePresenceChangedEvent.Name.init -> void
+Dahlke.EtherCAT.Diagnostics.SlavePresenceChangedEvent.SlavePresenceChangedEvent() -> void
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.Address.get -> ushort
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.Address.init -> void
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.CurrentState.get -> string!
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.CurrentState.init -> void
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.HasError.get -> bool
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.HasError.init -> void
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.MasterId.get -> int
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.MasterId.init -> void
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.Name.get -> string!
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.Name.init -> void
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.PreviousState.get -> string!
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.PreviousState.init -> void
+Dahlke.EtherCAT.Diagnostics.SlaveStateChangedEvent.SlaveStateChangedEvent() -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitFaultEvent
+Dahlke.EtherCAT.Diagnostics.SyncUnitFaultEvent.FaultCounter.get -> long
+Dahlke.EtherCAT.Diagnostics.SyncUnitFaultEvent.FaultCounter.init -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitFaultEvent.HasError.get -> bool
+Dahlke.EtherCAT.Diagnostics.SyncUnitFaultEvent.HasError.init -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitFaultEvent.MasterId.get -> int
+Dahlke.EtherCAT.Diagnostics.SyncUnitFaultEvent.MasterId.init -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitFaultEvent.SyncUnitFaultEvent() -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitFaultEvent.SyncUnitId.get -> int
+Dahlke.EtherCAT.Diagnostics.SyncUnitFaultEvent.SyncUnitId.init -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.FaultCounter.get -> long
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.FaultCounter.init -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.FramesMissed.get -> long
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.FramesMissed.init -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.HasError.get -> bool
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.HasError.init -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.Id.get -> int
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.Id.init -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.Slaves.get -> System.Collections.Generic.IReadOnlyList<ushort>!
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.Slaves.init -> void
+Dahlke.EtherCAT.Diagnostics.SyncUnitInfo.SyncUnitInfo() -> void
+static Dahlke.EtherCAT.Diagnostics.EtherCatServiceCollectionExtensions.AddEtherCatDiagnostics(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, bool startMonitor = true) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

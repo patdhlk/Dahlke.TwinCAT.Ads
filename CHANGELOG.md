@@ -421,6 +421,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code. A simulated symbol with no seeded entry reports an empty dictionary, never `null` —
   simulation always "collects," even when there is nothing to find.
 
+- **Two EtherCAT packages join this repository: `Dahlke.EtherCAT.Diagnostics` and
+  `Dahlke.EtherCAT.Esi`.** Adopted from `patdhlk/adsify` with their C# unchanged; only the project
+  files were rewritten to this repository's conventions. Both ship from the same release tag as the
+  four `Dahlke.TwinCAT.Ads` packages, so they debut at this version rather than at 0.1.0.
+
+  `Dahlke.EtherCAT.Diagnostics` reads EtherCAT master and slave diagnostics over ADS: topology,
+  configured versus *scanned* slaves, slave and port state, CRC and frame error counters, sync-unit
+  faults, CoE object reads, and a change-event stream, with a polling monitor and a snapshot cache
+  so a request path never has to touch the bus.
+
+  ```csharp
+  builder.Services.AddTwinCatAds(builder.Configuration);
+  builder.Services.AddEtherCatDiagnostics();
+  ```
+
+  It belongs here because it is built on this library's own raw ADS channels — the feature the
+  README introduces as being for "targets the symbol API cannot reach: EtherCAT masters and slaves".
+  There are no PLC symbols for any of this, so raw index groups are the only route, and the
+  simulation that comes with them means the whole library is testable with no PLC.
+
+  `Dahlke.EtherCAT.Esi` is an ESI (EtherCAT Slave Information) device catalogue: it parses vendor
+  ESI XML and resolves a vendor/product/revision triple to the best matching device description,
+  ranking candidate files by a type hint and bounding a lookup with a budget checked *between*
+  files. It **depends on no ADS or TwinCAT package at all** — XML, options and logging — and is
+  usable on its own with nothing but a folder of ESI files. That independence is why it is a
+  separate package from the diagnostics library rather than part of it.
+
+  Two packaging notes worth stating, since both are visible on nuget.org:
+
+  - **Each EtherCAT package ships its own README** rather than this repository's. `Directory.Build.props`
+    now prefers a package-local `README.md` when one exists and falls back to the repository's
+    otherwise, so the four `Dahlke.TwinCAT.Ads` packages are unaffected. A 60 KB document about an
+    ADS connection pool would misdescribe an ESI XML parser to the one audience that reads a package
+    page before installing.
+  - **`Dahlke.EtherCAT.Diagnostics` pins two `Microsoft.Extensions` abstractions per target
+    framework** where its neighbours float on the shared property:
+    `Logging.Abstractions` at 8.0.3 / 9.0.0 / 10.0.9 and `DependencyInjection.Abstractions` at
+    8.0.2 / 9.0.0 / 10.0.9. Neither floor comes from this repository — `Beckhoff.TwinCAT.Ads` 7.0.292
+    sets the first, and `Logging.Abstractions` at that floor then cascades into the second — and a
+    direct pin below a floor is an NU1605 downgrade *error*, so each was a build failure on two of
+    the three framework legs before it was a pin. Both are declared rather than left transitive
+    because both are contracts the package's public surface uses. `Beckhoff.TwinCAT.Ads` itself is
+    bracketed `[7.0.292,8.0.0)` to match the ceiling `Dahlke.TwinCAT.Ads` sets on it.
+
 ### Changed
 
 - **BREAKING: `AdsRawChannelSeed.Port` is now `int?`, and required.** A seed entry names its
