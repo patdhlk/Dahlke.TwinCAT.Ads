@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<EtherCATInfo>
+  <Vendor>
+    <Id>#x00000002</Id>
+    <Name LcId="1033">Beckhoff Automation GmbH &amp; Co. KG</Name>
+  </Vendor>
+  <Descriptions>
+    <Groups>
+      <Group>
+        <Type>EncInput</Type>
+        <Name LcId="1033">Position Measurement</Name>
+      </Group>
+    </Groups>
+    <Devices>
+      <Device>
+        <Type ProductCode="#x13893052">EL5001</Type>
+        <Name LcId="1033">EL5001 SSI Encoder Interface</Name>
+        <GroupType>EncInput</GroupType>
+        <URL>http://www.beckhoff.de/EL5001</URL>
+      </Device>
+    </Devices>
+  </Descriptions>
+</EtherCATInfo>

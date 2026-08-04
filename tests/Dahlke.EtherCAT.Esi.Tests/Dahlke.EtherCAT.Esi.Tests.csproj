@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <!--
+      FluentAssertions and NSubstitute are used by no other test project in this repository, which
+      writes plain xunit assertions. They came with this suite when the package was adopted from
+      patdhlk/adsify and are kept deliberately: rewriting working tests during a move is how a move
+      breaks them silently. Both are test-only (IsPackable=false above), so neither reaches a
+      consumer of Dahlke.EtherCAT.Esi.
+    -->
+    <PackageReference Include="FluentAssertions" Version="8.9.0" />
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+    <!--
+      Concrete Microsoft.Extensions.Logging, not just the Abstractions the library itself needs,
+      for LoggerFactory.Create in CapturingLoggerProvider. Versions and their shape:
+      Directory.Build.props.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="$(MicrosoftExtensionsVersion)" />
+    <!--
+      PINNED FLAT, deliberately NOT $(MicrosoftExtensionsVersion) as everything else here is, and
+      not to be "tidied" into line with it. LookupAsync_checks_the_budget_between_files_not_once_up_front
+      drives FakeTimeProvider.AutoAdvanceAmount and asserts on the NUMBER of clock reads the budget
+      check performs, so it is sensitive to that type's auto-advance semantics rather than merely to
+      its API. Resolving this per target framework gives 8.0.0 on net8.0 and 9.0.0 on net9.0, where
+      those semantics differ, and the test fails on both while passing on net10.0 — measured, not
+      assumed. This is the version the suite was written against, and it behaves identically on all
+      three frameworks. The repository's own test project can use the floating property because none
+      of its tests depend on auto-advance read counting.
+    -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.5.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Dahlke.EtherCAT.Esi\Dahlke.EtherCAT.Esi.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Fixtures/**/*.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

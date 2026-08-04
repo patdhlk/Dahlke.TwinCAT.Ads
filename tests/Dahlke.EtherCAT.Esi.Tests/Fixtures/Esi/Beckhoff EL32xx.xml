@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<EtherCATInfo>
+  <Vendor>
+    <Id>#x00000002</Id>
+    <Name LcId="1033">Beckhoff Automation GmbH &amp; Co. KG</Name>
+  </Vendor>
+  <Descriptions>
+    <Groups>
+      <Group>
+        <Type>AnaIn</Type>
+        <Name LcId="1033">Analog Input</Name>
+        <Name LcId="1031">Analoge Eingänge</Name>
+      </Group>
+    </Groups>
+    <Devices>
+      <Device>
+        <Type ProductCode="#x0c843052" RevisionNo="#x00100000">EL3204</Type>
+        <Name LcId="1033">EL3204 4Ch. Ana. Input PT100 (RTD)</Name>
+        <Name LcId="1031">EL3204 4K. Ana. Eingang PT100 (RTD) Meßbereich</Name>
+        <GroupType>AnaIn</GroupType>
+        <URL>http://www.beckhoff.de/EL3204-rev1</URL>
+      </Device>
+      <Device>
+        <Type ProductCode="#x0c843052" RevisionNo="#x00110000">EL3204</Type>
+        <Name LcId="1033">EL3204 4Ch. Ana. Input PT100 (RTD) rev17</Name>
+        <Name LcId="1031">EL3204 4K. Ana. Eingang PT100 (RTD) rev17</Name>
+        <GroupType>AnaIn</GroupType>
+        <URL>http://www.beckhoff.de/EL3204-rev17</URL>
+      </Device>
+      <Device>
+        <Type ProductCode="#x0c823052" RevisionNo="#x00100000">EL3202</Type>
+        <Name LcId="1033">EL3202 2Ch. Ana. Input PT100 (RTD)</Name>
+        <GroupType>AnaIn</GroupType>
+      </Device>
+    </Devices>
+  </Descriptions>
+</EtherCATInfo>
