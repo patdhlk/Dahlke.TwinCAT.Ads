@@ -50,6 +50,20 @@ Optionally add the testing harness to your **test** projects (see [Testing](#tes
 dotnet add package Dahlke.TwinCAT.Ads.Testing
 ```
 
+### EtherCAT packages
+
+This repository also ships two EtherCAT packages. They are documented on their own package pages rather than here, because only one of them is about ADS at all:
+
+| Package | What it is |
+|---|---|
+| [`Dahlke.EtherCAT.Diagnostics`](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/src/Dahlke.EtherCAT.Diagnostics/README.md) | Master and slave diagnostics over ADS — topology, slave and port state, CRC and frame error counters, sync-unit faults, CoE reads, and a change-event stream. Built on this library's [raw ADS channels](#raw-ads-channels), which is the only way to reach an EtherCAT master: there are no PLC symbols for any of it. |
+| [`Dahlke.EtherCAT.Esi`](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/src/Dahlke.EtherCAT.Esi/README.md) | An ESI (EtherCAT Slave Information) device catalogue — parses vendor ESI XML and resolves a vendor/product/revision triple to a device description. **Depends on no ADS or TwinCAT package**; it is XML, options and logging. Usable on its own with nothing but a folder of ESI files. |
+
+```bash
+dotnet add package Dahlke.EtherCAT.Diagnostics   # pulls Dahlke.TwinCAT.Ads and Dahlke.EtherCAT.Esi
+dotnet add package Dahlke.EtherCAT.Esi           # standalone
+```
+
 ## Quick Start
 
 ### Configuration-first (recommended for server applications)

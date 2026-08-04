@@ -61,8 +61,22 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
-  <ItemGroup>
+  <!--
+    A package documents itself if it ships its own README.md, and falls back to the repository's
+    otherwise. The fallback is right for the four Dahlke.TwinCAT.Ads packages, whose subject IS
+    what that README describes. It is wrong for a package that only lives in this repository —
+    Dahlke.EtherCAT.Esi parses ESI XML and has no ADS concept in it at all, so shipping 60 KB about
+    an ADS connection pool as its nuget.org page would misdescribe it to the one audience that
+    reads a package page before installing.
+
+    Exists() is evaluated per project, so adding a README.md to a package directory is all it takes
+    to opt in; nothing else has to change. The four existing packages have none and are unaffected.
+  -->
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)/README.md')">
     <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)/README.md')">
+    <None Include="README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
 </Project>
