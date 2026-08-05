@@ -1,0 +1,72 @@
+#nullable enable
+Dahlke.EtherCAT.Esi.EsiDevice
+Dahlke.EtherCAT.Esi.EsiDevice.<Clone>$() -> Dahlke.EtherCAT.Esi.EsiDevice!
+Dahlke.EtherCAT.Esi.EsiDevice.Deconstruct(out string? VendorName, out string? NameEn, out string? NameDe, out string? Group, out string? Url) -> void
+Dahlke.EtherCAT.Esi.EsiDevice.Equals(Dahlke.EtherCAT.Esi.EsiDevice? other) -> bool
+Dahlke.EtherCAT.Esi.EsiDevice.EsiDevice(string? VendorName, string? NameEn, string? NameDe, string? Group, string? Url) -> void
+Dahlke.EtherCAT.Esi.EsiDevice.Group.get -> string?
+Dahlke.EtherCAT.Esi.EsiDevice.Group.init -> void
+Dahlke.EtherCAT.Esi.EsiDevice.NameDe.get -> string?
+Dahlke.EtherCAT.Esi.EsiDevice.NameDe.init -> void
+Dahlke.EtherCAT.Esi.EsiDevice.NameEn.get -> string?
+Dahlke.EtherCAT.Esi.EsiDevice.NameEn.init -> void
+Dahlke.EtherCAT.Esi.EsiDevice.Url.get -> string?
+Dahlke.EtherCAT.Esi.EsiDevice.Url.init -> void
+Dahlke.EtherCAT.Esi.EsiDevice.VendorName.get -> string?
+Dahlke.EtherCAT.Esi.EsiDevice.VendorName.init -> void
+Dahlke.EtherCAT.Esi.EsiKey
+Dahlke.EtherCAT.Esi.EsiKey.Deconstruct(out uint VendorId, out uint ProductCode, out uint RevisionNumber) -> void
+Dahlke.EtherCAT.Esi.EsiKey.Equals(Dahlke.EtherCAT.Esi.EsiKey other) -> bool
+Dahlke.EtherCAT.Esi.EsiKey.EsiKey() -> void
+Dahlke.EtherCAT.Esi.EsiKey.EsiKey(uint VendorId, uint ProductCode, uint RevisionNumber) -> void
+Dahlke.EtherCAT.Esi.EsiKey.ProductCode.get -> uint
+Dahlke.EtherCAT.Esi.EsiKey.ProductCode.init -> void
+Dahlke.EtherCAT.Esi.EsiKey.RevisionNumber.get -> uint
+Dahlke.EtherCAT.Esi.EsiKey.RevisionNumber.init -> void
+Dahlke.EtherCAT.Esi.EsiKey.VendorId.get -> uint
+Dahlke.EtherCAT.Esi.EsiKey.VendorId.init -> void
+Dahlke.EtherCAT.Esi.EsiLookupResult
+Dahlke.EtherCAT.Esi.EsiLookupResult.<Clone>$() -> Dahlke.EtherCAT.Esi.EsiLookupResult!
+Dahlke.EtherCAT.Esi.EsiLookupResult.Deconstruct(out Dahlke.EtherCAT.Esi.EsiDevice? Device, out Dahlke.EtherCAT.Esi.EsiStatus Status) -> void
+Dahlke.EtherCAT.Esi.EsiLookupResult.Device.get -> Dahlke.EtherCAT.Esi.EsiDevice?
+Dahlke.EtherCAT.Esi.EsiLookupResult.Device.init -> void
+Dahlke.EtherCAT.Esi.EsiLookupResult.Equals(Dahlke.EtherCAT.Esi.EsiLookupResult? other) -> bool
+Dahlke.EtherCAT.Esi.EsiLookupResult.EsiLookupResult(Dahlke.EtherCAT.Esi.EsiDevice? Device, Dahlke.EtherCAT.Esi.EsiStatus Status) -> void
+Dahlke.EtherCAT.Esi.EsiLookupResult.Status.get -> Dahlke.EtherCAT.Esi.EsiStatus
+Dahlke.EtherCAT.Esi.EsiLookupResult.Status.init -> void
+Dahlke.EtherCAT.Esi.EsiOptions
+Dahlke.EtherCAT.Esi.EsiOptions.Directory.get -> string?
+Dahlke.EtherCAT.Esi.EsiOptions.Directory.set -> void
+Dahlke.EtherCAT.Esi.EsiOptions.EsiOptions() -> void
+Dahlke.EtherCAT.Esi.EsiOptions.LookupBudgetMs.get -> int
+Dahlke.EtherCAT.Esi.EsiOptions.LookupBudgetMs.set -> void
+Dahlke.EtherCAT.Esi.EsiServiceCollectionExtensions
+Dahlke.EtherCAT.Esi.EsiStatus
+Dahlke.EtherCAT.Esi.EsiStatus.IdentityUnavailable = 2 -> Dahlke.EtherCAT.Esi.EsiStatus
+Dahlke.EtherCAT.Esi.EsiStatus.NotConfigured = 1 -> Dahlke.EtherCAT.Esi.EsiStatus
+Dahlke.EtherCAT.Esi.EsiStatus.NotFound = 3 -> Dahlke.EtherCAT.Esi.EsiStatus
+Dahlke.EtherCAT.Esi.EsiStatus.ReadFailed = 4 -> Dahlke.EtherCAT.Esi.EsiStatus
+Dahlke.EtherCAT.Esi.EsiStatus.Resolved = 0 -> Dahlke.EtherCAT.Esi.EsiStatus
+Dahlke.EtherCAT.Esi.IEsiCatalog
+Dahlke.EtherCAT.Esi.IEsiCatalog.LookupAsync(Dahlke.EtherCAT.Esi.EsiKey key, string! typeHint) -> System.Threading.Tasks.Task<Dahlke.EtherCAT.Esi.EsiLookupResult!>!
+const Dahlke.EtherCAT.Esi.EsiOptions.SectionName = "EtherCat:Esi" -> string!
+override Dahlke.EtherCAT.Esi.EsiDevice.Equals(object? obj) -> bool
+override Dahlke.EtherCAT.Esi.EsiDevice.GetHashCode() -> int
+override Dahlke.EtherCAT.Esi.EsiDevice.ToString() -> string!
+override Dahlke.EtherCAT.Esi.EsiKey.GetHashCode() -> int
+override Dahlke.EtherCAT.Esi.EsiLookupResult.Equals(object? obj) -> bool
+override Dahlke.EtherCAT.Esi.EsiLookupResult.GetHashCode() -> int
+override Dahlke.EtherCAT.Esi.EsiLookupResult.ToString() -> string!
+static Dahlke.EtherCAT.Esi.EsiDevice.operator !=(Dahlke.EtherCAT.Esi.EsiDevice? left, Dahlke.EtherCAT.Esi.EsiDevice? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiDevice.operator ==(Dahlke.EtherCAT.Esi.EsiDevice? left, Dahlke.EtherCAT.Esi.EsiDevice? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiKey.operator !=(Dahlke.EtherCAT.Esi.EsiKey left, Dahlke.EtherCAT.Esi.EsiKey right) -> bool
+static Dahlke.EtherCAT.Esi.EsiKey.operator ==(Dahlke.EtherCAT.Esi.EsiKey left, Dahlke.EtherCAT.Esi.EsiKey right) -> bool
+static Dahlke.EtherCAT.Esi.EsiLookupResult.operator !=(Dahlke.EtherCAT.Esi.EsiLookupResult? left, Dahlke.EtherCAT.Esi.EsiLookupResult? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiLookupResult.operator ==(Dahlke.EtherCAT.Esi.EsiLookupResult? left, Dahlke.EtherCAT.Esi.EsiLookupResult? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiServiceCollectionExtensions.AddEsiCatalog(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! section) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static readonly Dahlke.EtherCAT.Esi.EsiLookupResult.IdentityUnavailable -> Dahlke.EtherCAT.Esi.EsiLookupResult!
+static readonly Dahlke.EtherCAT.Esi.EsiLookupResult.NotConfigured -> Dahlke.EtherCAT.Esi.EsiLookupResult!
+static readonly Dahlke.EtherCAT.Esi.EsiLookupResult.NotFound -> Dahlke.EtherCAT.Esi.EsiLookupResult!
+static readonly Dahlke.EtherCAT.Esi.EsiLookupResult.ReadFailed -> Dahlke.EtherCAT.Esi.EsiLookupResult!
+~override Dahlke.EtherCAT.Esi.EsiKey.Equals(object obj) -> bool
+~override Dahlke.EtherCAT.Esi.EsiKey.ToString() -> string

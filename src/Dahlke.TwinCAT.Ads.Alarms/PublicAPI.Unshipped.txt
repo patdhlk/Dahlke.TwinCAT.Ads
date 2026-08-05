@@ -1,5 +1,1 @@
 #nullable enable
-Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmHandler
-Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmHandler.OnTransitionAsync(Dahlke.TwinCAT.Ads.Alarms.AlarmTransition! transition, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
-Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.AcknowledgeAsync(string! plcId, string! alarmKey, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
-static Dahlke.TwinCAT.Ads.Alarms.AlarmsServiceCollectionExtensions.AddAlarmHandler<THandler>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
