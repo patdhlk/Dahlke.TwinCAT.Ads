@@ -52,6 +52,10 @@ One case deliberately does **not** get its own status: a lookup that exhausts `L
 
 **Ranks candidates by the type hint.** A real ESI folder holds hundreds of files and the sought identity is in one of them. The hint (typically the slave's type string, e.g. `EL3204`) orders the search so the likely file is opened first, rather than parsing the folder alphabetically.
 
+The file name is read as the *pattern* Beckhoff writes, with an `x` standing where a digit varies — so `ELx9xx` scores against `EL1904` as though it were `EL19xx`. That is what keeps the cross-family files reachable: every TwinSAFE I/O terminal (`EL1904`, `EL2904`, `EK1914`, `EP1908`) is filed under `ELx9xx` / `EKx9xx` / `EPx9xx` rather than the `EL19xx` its model number suggests. A wildcard stands in for a digit only, so the literal series letter of `ELXxxxx` is not mistaken for one, and ties break toward the name spelling out the most leading digits — `EL1904` still tries `EL19xx` first, and only the miss falls through to `ELx9xx`.
+
+Ranking decides only the *order* files are opened; the identity match alone decides the answer, so a hint that ranks badly costs time, never correctness. The case that still gets no help is a non-Beckhoff vendor, whose inferred type is `Unknown` or `Vendor(0x…)` and prefixes no real file name — that lookup falls back to scanning the directory alphabetically, which is the whole-set worst case `LookupBudgetMs` exists to bound.
+
 **Bounds the work.** `LookupBudgetMs` caps a single lookup. The budget is checked *between files*, not once up front, so a large folder cannot be turned into an unbounded scan by one unlucky query — the lookup gives up and warns rather than blocking a request thread.
 
 **Parses each device at most once per process, and complains at most once per device.** Both are properties of a single shared instance, which is why `AddEsiCatalog` registers `IEsiCatalog` as a singleton. Any other lifetime silently loses them.
