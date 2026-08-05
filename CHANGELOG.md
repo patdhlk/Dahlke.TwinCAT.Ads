@@ -31,11 +31,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wins. 44 of the 142 files in the reference set use an `x` this way, so the miss was a class of
   devices rather than one unlucky slave.
 
+  Measured on the reference set (142 files, 827 MiB), cold, before and after:
+
+  | Slave | Candidate | MiB read | Cold lookup |
+  |---|---|---|---|
+  | `EL1904` before | 39 of 142 | 577 | 3452 ms |
+  | `EL1904` after | **3 of 142** | **8** | **98 ms** |
+
+  That is 67% of the default 5000 ms budget down to 2%. The gain is not confined to safety
+  terminals: reading the `x` also puts `EL1xxx.xml` and `EL2xxx.xml` first for the ordinary
+  terminals that share a file with them, where they previously ranked third behind `EL18xx` and
+  `EL19xx`. `EL1008` fell 42 ms → 3 ms, `EL2004` 257 ms → 83 ms, `EL7047` 446 ms → 234 ms, and
+  resolving all eight slaves of the reference rack went from 8 s to 1 s.
+
   This was never a wrong answer — ranking decides only the order files are searched, and the device
-  was always found eventually. What it cost was headroom: roughly 1.5× against the default budget
-  rather than the wide margin 5000 ms suggests, so a larger ESI set, a slower disk or a network
-  share was enough to report a device that *is* present as not found. It remains a file-name
-  heuristic, with its own blind spots; it is the systematic case that is now a hit.
+  was always found eventually. What it cost was headroom: 1.5× against the default budget rather
+  than the wide margin 5000 ms suggests, so a larger ESI set, a slower disk or a network share was
+  enough to report a device that *is* present as not found. That margin is now roughly 50×. It
+  remains a file-name heuristic, with its own blind spots; it is the systematic case that is now a
+  hit.
 
 ## [0.9.1] - 2026-08-05
 
