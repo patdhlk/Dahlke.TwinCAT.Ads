@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-08-05
+
+**No functional change.** Not one `.cs` file differs from 0.9.0 — all six packages are behaviourally
+identical to it, and there is nothing here to upgrade *for*. They carry a new version number only
+because this repository's release train tags and publishes every package together, so housekeeping
+that touches no library still ships as a version.
+
+Recorded rather than left silent, because a version with no entry is worse than a version with a
+short one: someone comparing 0.9.0 and 0.9.1 should be able to find out that the answer is "nothing",
+without diffing the packages to discover it.
+
+### Changed
+
+- **`PublicAPI.Shipped.txt` now records the API that 0.9.0 actually shipped.** 566 public members
+  across five packages had been released while still sitting in `PublicAPI.Unshipped.txt` — including
+  the entire surface of `Dahlke.TwinCAT.Ads.Testing`, `Dahlke.EtherCAT.Esi` and
+  `Dahlke.EtherCAT.Diagnostics`, which made their debut in 0.9.0 with an empty `Shipped.txt`.
+
+  Those two files exist to separate committed API from in-flight API, and after a release with
+  everything on the unshipped side they could not. The practical cost was that the next release's
+  additions would have been unreadable — indistinguishable from 0.9.0's in one undifferentiated
+  pile — and that a `*REMOVED*` marker was sitting in `Unshipped` describing a removal from a file it
+  was not in. No entry was lost or gained in the sweep, and the marker resolved rather than being
+  copied across: `AdsRawChannelSeed.Port.get -> int` is gone, its `int?` replacement is recorded.
+
+- **Zero warnings is now enforced by the build rather than by review.** `TreatWarningsAsErrors` is
+  set repository-wide, covering `src`, `tests`, `examples` and the out-of-solution prototype. Nothing
+  needed fixing to turn it on — Release, Debug, restore and the prototype all measured clean first.
+
+  What it changes in practice: `RS0017` and `RS0024`, which fire when a member recorded in a
+  `PublicAPI` file is removed or reshaped, were warnings. They could appear in a build log and be
+  merged anyway. They now fail the build, so a consumer compiling against a published package is
+  protected by the toolchain instead of by attention.
+
+### Fixed
+
+- The `[0.9.0]` heading in this file carried 0.8.0's date. It was written the day 0.8.0 shipped, and
+  three further changes landed in the section afterwards.
+
 ## [0.9.0] - 2026-08-04
 
 ### Added
