@@ -19,6 +19,40 @@
 
   <PropertyGroup>
     <!--
+      ZERO WARNINGS, ENFORCED. This repository has held every project at zero warnings since it
+      began, but until now only by review: nothing in the toolchain failed a build that emitted
+      one, so the discipline was exactly as durable as the next reviewer's attention. It measured
+      clean in Release and Debug the day this was switched on, so turning it on cost no fixes —
+      it only removes the possibility of drifting.
+
+      What this catches that review might not: RS0017 and RS0024, which fire when a member already
+      recorded in PublicAPI.Shipped.txt is removed or reshaped. Those are the diagnostics that
+      protect a consumer compiling against a released package, and they are warnings, so before
+      this they could have appeared in a build log and been merged anyway.
+
+      SCOPE IS DELIBERATELY EVERY PROJECT — src, tests, examples, prototypes. A warning in an
+      example is a warning a reader copies.
+
+      THE COST, STATED SO IT IS NOT A SURPRISE. A new SDK or analyzer release that introduces a
+      warning breaks the build with no change to this repository, and .github/workflows both
+      request FLOATING SDK bands (ci.yml a matrix of 8.0.x/9.0.x/10.0.x, release.yml 10.0.x), so
+      that can arrive unbidden. Two things make it tolerable rather than reckless:
+
+        * CI runs the full build on all three SDK bands on every push, so a new-SDK warning
+          surfaces there long before a release tag reaches release.yml, which uses a band CI
+          already covers.
+        * A global.json pin would remove the risk and is deliberately NOT used: it applies to the
+          whole repository, so it would defeat the very SDK matrix that provides the early
+          warning above.
+
+      If a future SDK does introduce a warning class that is genuinely not worth fixing, add it to
+      WarningsNotAsErrors with the reason beside it rather than turning this off.
+    -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
       Dependency version policy, stated once for the whole repository. Only the numbers live
       here — nothing is referenced from this file, so a project that does not want a package
       simply does not mention it.
