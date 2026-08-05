@@ -34,7 +34,12 @@ internal static class EsiCandidateRanker
             ? []
             : all.Select(path => (path, name: Strip(Path.GetFileNameWithoutExtension(path))))
                 .Where(f => f.name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(f => CommonPrefixLength(model, f.name))
+                .OrderByDescending(f => MatchLength(model, f.name))
+                // Reading x as a digit makes whole groups of names match to the same length, so
+                // this is now the key that separates them — and it separates them the right way
+                // round on its own: 'X' sorts after every digit, so the file that spells the digit
+                // out beats the file that wildcards it. Same ordinal fact that used to bury
+                // ELx9xx, once the score above stops burying it first.
                 .ThenBy(f => f.name, StringComparer.OrdinalIgnoreCase)
                 .Select(f => f.path);
 
@@ -72,10 +77,36 @@ internal static class EsiCandidateRanker
             ? fileName[VendorPrefix.Length..]
             : fileName;
 
-    private static int CommonPrefixLength(string a, string b)
+    /// <summary>
+    /// How far a file name tracks the model, reading the <c>x</c> Beckhoff writes where a family
+    /// digit would go as a stand-in for that digit: <c>ELx9xx</c> tracks <c>EL1904</c> all six
+    /// characters, not the two a literal comparison sees.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// That <c>x</c> is not noise in the vendor set — it marks a file that deliberately spans
+    /// families, and Beckhoff files EVERY TwinSAFE I/O terminal (EK1914, EL1904, EL2904, EP1908)
+    /// into one such file rather than into each family's own. Scored literally, those four share
+    /// only the leading letters with their own model, so the single file that holds them ranked
+    /// LAST within its family group instead of near the front: candidate 39 of 142 on the
+    /// reference set, 605 MB streamed and 3.3 s spent before the device was found. It made safety
+    /// terminals the devices least likely to resolve inside the lookup budget, which is the wrong
+    /// way round.
+    /// </para>
+    /// <para>
+    /// The wildcard stands for a digit and ONLY a digit. That limit is what keeps a longer, vaguer
+    /// name from winning on length where the model runs past the end of a shorter one: given
+    /// "EL1904-0000", an unrestricted <c>x</c> would let <c>ELXxxxx</c> match the <c>-</c> as well
+    /// and so outscore <c>EL19xx</c>.
+    /// </para>
+    /// </remarks>
+    private static int MatchLength(string model, string name)
     {
-        int n = Math.Min(a.Length, b.Length), i = 0;
-        while (i < n && char.ToUpperInvariant(a[i]) == char.ToUpperInvariant(b[i]))
+        int n = Math.Min(model.Length, name.Length), i = 0;
+
+        while (i < n
+            && (char.ToUpperInvariant(model[i]) == char.ToUpperInvariant(name[i])
+                || (name[i] is 'x' or 'X' && char.IsAsciiDigit(model[i]))))
         {
             i++;
         }

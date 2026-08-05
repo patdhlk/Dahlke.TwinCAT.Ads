@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2]
+
+### Fixed
+
+- **ESI candidate ranking now reads the `x` in a vendor file name as the digit it stands for, so
+  safety terminals stop being the devices least likely to resolve.**
+  ([#63](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/63)) `EsiCandidateRanker` orders ESI
+  files by the inferred device type so the right family file is opened first. Beckhoff writes every
+  TwinSAFE I/O terminal — `EK1914`, `EL1904`, `EL2904`, `EP1908` — into a single cross-family
+  `Beckhoff ELx9xx.xml` rather than into each family's own file, and an `x` sits exactly where the
+  family digit would be.
+
+  Compared literally, `ELx9xx` shared only `EL` with `EL1904`. Worse, `x` sorts after every digit in
+  an ordinal comparison, so the one file that actually held the device ranked *last within its own
+  family group* — candidate 39 of 142 on a reference Beckhoff set, streaming 605 MB and spending
+  3335 ms, 67% of the default 5000 ms `LookupBudgetMs`, on one slave. The contrast that proves it
+  was the file name and not the device: `EL6910` resolved in 35 ms, because the TwinSAFE *logic*
+  terminal lives in a normally named `Beckhoff EL69xx.xml`.
+
+  Scoring reads `x` as any single digit, which moves that file from the back of its family group to
+  just behind the files that spell out the model's own family digit. The existing name tiebreak
+  needed no change and now does the discriminating: `X` sorts after every digit, so where the
+  wildcard makes several names match to the same length, the one that spells the digit out still
+  wins. 44 of the 142 files in the reference set use an `x` this way, so the miss was a class of
+  devices rather than one unlucky slave.
+
+  This was never a wrong answer — ranking decides only the order files are searched, and the device
+  was always found eventually. What it cost was headroom: roughly 1.5× against the default budget
+  rather than the wide margin 5000 ms suggests, so a larger ESI set, a slower disk or a network
+  share was enough to report a device that *is* present as not found. It remains a file-name
+  heuristic, with its own blind spots; it is the systematic case that is now a hit.
+
 ## [0.9.1] - 2026-08-05
 
 **No functional change.** Not one `.cs` file differs from 0.9.0 — all six packages are behaviourally
