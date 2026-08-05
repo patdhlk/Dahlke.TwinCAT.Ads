@@ -1,1 +1,52 @@
 #nullable enable
+Dahlke.TwinCAT.Ads.Testing.PlcAssertionException
+Dahlke.TwinCAT.Ads.Testing.PlcAssertionException.PlcAssertionException() -> void
+Dahlke.TwinCAT.Ads.Testing.PlcAssertionException.PlcAssertionException(string! message) -> void
+Dahlke.TwinCAT.Ads.Testing.PlcAssertionException.PlcAssertionException(string! message, System.Exception! innerException) -> void
+Dahlke.TwinCAT.Ads.Testing.PlcWrite
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.<Clone>$() -> Dahlke.TwinCAT.Ads.Testing.PlcWrite!
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.Changed.get -> bool
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.Changed.init -> void
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.Deconstruct(out string! SymbolPath, out object? Value, out object? PreviousValue, out bool Changed) -> void
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.Equals(Dahlke.TwinCAT.Ads.Testing.PlcWrite? other) -> bool
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.PlcWrite(string! SymbolPath, object? Value, object? PreviousValue, bool Changed) -> void
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.PreviousValue.get -> object?
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.PreviousValue.init -> void
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.SymbolPath.get -> string!
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.SymbolPath.init -> void
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.Value.get -> object?
+Dahlke.TwinCAT.Ads.Testing.PlcWrite.Value.init -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlc
+Dahlke.TwinCAT.Ads.Testing.TestPlc.Connection(string! plcId) -> Dahlke.TwinCAT.Ads.IAdsConnection!
+Dahlke.TwinCAT.Ads.Testing.TestPlc.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Dahlke.TwinCAT.Ads.Testing.TestPlc.Pool.get -> Dahlke.TwinCAT.Ads.IAdsConnectionPool!
+Dahlke.TwinCAT.Ads.Testing.TestPlc.RawChannels.get -> Dahlke.TwinCAT.Ads.IAdsRawChannelFactory!
+Dahlke.TwinCAT.Ads.Testing.TestPlc.Target(string! plcId) -> Dahlke.TwinCAT.Ads.Testing.TestPlcTarget!
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder.ConfigureTarget(string! plcId, System.Action<Dahlke.TwinCAT.Ads.PlcTargetOptions!>! configure) -> Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder!
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder.StartAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Dahlke.TwinCAT.Ads.Testing.TestPlc!>!
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder.UseLoggerFactory(Microsoft.Extensions.Logging.ILoggerFactory! loggerFactory) -> Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder!
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder.WithTarget(string! plcId) -> Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder!
+Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder.WithTarget(string! plcId, System.Action<System.Collections.Generic.IDictionary<string!, object?>!>! seed) -> Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder!
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.AssertNotWritten(string! symbolPath) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.AssertWriteCount(string! symbolPath, int expected) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.AssertWritten(string! symbolPath) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.AssertWritten(string! symbolPath, object? expected) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.ClearWrites() -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.PlcId.get -> string!
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Read(string! symbolPath) -> object?
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Read<T>(string! symbolPath) -> T
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Seed(System.Collections.Generic.IReadOnlyDictionary<string!, object?>! values) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Seed(string! symbolPath, object? value) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.SetRpc(string! symbolPath, string! methodName, System.Func<object?[]!, Dahlke.TwinCAT.Ads.AdsRpcResult!>! handler) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Simulated.get -> Dahlke.TwinCAT.Ads.SimulatedAdsConnection!
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Write(string! symbolPath, object? value) -> void
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.Writes.get -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.Testing.PlcWrite!>!
+Dahlke.TwinCAT.Ads.Testing.TestPlcTarget.WritesTo(string! symbolPath) -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.Testing.PlcWrite!>!
+override Dahlke.TwinCAT.Ads.Testing.PlcWrite.Equals(object? obj) -> bool
+override Dahlke.TwinCAT.Ads.Testing.PlcWrite.GetHashCode() -> int
+override Dahlke.TwinCAT.Ads.Testing.PlcWrite.ToString() -> string!
+static Dahlke.TwinCAT.Ads.Testing.PlcWrite.operator !=(Dahlke.TwinCAT.Ads.Testing.PlcWrite? left, Dahlke.TwinCAT.Ads.Testing.PlcWrite? right) -> bool
+static Dahlke.TwinCAT.Ads.Testing.PlcWrite.operator ==(Dahlke.TwinCAT.Ads.Testing.PlcWrite? left, Dahlke.TwinCAT.Ads.Testing.PlcWrite? right) -> bool
+static Dahlke.TwinCAT.Ads.Testing.TestPlc.Create() -> Dahlke.TwinCAT.Ads.Testing.TestPlcBuilder!

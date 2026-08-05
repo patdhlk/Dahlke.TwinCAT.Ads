@@ -56,7 +56,10 @@ Dahlke.TwinCAT.Ads.Alarms.IAlarmTextCatalog.Resolve(string! alarmKey) -> string?
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect.AcknowledgeAsync(Dahlke.TwinCAT.Ads.Alarms.AlarmAcknowledgeContext! context, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<bool>!
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmDialect.Bind(Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext! context) -> System.Collections.Generic.IReadOnlyList<Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!>!
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmHandler
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmHandler.OnTransitionAsync(Dahlke.TwinCAT.Ads.Alarms.AlarmTransition! transition, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor
+Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.AcknowledgeAsync(string! plcId, string! alarmKey, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.AlarmChanged -> System.EventHandler<Dahlke.TwinCAT.Ads.Alarms.AlarmTransition!>?
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.GetOutstanding() -> System.Collections.Generic.IReadOnlyCollection<Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!>!
 Dahlke.TwinCAT.Ads.Alarms.IPlcAlarmMonitor.GetOutstanding(string! plcId) -> System.Collections.Generic.IReadOnlyCollection<Dahlke.TwinCAT.Ads.Alarms.PlcAlarm!>!
@@ -135,6 +138,7 @@ static Dahlke.TwinCAT.Ads.Alarms.AlarmBindContext.operator ==(Dahlke.TwinCAT.Ads
 static Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.operator !=(Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? left, Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? right) -> bool
 static Dahlke.TwinCAT.Ads.Alarms.AlarmTransition.operator ==(Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? left, Dahlke.TwinCAT.Ads.Alarms.AlarmTransition? right) -> bool
 static Dahlke.TwinCAT.Ads.Alarms.AlarmsHealthChecksBuilderExtensions.AddTwinCatAdsAlarmHealthCheck(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder! builder, string! name = "twincat_ads_alarms", Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity degradedAt = Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Warning, Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity unhealthyAt = Dahlke.TwinCAT.Ads.Alarms.AlarmSeverity.Error, System.Collections.Generic.IEnumerable<string!>? tags = null) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
+static Dahlke.TwinCAT.Ads.Alarms.AlarmsServiceCollectionExtensions.AddAlarmHandler<THandler>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static Dahlke.TwinCAT.Ads.Alarms.AlarmsServiceCollectionExtensions.AddTwinCatAdsAlarms(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.operator !=(Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? left, Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? right) -> bool
 static Dahlke.TwinCAT.Ads.Alarms.PlcAlarm.operator ==(Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? left, Dahlke.TwinCAT.Ads.Alarms.PlcAlarm? right) -> bool
