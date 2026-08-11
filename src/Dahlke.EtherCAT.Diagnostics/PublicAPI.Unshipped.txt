@@ -1,4 +1,18 @@
 #nullable enable
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.AbortCode.get -> uint?
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.AbortCode.init -> void
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Cia402StatusResult() -> void
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Error.get -> string?
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Error.init -> void
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Reason.get -> Dahlke.EtherCAT.Diagnostics.CoeFailureReason
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Reason.init -> void
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Status.get -> Dahlke.EtherCAT.Cia402.Cia402Status?
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Status.init -> void
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Statusword.get -> ushort?
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Statusword.init -> void
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Succeeded.get -> bool
+Dahlke.EtherCAT.Diagnostics.Cia402StatusResult.Succeeded.init -> void
 Dahlke.EtherCAT.Diagnostics.CoeFailureReason.SdoAbort = 4 -> Dahlke.EtherCAT.Diagnostics.CoeFailureReason
 Dahlke.EtherCAT.Diagnostics.CoeReadResult.AbortCode.get -> uint?
 Dahlke.EtherCAT.Diagnostics.CoeReadResult.AbortCode.init -> void
@@ -12,4 +26,5 @@ Dahlke.EtherCAT.Diagnostics.CoeWriteResult.Reason.get -> Dahlke.EtherCAT.Diagnos
 Dahlke.EtherCAT.Diagnostics.CoeWriteResult.Reason.init -> void
 Dahlke.EtherCAT.Diagnostics.CoeWriteResult.Succeeded.get -> bool
 Dahlke.EtherCAT.Diagnostics.CoeWriteResult.Succeeded.init -> void
+Dahlke.EtherCAT.Diagnostics.IEtherCatClient.ReadCia402StatusAsync(string! masterAmsNetId, ushort physicalAddress, int timeoutMs, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.EtherCAT.Diagnostics.Cia402StatusResult!>!
 Dahlke.EtherCAT.Diagnostics.IEtherCatClient.WriteCoeObjectAsync(string! masterAmsNetId, ushort physicalAddress, ushort index, byte subIndex, System.ReadOnlyMemory<byte> data, int timeoutMs, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.EtherCAT.Diagnostics.CoeWriteResult!>!

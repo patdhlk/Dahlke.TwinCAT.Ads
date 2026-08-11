@@ -1,0 +1,74 @@
+#nullable enable
+Dahlke.EtherCAT.Cia402.Cia402Command
+Dahlke.EtherCAT.Cia402.Cia402Command.DisableVoltage = 0 -> Dahlke.EtherCAT.Cia402.Cia402Command
+Dahlke.EtherCAT.Cia402.Cia402Command.EnableOperation = 4 -> Dahlke.EtherCAT.Cia402.Cia402Command
+Dahlke.EtherCAT.Cia402.Cia402Command.FaultReset = 5 -> Dahlke.EtherCAT.Cia402.Cia402Command
+Dahlke.EtherCAT.Cia402.Cia402Command.QuickStop = 1 -> Dahlke.EtherCAT.Cia402.Cia402Command
+Dahlke.EtherCAT.Cia402.Cia402Command.Shutdown = 2 -> Dahlke.EtherCAT.Cia402.Cia402Command
+Dahlke.EtherCAT.Cia402.Cia402Command.SwitchOn = 3 -> Dahlke.EtherCAT.Cia402.Cia402Command
+Dahlke.EtherCAT.Cia402.Cia402Controlword
+Dahlke.EtherCAT.Cia402.Cia402Controlword.Cia402Controlword() -> void
+Dahlke.EtherCAT.Cia402.Cia402Controlword.Cia402Controlword(Dahlke.EtherCAT.Cia402.Cia402Command Command, bool Halt) -> void
+Dahlke.EtherCAT.Cia402.Cia402Controlword.Command.get -> Dahlke.EtherCAT.Cia402.Cia402Command
+Dahlke.EtherCAT.Cia402.Cia402Controlword.Command.init -> void
+Dahlke.EtherCAT.Cia402.Cia402Controlword.Deconstruct(out Dahlke.EtherCAT.Cia402.Cia402Command Command, out bool Halt) -> void
+Dahlke.EtherCAT.Cia402.Cia402Controlword.Equals(Dahlke.EtherCAT.Cia402.Cia402Controlword other) -> bool
+Dahlke.EtherCAT.Cia402.Cia402Controlword.Halt.get -> bool
+Dahlke.EtherCAT.Cia402.Cia402Controlword.Halt.init -> void
+Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.CyclicSyncPosition = 8 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.CyclicSyncTorque = 10 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.CyclicSyncTorqueWithCommutationAngle = 11 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.CyclicSyncVelocity = 9 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.Homing = 6 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.InterpolatedPosition = 7 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.NoMode = 0 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.ProfilePosition = 1 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.ProfileTorque = 4 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.ProfileVelocity = 3 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402Mode.Velocity = 2 -> Dahlke.EtherCAT.Cia402.Cia402Mode
+Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402State.Fault = 7 -> Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402State.FaultReactionActive = 6 -> Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402State.NotReadyToSwitchOn = 0 -> Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402State.OperationEnabled = 4 -> Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402State.QuickStopActive = 5 -> Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402State.ReadyToSwitchOn = 2 -> Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402State.SwitchOnDisabled = 1 -> Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402State.SwitchedOn = 3 -> Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402State.Unknown = 8 -> Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402Status
+Dahlke.EtherCAT.Cia402.Cia402Status.Cia402Status() -> void
+Dahlke.EtherCAT.Cia402.Cia402Status.Cia402Status(Dahlke.EtherCAT.Cia402.Cia402State State, bool VoltageEnabled, bool Warning, bool Remote, bool TargetReached, bool InternalLimitActive) -> void
+Dahlke.EtherCAT.Cia402.Cia402Status.Deconstruct(out Dahlke.EtherCAT.Cia402.Cia402State State, out bool VoltageEnabled, out bool Warning, out bool Remote, out bool TargetReached, out bool InternalLimitActive) -> void
+Dahlke.EtherCAT.Cia402.Cia402Status.Equals(Dahlke.EtherCAT.Cia402.Cia402Status other) -> bool
+Dahlke.EtherCAT.Cia402.Cia402Status.InternalLimitActive.get -> bool
+Dahlke.EtherCAT.Cia402.Cia402Status.InternalLimitActive.init -> void
+Dahlke.EtherCAT.Cia402.Cia402Status.Remote.get -> bool
+Dahlke.EtherCAT.Cia402.Cia402Status.Remote.init -> void
+Dahlke.EtherCAT.Cia402.Cia402Status.State.get -> Dahlke.EtherCAT.Cia402.Cia402State
+Dahlke.EtherCAT.Cia402.Cia402Status.State.init -> void
+Dahlke.EtherCAT.Cia402.Cia402Status.TargetReached.get -> bool
+Dahlke.EtherCAT.Cia402.Cia402Status.TargetReached.init -> void
+Dahlke.EtherCAT.Cia402.Cia402Status.VoltageEnabled.get -> bool
+Dahlke.EtherCAT.Cia402.Cia402Status.VoltageEnabled.init -> void
+Dahlke.EtherCAT.Cia402.Cia402Status.Warning.get -> bool
+Dahlke.EtherCAT.Cia402.Cia402Status.Warning.init -> void
+Dahlke.EtherCAT.Cia402.MotionCia402
+override Dahlke.EtherCAT.Cia402.Cia402Controlword.GetHashCode() -> int
+override Dahlke.EtherCAT.Cia402.Cia402Status.GetHashCode() -> int
+static Dahlke.EtherCAT.Cia402.Cia402Controlword.operator !=(Dahlke.EtherCAT.Cia402.Cia402Controlword left, Dahlke.EtherCAT.Cia402.Cia402Controlword right) -> bool
+static Dahlke.EtherCAT.Cia402.Cia402Controlword.operator ==(Dahlke.EtherCAT.Cia402.Cia402Controlword left, Dahlke.EtherCAT.Cia402.Cia402Controlword right) -> bool
+static Dahlke.EtherCAT.Cia402.Cia402Status.operator !=(Dahlke.EtherCAT.Cia402.Cia402Status left, Dahlke.EtherCAT.Cia402.Cia402Status right) -> bool
+static Dahlke.EtherCAT.Cia402.Cia402Status.operator ==(Dahlke.EtherCAT.Cia402.Cia402Status left, Dahlke.EtherCAT.Cia402.Cia402Status right) -> bool
+static Dahlke.EtherCAT.Cia402.MotionCia402.DecodeControlword(ushort controlword) -> Dahlke.EtherCAT.Cia402.Cia402Controlword
+static Dahlke.EtherCAT.Cia402.MotionCia402.DecodeModeOfOperation(sbyte mode) -> Dahlke.EtherCAT.Cia402.Cia402Mode?
+static Dahlke.EtherCAT.Cia402.MotionCia402.DecodeStatusword(ushort statusword) -> Dahlke.EtherCAT.Cia402.Cia402Status
+static Dahlke.EtherCAT.Cia402.MotionCia402.DescribeControlword(ushort controlword) -> string!
+static Dahlke.EtherCAT.Cia402.MotionCia402.DescribeModeOfOperation(sbyte mode) -> string!
+static Dahlke.EtherCAT.Cia402.MotionCia402.DescribeStatusword(ushort statusword) -> string!
+static Dahlke.EtherCAT.Cia402.MotionCia402.EncodeCommand(Dahlke.EtherCAT.Cia402.Cia402Command command) -> ushort
+~override Dahlke.EtherCAT.Cia402.Cia402Controlword.Equals(object obj) -> bool
+~override Dahlke.EtherCAT.Cia402.Cia402Controlword.ToString() -> string
+~override Dahlke.EtherCAT.Cia402.Cia402Status.Equals(object obj) -> bool
+~override Dahlke.EtherCAT.Cia402.Cia402Status.ToString() -> string

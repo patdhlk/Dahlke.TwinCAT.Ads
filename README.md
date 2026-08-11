@@ -52,16 +52,18 @@ dotnet add package Dahlke.TwinCAT.Ads.Testing
 
 ### EtherCAT packages
 
-This repository also ships two EtherCAT packages. They are documented on their own package pages rather than here, because only one of them is about ADS at all:
+This repository also ships three EtherCAT packages. They are documented on their own package pages rather than here, because only one of them is about ADS at all:
 
 | Package | What it is |
 |---|---|
-| [`Dahlke.EtherCAT.Diagnostics`](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/src/Dahlke.EtherCAT.Diagnostics/README.md) | Master and slave diagnostics over ADS — topology, slave and port state, CRC and frame error counters, sync-unit faults, CoE reads and writes, and a change-event stream. Built on this library's [raw ADS channels](#raw-ads-channels), which is the only way to reach an EtherCAT master: there are no PLC symbols for any of it. |
+| [`Dahlke.EtherCAT.Diagnostics`](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/src/Dahlke.EtherCAT.Diagnostics/README.md) | Master and slave diagnostics over ADS — topology, slave and port state, CRC and frame error counters, sync-unit faults, CoE reads and writes, a decoded CiA-402 drive statusword, and a change-event stream. Built on this library's [raw ADS channels](#raw-ads-channels), which is the only way to reach an EtherCAT master: there are no PLC symbols for any of it. |
 | [`Dahlke.EtherCAT.Esi`](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/src/Dahlke.EtherCAT.Esi/README.md) | An ESI (EtherCAT Slave Information) device catalogue — parses vendor ESI XML and resolves a vendor/product/revision triple to a device description. **Depends on no ADS or TwinCAT package**; it is XML, options and logging. Usable on its own with nothing but a folder of ESI files. |
+| [`Dahlke.EtherCAT.Cia402`](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/src/Dahlke.EtherCAT.Cia402/README.md) | CiA-402 (DS402) drive profile decoders — statusword, controlword and modes of operation, as pure functions over integers. **Depends on nothing at all**, not even `Microsoft.Extensions.*`, so it decodes a drive word that arrived over CoE, SoE, CANopen or a log file equally well. |
 
 ```bash
-dotnet add package Dahlke.EtherCAT.Diagnostics   # pulls Dahlke.TwinCAT.Ads and Dahlke.EtherCAT.Esi
+dotnet add package Dahlke.EtherCAT.Diagnostics   # pulls Dahlke.TwinCAT.Ads, .Esi and .Cia402
 dotnet add package Dahlke.EtherCAT.Esi           # standalone
+dotnet add package Dahlke.EtherCAT.Cia402        # standalone, zero dependencies
 ```
 
 ## Quick Start
