@@ -72,6 +72,26 @@ Beckhoff's published set declare a genuine `0`, so summing draws across a segmen
 be unable to tell an unknown contributor from one that draws nothing. Aggregating per-device
 figures into a segment load against a segment budget is yours to do; this reports the figure.
 
+**Reports the declared CoE object dictionary.** `EsiDevice.ObjectDictionary` carries what
+`<Profile><Dictionary>` declares — per object its index, name, data type, bit size, access flags
+and default — which is the metadata a live SDO upload does not carry. Look one up without scanning:
+
+```csharp
+if (device.ObjectDictionary?.TryGetObject(0x1018, out var identity) == true)
+{
+    Console.WriteLine(identity.Name);                        // "Identity"
+    Console.WriteLine(identity.SubItems[1].Name);            // "Vendor ID"
+    Console.WriteLine(identity.SubItems[1].SubIndex);        // 1  -> render as 0x1018:01
+}
+```
+
+Record sub-items are nested under their parent, not flattened. `SubIndex` is nullable because ESI
+genuinely omits it for array members, whose indices are implied by `<ArrayInfo>` rather than
+stated — deriving one would be inference, so absence is reported as absence.
+
+`null` means the device declares no dictionary. A device declaring an *empty* one reports a
+non-null value with an empty `Objects` — a different answer, deliberately.
+
 ## Registration is not eager
 
 `AddEsiCatalog` does not resolve the catalogue. Whether a misconfigured ESI directory should be reported at startup or on first use is a hosting decision, so it is left to you:
