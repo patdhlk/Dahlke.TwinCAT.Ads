@@ -5,13 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2]
+## [0.10.0]
 
-> **Version number to confirm before release.** This section adds a member to the public
-> `IEtherCatClient` interface, which is source-breaking for anyone who *implements* it (additive for
-> everyone who only calls it), so a patch number understates it. `0.10.0` is the honest label; the
-> heading is left as it was found rather than renumbered on this branch, because which release this
-> ships in is a release decision.
+A minor, not the patch this section was opened as: it adds a member to the public
+`IEtherCatClient` interface. Additive for everyone who *calls* the interface — existing code
+compiles and behaves identically — and source-breaking for anyone who *implements* it, who gains one
+unimplemented method. The ESI ranking fix below was the whole of the release when it was numbered
+0.9.2 and is unchanged by the renumber.
 
 ### Added
 
