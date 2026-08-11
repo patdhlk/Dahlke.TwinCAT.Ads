@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    PLAIN XUNIT, and deliberately not the FluentAssertions/NSubstitute pair the two adopted EtherCAT
+    suites carry. Those came with Dahlke.EtherCAT.Esi and Dahlke.EtherCAT.Diagnostics when they were
+    adopted from patdhlk/adsify, and are kept THERE because rewriting working tests during a move is
+    how a move breaks them silently. This suite is new, so it follows the convention the rest of the
+    repository writes in.
+
+    There is also nothing here to substitute: the library under test is static pure functions, so a
+    test needs no clock, no logger and no fake. That is also why Microsoft.Extensions.TimeProvider.Testing
+    is absent, which every other test project in this repository references.
+  -->
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Dahlke.EtherCAT.Cia402\Dahlke.EtherCAT.Cia402.csproj" />
+  </ItemGroup>
+
+</Project>

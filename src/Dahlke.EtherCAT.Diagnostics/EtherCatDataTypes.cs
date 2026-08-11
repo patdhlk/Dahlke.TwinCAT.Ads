@@ -1,3 +1,5 @@
+using Dahlke.EtherCAT.Cia402;
+
 namespace Dahlke.EtherCAT.Diagnostics;
 
 /// <summary>
@@ -419,4 +421,63 @@ public enum CoeFailureReason
     /// away that distinction to save a comparison.
     /// </summary>
     SdoAbort,
+}
+
+/// <summary>
+/// Result of reading a CiA-402 drive's statusword (object <c>0x6041</c>) over CoE.
+/// </summary>
+/// <remarks>
+/// A thin decode over <see cref="CoeReadResult"/>, and it keeps that result's whole failure
+/// vocabulary rather than inventing one: <see cref="Reason"/>, <see cref="AbortCode"/> and
+/// <see cref="Error"/> are the CoE read's own, forwarded verbatim. A drive that has no mailbox, or
+/// has one and does not implement <c>0x6041</c>, or aborts the upload, is reported exactly as
+/// <c>ReadCoeObjectAsync</c> would report it — which matters, because "this is not a CiA-402 device"
+/// and "this drive refused the read" are different findings and the abort code is what separates
+/// them.
+/// </remarks>
+public sealed class Cia402StatusResult
+{
+    /// <summary>
+    /// Whether a statusword came back and was two bytes wide. False for every CoE failure, and also
+    /// for a slave that answered SHORT — see <see cref="Error"/>.
+    /// </summary>
+    public required bool Succeeded { get; init; }
+
+    /// <summary>
+    /// The decoded statusword, or <see langword="null"/> when <see cref="Succeeded"/> is false.
+    ///
+    /// <para>
+    /// A successful read can still carry <see cref="Cia402State.Unknown"/>: that is the DRIVE
+    /// reporting a word the CiA-402 state table does not name, which is an answer, not a failure.
+    /// Read <see cref="Statusword"/> when it happens.
+    /// </para>
+    /// </summary>
+    public Cia402Status? Status { get; init; }
+
+    /// <summary>
+    /// The raw word the drive answered with, or <see langword="null"/> on failure. Kept beside the
+    /// decode because it is the only thing worth having when <see cref="Cia402Status.State"/> comes
+    /// back <see cref="Cia402State.Unknown"/>, and because it is what goes in a bug report.
+    /// </summary>
+    public ushort? Statusword { get; init; }
+
+    /// <summary>Why the read failed, or <see cref="CoeFailureReason.None"/> when it succeeded.</summary>
+    public CoeFailureReason Reason { get; init; } = CoeFailureReason.None;
+
+    /// <inheritdoc cref="CoeWriteResult.AbortCode"/>
+    public uint? AbortCode { get; init; }
+
+    /// <summary>
+    /// Underlying ADS error or abort description, forwarded from the CoE read — plus one case of its
+    /// own: a slave that answered FEWER than two bytes is reported here, naming the length it gave.
+    ///
+    /// <para>
+    /// That case is <see cref="CoeFailureReason.AdsError"/> rather than a new
+    /// <see cref="CoeFailureReason"/> member, because nothing about the CoE transfer failed — the
+    /// mailbox answered, and what it said was too short to be a statusword. A caller that needs to
+    /// tell it apart from a transport fault has this string; a caller switching on
+    /// <see cref="Reason"/> is not handed a member it has never seen.
+    /// </para>
+    /// </summary>
+    public string? Error { get; init; }
 }

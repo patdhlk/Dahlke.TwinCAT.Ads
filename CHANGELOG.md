@@ -7,13 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.0]
 
-A minor, not the patch this section was opened as: it adds a member to the public
-`IEtherCatClient` interface. Additive for everyone who *calls* the interface — existing code
-compiles and behaves identically — and source-breaking for anyone who *implements* it, who gains one
-unimplemented method. The ESI ranking fix below was the whole of the release when it was numbered
-0.9.2 and is unchanged by the renumber.
+A minor, not the patch this section was opened as: it adds two members to the public
+`IEtherCatClient` interface and a seventh package to the repository. Additive for everyone who
+*calls* the interface — existing code compiles and behaves identically — and source-breaking for
+anyone who *implements* it, who gains two unimplemented methods. The ESI ranking fix below was the
+whole of the release when it was numbered 0.9.2 and is unchanged by the renumber.
 
 ### Added
+
+- **A new package, `Dahlke.EtherCAT.Cia402`: CiA-402 (DS402) drive profile decoders.**
+  ([#74](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/74)) Statusword, controlword and
+  modes of operation, as pure functions over integers. Nothing in the solution understood DS402
+  before this.
+
+  It exists because the decoding was being done by hand. Over the same Bonfiglioli ACU commissioning
+  that produced `WriteCoeObjectAsync` below, `0x0231`, `0x0237`, `0x0637`, `0x0250`, `0x0218` and
+  `0x1591` were read off `0x6041` and turned into "ready to switch on / operation enabled /
+  switch-on-disabled / fault" on paper, dozens of times. That work is mechanical and identical for
+  every DS402 drive.
+
+  **A separate package with an empty dependency list**, rather than a class inside
+  `Dahlke.EtherCAT.Diagnostics`. Not even `Microsoft.Extensions.*` — there is no configuration to
+  bind, nothing to log, no I/O to fail and no state between calls, which is one step further than
+  `Dahlke.EtherCAT.Esi`, whose independence stops at "no ADS". So a caller decoding a drive word that
+  arrived over SoE, CANopen, a serial gateway or yesterday's log file pays nothing for an EtherCAT
+  transport they are not using.
+
+  Three things in it are deliberately not what the issue proposed, each because the standard forced
+  it:
+
+  | | |
+  |---|---|
+  | `Cia402State` has a ninth member, `Unknown` | The CiA-402 state table does **not** cover all 65536 statuswords, and real drives produce words outside it. `0x1591`, from the drive above, has bit 0 set while quick stop is clear — no row admits that. Reporting the nearest row would fabricate a state the drive is not in, which is the exact failure this package exists to prevent. `DescribeStatusword` carries the raw word (`"Unknown(0x1591): voltage enabled, warning, target reached"`), and the flag bits decode either way. |
+  | `Cia402Command` has six members, not the nine sketched in the issue | The controlword decode is **total** — every one of the 65536 words names exactly one command — so `None` and `Unknown` would be unreachable. There is also no `DisableOperation`: the standard lists "Switch on" and "Disable operation" as the *identical* pattern `0xxx0111` (transitions 3 and 5), told apart only by the state the drive is in. A member for a distinction one word cannot make would encode to the same value and could never be decoded back, breaking the round-trip property `EncodeCommand` is tested against. |
+  | `DecodeModeOfOperation` returns `Cia402Mode?` | `null` for anything CiA-402 leaves undefined — the reserved `5`, `12` and up, and every negative value, which the standard hands to the manufacturer. A `ManufacturerSpecific` member would throw away the vendor mode's **number**, the only part that carries information, which the caller already holds. `DescribeModeOfOperation` never returns null and keeps it: `"Manufacturer-specific (-2)"`, `"Reserved (12)"`. |
+
+  The issue asked for decode only; `EncodeCommand` is here too, because driving the state machine
+  forward is what the commissioning was actually doing — `0x0006`, `0x0007`, `0x000F` typed by hand.
+  It is the exact inverse of `DecodeControlword`, and the round trip is pinned per command. It leaves
+  every don't-care bit clear, so it can never set halt: a command that quietly stopped the drive
+  would be worse than no helper at all.
+
+  **Fully covered without hardware, and the coverage is exhaustive rather than sampled.** 107 tests,
+  including sweeps over all 65536 words asserting that the flags are exactly their bits, that the
+  eight state-table rows are mutually exclusive, that `Unknown` appears exactly when no row matches,
+  and that manufacturer and mode-specific bits change nothing. The six words above are pinned as
+  literals, since they are the only inputs in the suite that a real drive actually sent.
+
+- **`IEtherCatClient` can read a CiA-402 drive's statusword and hand back the decoded state.**
+  ([#74](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/74)) `ReadCia402StatusAsync` reads
+  `0x6041` and returns a `Cia402StatusResult` carrying a decoded `Cia402Status`, the raw word, and
+  the CoE read's own failure vocabulary — `Reason`, `AbortCode`, `Error` — forwarded verbatim.
+
+  It delegates to `ReadCoeObjectAsync` rather than reimplementing the transport, so the ADS-port
+  addressing, the abort recognition, the timeout-means-no-mailbox rule, the retry and the logging are
+  the read's and cannot drift from it. `Dahlke.EtherCAT.Diagnostics` gains a `ProjectReference` on the
+  new package; the direction is one-way and stays that way.
+
+  Two behaviours worth stating. A **successful** read can carry `Cia402State.Unknown` — the drive
+  reporting an unnamed word is an answer, not a failure, and `Statusword` is what to read when it
+  happens. And a slave answering **fewer than two bytes** is reported as a failure rather than
+  decoded: `ReadCoeObjectAsync` reports a short answer as a success with fewer bytes, and inventing
+  the high byte would fabricate the remote and target-reached flags into a plausible-looking state.
+  That case is `CoeFailureReason.AdsError` with an `Error` naming the length, not a new enum member —
+  nothing about the CoE transfer failed, and a caller switching on `Reason` is not handed a member it
+  has never seen.
+
+  It does **not** verify the slave is a drive. `0x6041` on a non-drive either does not exist or means
+  something else; reading `0x1000` first would double the round trips for every caller to catch a
+  misconfiguration the caller already knows about. Like the CoE calls it wraps, it is on-demand only
+  and must not be called from the polling loop.
+
+  **Not verified against hardware in this repository** — the rack these notes come from has no DS402
+  drive. The decode is exhaustively tested against the standard, and the read is covered in
+  simulation: the statusword round-trips through the seeded raw-channel store, the addressing is
+  pinned (a one-digit change to the object index fails eight tests), and every failure shape is
+  classified. What is untested is a real drive answering.
 
 - **`IEtherCatClient` can now write CoE objects, and reports the slave's own SDO abort code when it
   refuses.** ([#73](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/73)) The client could read

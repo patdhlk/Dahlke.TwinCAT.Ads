@@ -46,7 +46,7 @@ public sealed class TopologyEndpoint(IEtherCatClient client)
 
 | | |
 |---|---|
-| `IEtherCatClient` | One-shot reads: masters, master state, configured vs. **scanned** slaves, per-slave detail, error counters, sync units, CoE objects. Counters are resettable and CoE objects are writable. |
+| `IEtherCatClient` | One-shot reads: masters, master state, configured vs. **scanned** slaves, per-slave detail, error counters, sync units, CoE objects, and a CiA-402 drive's decoded statusword. Counters are resettable and CoE objects are writable. |
 | `IEtherCatCache` | The last snapshot the monitor took, so a request path never has to touch the bus. |
 | `IEtherCatMonitor` | The polling loop, registered as a hosted service. Re-arm a CRC notification with `ClearCrcNotification`. |
 | `IEtherCatEvent` | The change stream — slave present/absent, slave and master state changes, CRC threshold exceeded, sync-unit fault, diagnostics degraded. |
@@ -73,6 +73,24 @@ if (!write.Succeeded && write.Reason == CoeFailureReason.SdoAbort)
 **A refusal is a result, not an exception**, and the slave's own reason is the point. `Reason` separates a slave with no mailbox from an object that is not in its dictionary from an `SdoAbort` — and an abort carries the device's verbatim code in `AbortCode` (`0x06010002` read-only object, `0x06090030` value out of range, `0x08000021` local control), with the ETG.1000-6 description in `Error`. During commissioning that code is the difference between "fix the value" and "put the drive back in remote".
 
 Three things this deliberately does not do: it does not read the value back (a device may clamp, round, or store to a shadow copy pending a save to 0x1010), it does not encode CoE data types for you, and it does not suppress the raw channel's retry — so a write that gets no answer can reach the slave twice. That is safe for a parameter store and wrong for an object whose write is a command; set `RawChannels:RetryCount` to 0 in a host that writes those.
+
+## Reading a drive's CiA-402 state
+
+`ReadCia402StatusAsync` reads object `0x6041` and hands back the decoded drive state instead of two bytes:
+
+```csharp
+var status = await client.ReadCia402StatusAsync(
+    master.AmsNetId, physicalAddress: 1004, timeoutMs: 3000, ct);
+
+if (status.Succeeded && status.Status!.Value.State == Cia402State.Fault)
+    logger.LogWarning("drive is faulted: 0x{Word:X4}", status.Statusword);
+```
+
+It is a convenience over `ReadCoeObjectAsync` and nothing more — same ADS-port addressing, same on-demand-only rule, same retry, and the CoE read's whole failure vocabulary (`Reason`, `AbortCode`, `Error`) forwarded untouched. The decoding itself lives in [`Dahlke.EtherCAT.Cia402`](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/src/Dahlke.EtherCAT.Cia402/README.md), which this package depends on and which depends on nothing: use it directly if you already have the word.
+
+Two cases worth knowing. A successful read can carry `Cia402State.Unknown` — that is the *drive* reporting a word the CiA-402 state table does not name, which is an answer, so read `Statusword` when it happens. And a slave that answers *fewer than two bytes* is reported as a failure rather than decoded, because inventing the high byte would fabricate the remote and target-reached flags.
+
+Nothing here checks that the slave is a drive at all: `0x6041` on a non-drive either does not exist (`ObjectNotFound`, or an abort) or means something else, and reading `0x1000` first to find out would double the round trips for every caller.
 
 ## Turning the polling off
 

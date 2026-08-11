@@ -168,4 +168,39 @@ public interface IEtherCatClient
         ReadOnlyMemory<byte> data,
         int timeoutMs,
         CancellationToken ct);
+
+    /// <summary>
+    /// Reads a CiA-402 drive's statusword (object <c>0x6041</c>) and decodes it into the drive's
+    /// state and flags.
+    ///
+    /// <para>
+    /// A convenience over <see cref="ReadCoeObjectAsync"/> and nothing more: same addressing (the
+    /// slave's fixed address as the <b>ADS port</b>), same index group, same on-demand-only rule,
+    /// same retry, and the CoE read's own failure vocabulary forwarded verbatim on
+    /// <see cref="Cia402StatusResult"/>. It exists because the two lines it replaces — read two
+    /// bytes, then decode them little-endian — were written by hand dozens of times over one
+    /// commissioning, and the second line is where the mistakes were.
+    /// </para>
+    /// <para>
+    /// <b>It does not verify the slave is a drive.</b> Object <c>0x6041</c> on a device that is not
+    /// a CiA-402 drive either does not exist (reported as
+    /// <see cref="CoeFailureReason.ObjectNotFound"/> or an abort) or means something else entirely,
+    /// in which case this decodes whatever two bytes came back. Nothing here reads the device's
+    /// profile number (<c>0x1000</c>) first, because that would double the round trips for every
+    /// caller to catch a misconfiguration the caller already knows about.
+    /// </para>
+    /// <para>
+    /// <b>Never call this from a polling loop</b> — it is a mailbox transfer, exactly like the CoE
+    /// read it wraps, and a slave without a mailbox answers by timing out.
+    /// </para>
+    /// </summary>
+    /// <param name="masterAmsNetId">The EtherCAT master's own AMS Net ID.</param>
+    /// <param name="physicalAddress">The drive's fixed address, used as the ADS port.</param>
+    /// <param name="timeoutMs">Bound for EACH attempt — see <c>EtherCatClient</c> on retry.</param>
+    /// <param name="ct">Cancels the operation, and is the one input that surfaces as an exception.</param>
+    Task<Cia402StatusResult> ReadCia402StatusAsync(
+        string masterAmsNetId,
+        ushort physicalAddress,
+        int timeoutMs,
+        CancellationToken ct);
 }

@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- What differs per package; the rest is in src/Directory.Build.props -->
+    <PackageId>Dahlke.EtherCAT.Cia402</PackageId>
+    <Description>CiA-402 (DS402) drive profile decoders — turns a statusword, controlword or modes-of-operation byte into the state, command and mode it stands for. Pure functions over integers: no ADS, no TwinCAT, no EtherCAT transport, and no package dependencies at all.</Description>
+    <PackageTags>CiA402;DS402;EtherCAT;CANopen;Drive;Servo;Motion;Automation;Fieldbus</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <!--
+    NO InternalsVisibleTo, unlike both Dahlke.EtherCAT packages beside it. There are no internals to
+    grant: every type here is public and every method is a pure function of its arguments, so the
+    test project reaches everything through the same surface a consumer does. A grant would only
+    make it possible to test something a consumer cannot reach.
+  -->
+
+  <!--
+    THE ONLY PACKAGEREFERENCE IS THE API TRACKER, and that one is PrivateAssets=all, so this package
+    ships with an EMPTY dependency list on every target framework. That is not an accident of it
+    being small — it is the reason it is its own package rather than a class inside
+    Dahlke.EtherCAT.Diagnostics.
+
+    Dahlke.EtherCAT.Esi makes the weaker version of this argument next door: it depends on no ADS or
+    Beckhoff package, but it does take four Microsoft.Extensions references for options and logging.
+    This library needs neither. It has no configuration to bind, nothing to log, no I/O to fail, and
+    no state to hold between calls — a statusword goes in and a decoded record comes out. So the
+    dependency list stays empty, and a caller decoding a drive word over SoE, CANopen, a serial
+    gateway, or a log file from last week pays nothing for the EtherCAT transport they are not using.
+
+    Keep it that way. A logger or an options type here would put a dependency in front of every one
+    of those callers to serve a decode that cannot fail.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="4.14.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

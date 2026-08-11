@@ -5,6 +5,18 @@ using System.Collections.Concurrent;
 using System.Text;
 using TwinCAT.Ads;
 
+// AN ALIAS, not a plain `using Dahlke.EtherCAT.Cia402`, and it cannot be tidied into one. The
+// decoder package's static class is named Cia402 INSIDE a namespace also named
+// Dahlke.EtherCAT.Cia402, and C# resolves a bare `Cia402` here by walking the enclosing namespaces
+// first: Dahlke.EtherCAT contains a member namespace called Cia402, so the name binds to the
+// NAMESPACE and `Cia402.DecodeStatusword` fails to compile with CS0234 — measured, not predicted.
+// Only code inside Dahlke.EtherCAT.* hits this; a consumer in their own namespace writes
+// `Cia402.DecodeStatusword` with no ceremony, which is the API issue #74 asked for.
+//
+// Ds402 rather than an arbitrary name because it is what the profile is also called — the CANopen
+// drive profile CiA-402 was DSP-402/DS-402, and drive manuals still say DS402.
+using Ds402 = Dahlke.EtherCAT.Cia402.Cia402;
+
 namespace Dahlke.EtherCAT.Diagnostics;
 
 /// <summary>
@@ -102,6 +114,10 @@ namespace Dahlke.EtherCAT.Diagnostics;
 ///     actually received the first write and only lost the answer cannot tell this apart from a
 ///     genuine second request. Set <c>RawChannels:RetryCount</c> to 0 for a host that writes such
 ///     objects.</description></item>
+///   <item><term><see cref="ReadCia402StatusAsync"/></term><description>Whatever
+///     <see cref="ReadCoeObjectAsync"/> does, exactly — it delegates to it and adds no transport of
+///     its own. Listed anyway so the table stays a complete census of the call sites, rather than
+///     leaving a reader to work out that one of them is not really a call site.</description></item>
 /// </list>
 /// See <c>DEVELOPMENT.md</c>'s "<c>RawChannels</c>" section for the same table aimed at an
 /// operator tuning <c>appsettings.json</c>.
@@ -1020,6 +1036,70 @@ internal sealed class EtherCatClient : IEtherCatClient
             };
         }
     }
+
+    /// <inheritdoc/>
+    public async Task<Cia402StatusResult> ReadCia402StatusAsync(
+        string masterAmsNetId,
+        ushort physicalAddress,
+        int timeoutMs,
+        CancellationToken ct)
+    {
+        // DELIBERATELY delegating rather than reaching for the channel directly. Everything that
+        // makes the CoE read correct — the ADS-port addressing, the abort recognition, the
+        // timeout-means-no-mailbox rule, the retry, the logging — is one method away, and a second
+        // copy of it here is a second place for it to drift. What this method adds is two bytes
+        // becoming a state.
+        var read = await ReadCoeObjectAsync(
+                masterAmsNetId, physicalAddress, StatuswordIndex, subIndex: 0x00,
+                timeoutMs, maxBytes: StatuswordBytes, ct)
+            .ConfigureAwait(false);
+
+        if (!read.Succeeded)
+        {
+            return new Cia402StatusResult
+            {
+                Succeeded = false,
+                Reason = read.Reason,
+                AbortCode = read.AbortCode,
+                Error = read.Error,
+            };
+        }
+
+        // A SHORT answer is a success at the ADS layer: ReadCoeObjectAsync reports however many
+        // bytes came back and does not require the buffer to be filled. One byte is not a statusword
+        // — decoding it would fabricate the high byte, and the high byte holds the remote and
+        // target-reached flags, so the fabrication would read as a plausible drive state.
+        if (read.Data.Length < StatuswordBytes)
+        {
+            _logger.LogWarning(
+                "CiA-402 statusword read from slave {Addr} on {AmsNetId} answered {Bytes}b, expected {Expected}b",
+                physicalAddress, masterAmsNetId, read.Data.Length, StatuswordBytes);
+
+            return new Cia402StatusResult
+            {
+                Succeeded = false,
+                Reason = CoeFailureReason.AdsError,
+                Error = $"Statusword 0x{StatuswordIndex:X4} answered {read.Data.Length} byte(s), expected {StatuswordBytes}",
+            };
+        }
+
+        var statusword = BinaryPrimitives.ReadUInt16LittleEndian(read.Data);
+        var status = Ds402.DecodeStatusword(statusword);
+
+        _logger.LogDebug("CiA-402 statusword 0x{Word:X4} from slave {Addr} decodes as {Description}",
+            statusword, physicalAddress, Ds402.DescribeStatusword(statusword));
+
+        return new Cia402StatusResult
+        {
+            Succeeded = true,
+            Statusword = statusword,
+            Status = status,
+        };
+    }
+
+    /// <summary>CiA-402 statusword — a UINT16, so two bytes, little-endian like every CoE value.</summary>
+    private const ushort StatuswordIndex = 0x6041;
+    private const int StatuswordBytes = 2;
 
     /// <summary>
     /// Classifies a CoE read or write failure. Observed on a live EK1100 bus: a mailbox-less

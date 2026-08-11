@@ -23,6 +23,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      Dahlke.EtherCAT.Cia402 is a decoder with an EMPTY dependency list, so this reference adds one
+      assembly to a consumer's output and nothing else — no transitive package, no version to
+      reconcile. It is here because ReadCia402StatusAsync answers with a decoded Cia402Status rather
+      than two raw bytes, and the direction matters: Diagnostics depends on Cia402, never the
+      reverse. A drive decoder that needed an ADS transport to decode a statusword would be useless
+      to the SoE, CANopen and log-file callers that are the point of it being its own package.
+    -->
+    <ProjectReference Include="../Dahlke.EtherCAT.Cia402/Dahlke.EtherCAT.Cia402.csproj" />
     <ProjectReference Include="../Dahlke.EtherCAT.Esi/Dahlke.EtherCAT.Esi.csproj" />
     <!--
       A ProjectReference now, where the adsify original carried a PackageReference to
