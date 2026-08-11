@@ -27,28 +27,35 @@ public class EsiProcessDataTests
     }
 
     // #67: direction comes from the element name and is modelled explicitly, not left for a
-    // consumer to infer from a string.
+    // consumer to infer from a string. The fixture carries two <RxPdo> (0x1600, 0x1601) and one
+    // <TxPdo> (0x1A00), so this also confirms grouping copes with more than one PDO per direction.
     [Fact]
     public async Task Parse_groups_pdos_by_direction_taken_from_the_element_name()
     {
         var processData = await El3204ProcessDataAsync();
 
-        processData.Pdos.Should().HaveCount(2);
+        processData.Pdos.Should().HaveCount(3);
         processData.Pdos.Single(p => p.Direction == EsiPdoDirection.Transmit).Index.Should().Be(0x1A00);
-        processData.Pdos.Single(p => p.Direction == EsiPdoDirection.Receive).Index.Should().Be(0x1600);
+        processData.Pdos.Where(p => p.Direction == EsiPdoDirection.Receive)
+            .Select(p => p.Index).Should().BeEquivalentTo(new ushort[] { 0x1600, 0x1601 });
     }
 
-    // The fixture deliberately lists <RxPdo> BEFORE <TxPdo> — a naive "collect all TxPdo, then
-    // all RxPdo" implementation would still pass every other test in this file (they all match by
-    // direction, not position), so this is the one test that pins the parser to the file's own
-    // document order rather than to element name.
+    // The fixture lists Rx, Tx, Rx (0x1600, 0x1A00, 0x1601) — deliberately not one PDO per
+    // direction. Grouping ALL Tx then ALL Rx, or ALL Rx then ALL Tx, both disagree with this order,
+    // so unlike a fixture with a single PDO per direction, no grouping strategy survives it: only
+    // the file's own document order does.
     [Fact]
     public async Task Parse_reports_pdos_in_the_files_own_document_order()
     {
         var processData = await El3204ProcessDataAsync();
 
+        processData.Pdos.Should().HaveCount(3);
         processData.Pdos[0].Direction.Should().Be(EsiPdoDirection.Receive);
+        processData.Pdos[0].Index.Should().Be(0x1600);
         processData.Pdos[1].Direction.Should().Be(EsiPdoDirection.Transmit);
+        processData.Pdos[1].Index.Should().Be(0x1A00);
+        processData.Pdos[2].Direction.Should().Be(EsiPdoDirection.Receive);
+        processData.Pdos[2].Index.Should().Be(0x1601);
     }
 
     [Fact]
@@ -61,17 +68,22 @@ public class EsiProcessDataTests
         tx.Fixed.Should().BeTrue();
         tx.Mandatory.Should().BeTrue();
 
+        // The one entry in this PDO that carries a <Comment>.
+        EsiPdoEntry underrange = tx.Entries[0];
+        underrange.Comment.Should().Be("Underrange event active");
+
         EsiPdoEntry value = tx.Entries[2];
         value.Index.Should().Be(0x6000);
         value.SubIndex.Should().Be(17);
         value.BitLength.Should().Be(16);
         value.Name.Should().Be("Value");
         value.DataType.Should().Be("INT");
+        value.Comment.Should().BeNull();
     }
 
     // A padding entry is <Index>#x0</Index> with a bit length and nothing else. Dropping it would
     // silently corrupt any consumer computing bit offsets down the PDO, so it is kept with its
-    // three absent fields reported as null.
+    // four absent fields reported as null.
     [Fact]
     public async Task Parse_keeps_padding_entries_rather_than_dropping_them()
     {
@@ -86,6 +98,7 @@ public class EsiProcessDataTests
         padding.SubIndex.Should().BeNull();
         padding.Name.Should().BeNull();
         padding.DataType.Should().BeNull();
+        padding.Comment.Should().BeNull();
     }
 
     // The fixture's TxPdo carries a fourth <Entry> with an <Index> but no <BitLen> — malformed,
@@ -114,24 +127,25 @@ public class EsiProcessDataTests
     }
 
     // 37,541 of 58,128 PDOs in Beckhoff's published set carry no Sm attribute, so this is the
-    // majority case, not an edge case.
+    // majority case, not an edge case. Targeted by Index, not Direction: the fixture now carries
+    // two <RxPdo> (0x1600, 0x1601), so Direction alone no longer picks one.
     [Fact]
     public async Task Parse_reports_a_pdo_with_no_sm_attribute_as_unassigned()
     {
         var processData = await El3204ProcessDataAsync();
 
-        processData.Pdos.Single(p => p.Direction == EsiPdoDirection.Receive)
+        processData.Pdos.Single(p => p.Index == 0x1600)
             .SyncManager.Should().BeNull();
     }
 
-    // The fixture's RxPdo carries Fixed="1" but no Mandatory attribute at all, so the nullable
-    // must come back null rather than defaulting to false.
+    // The fixture's 0x1600 RxPdo carries Fixed="1" but no Mandatory attribute at all, so the
+    // nullable must come back null rather than defaulting to false.
     [Fact]
     public async Task Parse_reports_no_mandatory_attribute_as_null()
     {
         var processData = await El3204ProcessDataAsync();
 
-        EsiPdo rx = processData.Pdos.Single(p => p.Direction == EsiPdoDirection.Receive);
+        EsiPdo rx = processData.Pdos.Single(p => p.Index == 0x1600);
         rx.Fixed.Should().BeTrue();
         rx.Mandatory.Should().BeNull();
     }
@@ -156,6 +170,20 @@ public class EsiProcessDataTests
         // This is the attribute-level twin of Parse_keeps_padding_entries_rather_than_dropping_them's
         // element-level zero-vs-null pin.
         processData.SyncManagers[2].DefaultSize.Should().Be(0);
+    }
+
+    // "MBoxOut" declares distinct MinSize and MaxSize values. Asserting only one of the two, or
+    // asserting them equal, would still pass if the parser swapped them; 3,222 of 7,222 real sync
+    // managers in Beckhoff's published set declare MinSize != MaxSize.
+    [Fact]
+    public async Task Parse_does_not_swap_min_and_max_size()
+    {
+        var processData = await El3204ProcessDataAsync();
+
+        EsiSyncManager mboxOut = processData.SyncManagers[0];
+        mboxOut.Name.Should().Be("MBoxOut");
+        mboxOut.MinSize.Should().Be(34);
+        mboxOut.MaxSize.Should().Be(128);
     }
 
     [Fact]
