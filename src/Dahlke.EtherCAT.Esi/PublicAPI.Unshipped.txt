@@ -63,13 +63,102 @@ Dahlke.EtherCAT.Esi.EsiObjectSubItem.SubIndex.get -> byte?
 Dahlke.EtherCAT.Esi.EsiObjectSubItem.SubIndex.init -> void
 Dahlke.EtherCAT.Esi.EsiObjectSubItem.WriteRestrictions.get -> string?
 Dahlke.EtherCAT.Esi.EsiObjectSubItem.WriteRestrictions.init -> void
+Dahlke.EtherCAT.Esi.EsiPdo
+Dahlke.EtherCAT.Esi.EsiPdo.<Clone>$() -> Dahlke.EtherCAT.Esi.EsiPdo!
+Dahlke.EtherCAT.Esi.EsiPdo.Deconstruct(out Dahlke.EtherCAT.Esi.EsiPdoDirection Direction, out ushort Index, out string? Name, out int? SyncManager, out bool? Fixed, out bool? Mandatory, out System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Esi.EsiPdoEntry!>! Entries) -> void
+Dahlke.EtherCAT.Esi.EsiPdo.Direction.get -> Dahlke.EtherCAT.Esi.EsiPdoDirection
+Dahlke.EtherCAT.Esi.EsiPdo.Direction.init -> void
+Dahlke.EtherCAT.Esi.EsiPdo.Entries.get -> System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Esi.EsiPdoEntry!>!
+Dahlke.EtherCAT.Esi.EsiPdo.Entries.init -> void
+Dahlke.EtherCAT.Esi.EsiPdo.Equals(Dahlke.EtherCAT.Esi.EsiPdo? other) -> bool
+Dahlke.EtherCAT.Esi.EsiPdo.EsiPdo(Dahlke.EtherCAT.Esi.EsiPdoDirection Direction, ushort Index, string? Name, int? SyncManager, bool? Fixed, bool? Mandatory, System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Esi.EsiPdoEntry!>! Entries) -> void
+Dahlke.EtherCAT.Esi.EsiPdo.Fixed.get -> bool?
+Dahlke.EtherCAT.Esi.EsiPdo.Fixed.init -> void
+Dahlke.EtherCAT.Esi.EsiPdo.Index.get -> ushort
+Dahlke.EtherCAT.Esi.EsiPdo.Index.init -> void
+Dahlke.EtherCAT.Esi.EsiPdo.Mandatory.get -> bool?
+Dahlke.EtherCAT.Esi.EsiPdo.Mandatory.init -> void
+Dahlke.EtherCAT.Esi.EsiPdo.Name.get -> string?
+Dahlke.EtherCAT.Esi.EsiPdo.Name.init -> void
+Dahlke.EtherCAT.Esi.EsiPdo.SyncManager.get -> int?
+Dahlke.EtherCAT.Esi.EsiPdo.SyncManager.init -> void
+Dahlke.EtherCAT.Esi.EsiPdoDirection
+Dahlke.EtherCAT.Esi.EsiPdoDirection.Receive = 1 -> Dahlke.EtherCAT.Esi.EsiPdoDirection
+Dahlke.EtherCAT.Esi.EsiPdoDirection.Transmit = 0 -> Dahlke.EtherCAT.Esi.EsiPdoDirection
+Dahlke.EtherCAT.Esi.EsiPdoEntry
+Dahlke.EtherCAT.Esi.EsiPdoEntry.<Clone>$() -> Dahlke.EtherCAT.Esi.EsiPdoEntry!
+Dahlke.EtherCAT.Esi.EsiPdoEntry.BitLength.get -> int
+Dahlke.EtherCAT.Esi.EsiPdoEntry.BitLength.init -> void
+Dahlke.EtherCAT.Esi.EsiPdoEntry.Comment.get -> string?
+Dahlke.EtherCAT.Esi.EsiPdoEntry.Comment.init -> void
+Dahlke.EtherCAT.Esi.EsiPdoEntry.DataType.get -> string?
+Dahlke.EtherCAT.Esi.EsiPdoEntry.DataType.init -> void
+Dahlke.EtherCAT.Esi.EsiPdoEntry.Deconstruct(out ushort Index, out byte? SubIndex, out int BitLength, out string? Name, out string? DataType, out string? Comment) -> void
+Dahlke.EtherCAT.Esi.EsiPdoEntry.Equals(Dahlke.EtherCAT.Esi.EsiPdoEntry? other) -> bool
+Dahlke.EtherCAT.Esi.EsiPdoEntry.EsiPdoEntry(ushort Index, byte? SubIndex, int BitLength, string? Name, string? DataType, string? Comment) -> void
+Dahlke.EtherCAT.Esi.EsiPdoEntry.Index.get -> ushort
+Dahlke.EtherCAT.Esi.EsiPdoEntry.Index.init -> void
+Dahlke.EtherCAT.Esi.EsiPdoEntry.Name.get -> string?
+Dahlke.EtherCAT.Esi.EsiPdoEntry.Name.init -> void
+Dahlke.EtherCAT.Esi.EsiPdoEntry.SubIndex.get -> byte?
+Dahlke.EtherCAT.Esi.EsiPdoEntry.SubIndex.init -> void
+Dahlke.EtherCAT.Esi.EsiProcessData
+Dahlke.EtherCAT.Esi.EsiProcessData.<Clone>$() -> Dahlke.EtherCAT.Esi.EsiProcessData!
+Dahlke.EtherCAT.Esi.EsiProcessData.Deconstruct(out System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Esi.EsiPdo!>! Pdos, out System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Esi.EsiSyncManager!>! SyncManagers) -> void
+Dahlke.EtherCAT.Esi.EsiProcessData.Equals(Dahlke.EtherCAT.Esi.EsiProcessData? other) -> bool
+Dahlke.EtherCAT.Esi.EsiProcessData.EsiProcessData(System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Esi.EsiPdo!>! Pdos, System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Esi.EsiSyncManager!>! SyncManagers) -> void
+Dahlke.EtherCAT.Esi.EsiProcessData.Pdos.get -> System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Esi.EsiPdo!>!
+Dahlke.EtherCAT.Esi.EsiProcessData.Pdos.init -> void
+Dahlke.EtherCAT.Esi.EsiProcessData.SyncManagers.get -> System.Collections.Generic.IReadOnlyList<Dahlke.EtherCAT.Esi.EsiSyncManager!>!
+Dahlke.EtherCAT.Esi.EsiProcessData.SyncManagers.init -> void
+Dahlke.EtherCAT.Esi.EsiSyncManager
+Dahlke.EtherCAT.Esi.EsiSyncManager.<Clone>$() -> Dahlke.EtherCAT.Esi.EsiSyncManager!
+Dahlke.EtherCAT.Esi.EsiSyncManager.ControlByte.get -> byte?
+Dahlke.EtherCAT.Esi.EsiSyncManager.ControlByte.init -> void
+Dahlke.EtherCAT.Esi.EsiSyncManager.Deconstruct(out int Number, out string? Name, out ushort? StartAddress, out byte? ControlByte, out int? DefaultSize, out int? MinSize, out int? MaxSize, out bool? Enabled) -> void
+Dahlke.EtherCAT.Esi.EsiSyncManager.DefaultSize.get -> int?
+Dahlke.EtherCAT.Esi.EsiSyncManager.DefaultSize.init -> void
+Dahlke.EtherCAT.Esi.EsiSyncManager.Enabled.get -> bool?
+Dahlke.EtherCAT.Esi.EsiSyncManager.Enabled.init -> void
+Dahlke.EtherCAT.Esi.EsiSyncManager.Equals(Dahlke.EtherCAT.Esi.EsiSyncManager? other) -> bool
+Dahlke.EtherCAT.Esi.EsiSyncManager.EsiSyncManager(int Number, string? Name, ushort? StartAddress, byte? ControlByte, int? DefaultSize, int? MinSize, int? MaxSize, bool? Enabled) -> void
+Dahlke.EtherCAT.Esi.EsiSyncManager.MaxSize.get -> int?
+Dahlke.EtherCAT.Esi.EsiSyncManager.MaxSize.init -> void
+Dahlke.EtherCAT.Esi.EsiSyncManager.MinSize.get -> int?
+Dahlke.EtherCAT.Esi.EsiSyncManager.MinSize.init -> void
+Dahlke.EtherCAT.Esi.EsiSyncManager.Name.get -> string?
+Dahlke.EtherCAT.Esi.EsiSyncManager.Name.init -> void
+Dahlke.EtherCAT.Esi.EsiSyncManager.Number.get -> int
+Dahlke.EtherCAT.Esi.EsiSyncManager.Number.init -> void
+Dahlke.EtherCAT.Esi.EsiSyncManager.StartAddress.get -> ushort?
+Dahlke.EtherCAT.Esi.EsiSyncManager.StartAddress.init -> void
 override Dahlke.EtherCAT.Esi.EsiObject.Equals(object? obj) -> bool
 override Dahlke.EtherCAT.Esi.EsiObject.GetHashCode() -> int
 override Dahlke.EtherCAT.Esi.EsiObject.ToString() -> string!
 override Dahlke.EtherCAT.Esi.EsiObjectSubItem.Equals(object? obj) -> bool
 override Dahlke.EtherCAT.Esi.EsiObjectSubItem.GetHashCode() -> int
 override Dahlke.EtherCAT.Esi.EsiObjectSubItem.ToString() -> string!
+override Dahlke.EtherCAT.Esi.EsiPdo.Equals(object? obj) -> bool
+override Dahlke.EtherCAT.Esi.EsiPdo.GetHashCode() -> int
+override Dahlke.EtherCAT.Esi.EsiPdo.ToString() -> string!
+override Dahlke.EtherCAT.Esi.EsiPdoEntry.Equals(object? obj) -> bool
+override Dahlke.EtherCAT.Esi.EsiPdoEntry.GetHashCode() -> int
+override Dahlke.EtherCAT.Esi.EsiPdoEntry.ToString() -> string!
+override Dahlke.EtherCAT.Esi.EsiProcessData.Equals(object? obj) -> bool
+override Dahlke.EtherCAT.Esi.EsiProcessData.GetHashCode() -> int
+override Dahlke.EtherCAT.Esi.EsiProcessData.ToString() -> string!
+override Dahlke.EtherCAT.Esi.EsiSyncManager.Equals(object? obj) -> bool
+override Dahlke.EtherCAT.Esi.EsiSyncManager.GetHashCode() -> int
+override Dahlke.EtherCAT.Esi.EsiSyncManager.ToString() -> string!
 static Dahlke.EtherCAT.Esi.EsiObject.operator !=(Dahlke.EtherCAT.Esi.EsiObject? left, Dahlke.EtherCAT.Esi.EsiObject? right) -> bool
 static Dahlke.EtherCAT.Esi.EsiObject.operator ==(Dahlke.EtherCAT.Esi.EsiObject? left, Dahlke.EtherCAT.Esi.EsiObject? right) -> bool
 static Dahlke.EtherCAT.Esi.EsiObjectSubItem.operator !=(Dahlke.EtherCAT.Esi.EsiObjectSubItem? left, Dahlke.EtherCAT.Esi.EsiObjectSubItem? right) -> bool
 static Dahlke.EtherCAT.Esi.EsiObjectSubItem.operator ==(Dahlke.EtherCAT.Esi.EsiObjectSubItem? left, Dahlke.EtherCAT.Esi.EsiObjectSubItem? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiPdo.operator !=(Dahlke.EtherCAT.Esi.EsiPdo? left, Dahlke.EtherCAT.Esi.EsiPdo? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiPdo.operator ==(Dahlke.EtherCAT.Esi.EsiPdo? left, Dahlke.EtherCAT.Esi.EsiPdo? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiPdoEntry.operator !=(Dahlke.EtherCAT.Esi.EsiPdoEntry? left, Dahlke.EtherCAT.Esi.EsiPdoEntry? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiPdoEntry.operator ==(Dahlke.EtherCAT.Esi.EsiPdoEntry? left, Dahlke.EtherCAT.Esi.EsiPdoEntry? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiProcessData.operator !=(Dahlke.EtherCAT.Esi.EsiProcessData? left, Dahlke.EtherCAT.Esi.EsiProcessData? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiProcessData.operator ==(Dahlke.EtherCAT.Esi.EsiProcessData? left, Dahlke.EtherCAT.Esi.EsiProcessData? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiSyncManager.operator !=(Dahlke.EtherCAT.Esi.EsiSyncManager? left, Dahlke.EtherCAT.Esi.EsiSyncManager? right) -> bool
+static Dahlke.EtherCAT.Esi.EsiSyncManager.operator ==(Dahlke.EtherCAT.Esi.EsiSyncManager? left, Dahlke.EtherCAT.Esi.EsiSyncManager? right) -> bool
