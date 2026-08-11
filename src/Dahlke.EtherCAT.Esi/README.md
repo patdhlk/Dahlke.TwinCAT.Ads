@@ -109,8 +109,9 @@ published set declare no `Sm`. Padding entries (index `0`, a bit length, nothing
 reported rather than filtered, because dropping them corrupts any bit-offset arithmetic a
 consumer does over the entries.
 
-`null` means the device declares no sync managers and no PDOs at all; a device declaring an empty
-map reports a non-null value with empty lists.
+Unlike the object dictionary above, ESI gives process data no container element — `<Sm>`,
+`<TxPdo>` and `<RxPdo>` are direct children of `<Device>` — so a device with no sync managers and
+no PDOs is indistinguishable from one declaring an empty map, and both report `null`.
 
 ## Registration is not eager
 

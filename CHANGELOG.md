@@ -192,7 +192,12 @@ below was the whole of the release when it was numbered 0.9.2 and is unchanged b
   `ObjectDictionary` ([#66](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/66)) and
   `ProcessData` ([#67](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/67)). Code that
   constructs or deconstructs `EsiDevice` positionally must be updated to match. Reading the
-  properties is unaffected. Pre-1.0.0, which is where the allowance to do this comes from.
+  properties is unaffected. Equality and hashing are not: `ObjectDictionary` is a class with no
+  `Equals` override and `ProcessData` is a record over `IReadOnlyList` members, so `EsiDevice`'s
+  released `Equals`, `GetHashCode` and `operator ==` are now reference-based with respect to those
+  two members — two descriptions parsed separately from the same file for the same key no longer
+  compare equal or hash alike, and `EsiLookupResult` inherits the change. Pre-1.0.0, which is where
+  the allowance to do this comes from.
 
 - **`EsiDevice` reports each device's declared CoE object dictionary.**
   ([#66](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/66)) `ObjectDictionary`, from
@@ -243,8 +248,9 @@ below was the whole of the release when it was numbered 0.9.2 and is unchanged b
   carried by ESI's `Su` attribute, and unrelated to `IEtherCatClient.GetSyncUnitsAsync` despite
   the similar name.
 
-  A device declaring no sync managers and no PDOs reports `null`; one declaring an empty map
-  reports a non-null value with empty lists.
+  Unlike the object dictionary above, ESI gives process data no container element — `<Sm>`,
+  `<TxPdo>` and `<RxPdo>` are direct children of `<Device>` — so a device with no sync managers and
+  no PDOs is indistinguishable from one declaring an empty map: both report `null`.
 
 ### Changed
 

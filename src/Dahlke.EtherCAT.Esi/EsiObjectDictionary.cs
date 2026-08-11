@@ -112,7 +112,7 @@ public sealed record EsiObject(
 /// </summary>
 /// <remarks>
 /// <para>
-/// A class rather than a record, unlike every other type in this namespace, for two reasons. It
+/// A class rather than a record, unlike the other contract types here, for two reasons. It
 /// carries behaviour (<see cref="TryGetObject"/>) rather than being a pure data carrier; and a
 /// record's synthesized equality compares every declared instance field, which would include the
 /// index below — so two dictionaries built from the same object list would compare UNEQUAL,
@@ -138,7 +138,11 @@ public sealed class EsiObjectDictionary
     /// <param name="objects">The objects the device declares.</param>
     public EsiObjectDictionary(IReadOnlyList<EsiObject> objects)
     {
-        Objects = objects;
+        // A snapshot, not an alias: _byIndex below is built once from objects and never revisited,
+        // so if Objects aliased the caller's list, a caller who mutates that list afterwards would
+        // get an Objects that disagrees with TryGetObject — an internal inconsistency, not merely
+        // a shared reference.
+        Objects = objects.ToArray();
 
         var map = new Dictionary<ushort, EsiObject>(objects.Count);
         foreach (EsiObject o in objects)

@@ -51,8 +51,10 @@ internal static class EsiProcessDataParser
         var pdos = new List<EsiPdo>(pdoElements.Count);
         foreach (XElement pdo in pdoElements)
         {
-            // A PDO with no parseable index cannot be identified or matched against a live
-            // mapping, so it is skipped rather than reported at index 0.
+            // No parseable index means either malformed ESI or a PDO declared entirely by Ref into
+            // a file-level <Pdos> pool (the index lives on the referenced template, not here) —
+            // see the Ref remarks on EsiProcessData. Either way it is skipped rather than reported
+            // at index 0.
             if (EsiXml.ParseUShort(EsiXml.Text(pdo.Element("Index"))) is not ushort index)
             {
                 continue;

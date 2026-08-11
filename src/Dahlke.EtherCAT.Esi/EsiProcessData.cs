@@ -115,18 +115,33 @@ public sealed record EsiSyncManager(
 /// which sync manager, entirely offline.
 /// </summary>
 /// <remarks>
+/// <para>
 /// <b>Modular devices are out of scope.</b> A modular device declares its per-slot PDOs under
 /// <c>&lt;Modules&gt;</c> rather than under <c>&lt;Device&gt;</c>, and this catalogue has no
 /// concept of slot configuration. What is reported here is the device-level declaration alone,
 /// which for an EJ-series modular box is not the whole process image.
+/// </para>
+/// <para>
+/// <b><c>Ref</c>-declared PDOs are out of scope, too.</b> Standard ETG ESI lets a device reference
+/// a template from a file-level <c>&lt;Pdos&gt;</c> pool instead of writing out its own index and
+/// entries — <c>&lt;TxPdo Ref="DigInputBit" Chn="0" Sm="0"/&gt;</c> — and such a <c>&lt;TxPdo&gt;</c>
+/// has no <c>&lt;Index&gt;</c> child at all: the index lives on the referenced template, not on the
+/// device's own element. This library does not resolve <c>Ref</c>, so those PDOs are omitted from
+/// <see cref="Pdos"/> rather than reported. An empty <see cref="Pdos"/> must therefore not be read
+/// as "this device declares no process data" — it may instead mean the device declares its PDOs
+/// entirely by <c>Ref</c>. In Beckhoff's published set this is confined to one legacy family file,
+/// <c>EtherCAT Terminals.xml</c> — 54 such PDOs across 24 identities. Resolving <c>Ref</c> with
+/// <c>Chn</c>/<c>ChnFac</c> expansion is future work.
+/// </para>
 /// </remarks>
 /// <param name="Pdos">
 /// Every PDO the device declares, in the order the file lists them — except a PDO whose
-/// <c>&lt;Index&gt;</c> cannot be parsed, which is omitted rather than reported at index 0: it
-/// could not be identified or matched against a live mapping anyway. One list rather than
-/// separate Tx and Rx lists: each PDO carries its own <see cref="EsiPdo.Direction"/>, so it stays
-/// self-describing wherever it is passed, and two lists PLUS a direction field would be redundant
-/// state that can disagree. Group with
+/// <c>&lt;Index&gt;</c> cannot be parsed, which is omitted rather than reported at index 0. That
+/// includes a PDO declared entirely by <c>Ref</c> into a file-level <c>&lt;Pdos&gt;</c> pool — see
+/// the remarks on <see cref="EsiProcessData"/> for what that means for an empty list. One list
+/// rather than separate Tx and Rx lists: each PDO carries its own <see cref="EsiPdo.Direction"/>,
+/// so it stays self-describing wherever it is passed, and two lists PLUS a direction field would be
+/// redundant state that can disagree. Group with
 /// <c>Pdos.Where(p =&gt; p.Direction == EsiPdoDirection.Transmit)</c>.
 /// </param>
 /// <param name="SyncManagers">

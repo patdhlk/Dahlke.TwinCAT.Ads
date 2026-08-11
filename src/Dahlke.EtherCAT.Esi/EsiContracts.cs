@@ -31,7 +31,7 @@ public readonly record struct EsiKey(uint VendorId, uint ProductCode, uint Revis
 /// draws across a segment must be able to tell an unknown contributor from one that draws
 /// nothing. Text that cannot be parsed as a number is also null, which does conflate "states
 /// something unreadable" with "states nothing"; no such device exists in Beckhoff's 868 MB set,
-/// so a third state would be surface with no reader for it.
+/// so a third state would be API surface with no reader for it.
 /// </para>
 /// <para>
 /// Aggregating these into a per-segment load against a segment budget is the consumer's job.
@@ -45,7 +45,10 @@ public readonly record struct EsiKey(uint VendorId, uint ProductCode, uint Revis
 /// </param>
 /// <param name="ProcessData">
 /// The process-data map the device declares — its PDOs and sync managers — or null when it
-/// declares none. A device declaring an EMPTY map reports a non-null value with empty lists.
+/// declares none. <b>Unlike <see cref="ObjectDictionary"/>, ESI gives process data no container
+/// element</b> — <c>&lt;Sm&gt;</c>, <c>&lt;TxPdo&gt;</c> and <c>&lt;RxPdo&gt;</c> are direct
+/// children of <c>&lt;Device&gt;</c> — so a device with no sync managers and no PDOs is
+/// indistinguishable from one declaring an empty map, and both report null.
 /// </param>
 public sealed record EsiDevice(
     string? VendorName,
