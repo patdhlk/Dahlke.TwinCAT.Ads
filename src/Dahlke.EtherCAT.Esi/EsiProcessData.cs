@@ -121,8 +121,10 @@ public sealed record EsiSyncManager(
 /// which for an EJ-series modular box is not the whole process image.
 /// </remarks>
 /// <param name="Pdos">
-/// Every PDO the device declares, in the order the file lists them. One list rather than separate
-/// Tx and Rx lists: each PDO carries its own <see cref="EsiPdo.Direction"/>, so it stays
+/// Every PDO the device declares, in the order the file lists them — except a PDO whose
+/// <c>&lt;Index&gt;</c> cannot be parsed, which is omitted rather than reported at index 0: it
+/// could not be identified or matched against a live mapping anyway. One list rather than
+/// separate Tx and Rx lists: each PDO carries its own <see cref="EsiPdo.Direction"/>, so it stays
 /// self-describing wherever it is passed, and two lists PLUS a direction field would be redundant
 /// state that can disagree. Group with
 /// <c>Pdos.Where(p =&gt; p.Direction == EsiPdoDirection.Transmit)</c>.

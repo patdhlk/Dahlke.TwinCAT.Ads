@@ -151,6 +151,11 @@ public class EsiProcessDataTests
         processData.SyncManagers[3].DefaultSize.Should().Be(4);
         processData.SyncManagers[3].Enabled.Should().BeTrue();
         processData.SyncManagers[3].MinSize.Should().BeNull();
+
+        // "Outputs" declares DefaultSize="0" — a genuine zero, not the absence a null would mean.
+        // This is the attribute-level twin of Parse_keeps_padding_entries_rather_than_dropping_them's
+        // element-level zero-vs-null pin.
+        processData.SyncManagers[2].DefaultSize.Should().Be(0);
     }
 
     [Fact]

@@ -154,15 +154,15 @@
           </Entry>
           <Entry>
             <Index>#x6000</Index>
+            <SubIndex>18</SubIndex>
+            <Name>Malformed entry with no BitLen</Name>
+          </Entry>
+          <Entry>
+            <Index>#x6000</Index>
             <SubIndex>17</SubIndex>
             <BitLen>16</BitLen>
             <Name>Value</Name>
             <DataType>INT</DataType>
-          </Entry>
-          <Entry>
-            <Index>#x6000</Index>
-            <SubIndex>18</SubIndex>
-            <Name>Malformed entry with no BitLen</Name>
           </Entry>
         </TxPdo>
       </Device>
