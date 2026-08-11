@@ -48,11 +48,37 @@ whole of the release when it was numbered 0.9.2 and is unchanged by the renumber
   every don't-care bit clear, so it can never set halt: a command that quietly stopped the drive
   would be worse than no helper at all.
 
+  **The static class is `MotionCia402`, not `Cia402`.** A type named `Cia402` inside a namespace also
+  named `Dahlke.EtherCAT.Cia402` compiles, but it is unusable from anywhere else under
+  `Dahlke.EtherCAT`: C# resolves a bare `Cia402` by walking the enclosing namespaces first, finds the
+  member *namespace* of that name, and fails with CS0234 before it ever considers the type.
+  `Dahlke.EtherCAT.Diagnostics` is exactly such a caller and initially needed a `using` alias to
+  compile at all. The prefix removes the collision instead of documenting it, so every caller —
+  inside this repository or outside it — writes the same thing and nobody needs an alias. The
+  record structs and enums (`Cia402Status`, `Cia402State`, `Cia402Command`, `Cia402Mode`,
+  `Cia402Controlword`) keep their plain names; only the static class could collide.
+
   **Fully covered without hardware, and the coverage is exhaustive rather than sampled.** 107 tests,
   including sweeps over all 65536 words asserting that the flags are exactly their bits, that the
   eight state-table rows are mutually exclusive, that `Unknown` appears exactly when no row matches,
   and that manufacturer and mode-specific bits change nothing. The six words above are pinned as
   literals, since they are the only inputs in the suite that a real drive actually sent.
+
+  **What Beckhoff's documentation confirms, and what it does not.** Checked against TwinCAT InfoSys:
+  the four object numbers are right (`0x6040` Controlword, `0x6041` Statusword, `0x6060` Mode of
+  operation, `0x6061` Modes of operation display), both words are 16-bit `WORD`/`UINT` — which is
+  what the two-byte read width and the short-answer guard below rest on — and "DS402" is Beckhoff's
+  own term for the profile ("CoE DS402 Drive" in the MC3 data-area docs). The velocity-mode reading
+  is confirmed too: InfoSys documents `0x6042` as "Target velocity for velocity mode (for frequency
+  inverter)", which is why `Cia402Mode.Velocity` is documented as the frequency-inverter mode and
+  kept distinct from `ProfileVelocity` (`0x60FF`) and `ProfileTorque` (`0x6071`).
+
+  The **bit-level tables are not in InfoSys** and are not claimed to be verified by it: the statusword
+  bit positions, the eight-row state table, the controlword command table and the mode numbers come
+  from CiA 402 / IEC 61800-7-201, and Beckhoff's drive-terminal manuals that would reproduce them are
+  not in the indexed corpus. Nothing found there contradicts them. The tests transcribe the
+  specification's rows independently of the code that applies them, which is the strongest check
+  available without a drive.
 
 - **`IEtherCatClient` can read a CiA-402 drive's statusword and hand back the decoded state.**
   ([#74](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/74)) `ReadCia402StatusAsync` reads

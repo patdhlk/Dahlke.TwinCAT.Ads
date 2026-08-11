@@ -21,7 +21,7 @@ public class Cia402ModeTests
     [InlineData(11, Cia402Mode.CyclicSyncTorqueWithCommutationAngle)]
     public void Every_standard_mode_decodes_to_its_member(int mode, Cia402Mode expected)
     {
-        Assert.Equal(expected, Cia402.DecodeModeOfOperation((sbyte)mode));
+        Assert.Equal(expected, MotionCia402.DecodeModeOfOperation((sbyte)mode));
     }
 
     [Theory]
@@ -36,7 +36,7 @@ public class Cia402ModeTests
         // Null rather than a catch-all member, because the caller still holds the raw sbyte and a
         // member named ManufacturerSpecific would throw the NUMBER away — which is the only part of
         // a vendor mode that means anything.
-        Assert.Null(Cia402.DecodeModeOfOperation((sbyte)mode));
+        Assert.Null(MotionCia402.DecodeModeOfOperation((sbyte)mode));
     }
 
     [Fact]
@@ -44,7 +44,7 @@ public class Cia402ModeTests
     {
         for (int mode = sbyte.MinValue; mode <= sbyte.MaxValue; mode++)
         {
-            var decoded = Cia402.DecodeModeOfOperation((sbyte)mode);
+            var decoded = MotionCia402.DecodeModeOfOperation((sbyte)mode);
 
             // Either it is a defined member, or it is null. Never an undefined enum value.
             if (decoded is not null)
@@ -71,7 +71,7 @@ public class Cia402ModeTests
     {
         // The abbreviations are worth carrying: a drive's own manual and its ESI file label the
         // modes "csp" and "pv", not "CyclicSyncPosition".
-        Assert.Equal(expected, Cia402.DescribeModeOfOperation((sbyte)mode));
+        Assert.Equal(expected, MotionCia402.DescribeModeOfOperation((sbyte)mode));
     }
 
     [Theory]
@@ -83,7 +83,7 @@ public class Cia402ModeTests
     [InlineData(-128, "Manufacturer-specific (-128)")]
     public void Describe_names_an_undefined_mode_and_keeps_its_number(int mode, string expected)
     {
-        Assert.Equal(expected, Cia402.DescribeModeOfOperation((sbyte)mode));
+        Assert.Equal(expected, MotionCia402.DescribeModeOfOperation((sbyte)mode));
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class Cia402ModeTests
     {
         for (int mode = sbyte.MinValue; mode <= sbyte.MaxValue; mode++)
         {
-            Assert.False(string.IsNullOrWhiteSpace(Cia402.DescribeModeOfOperation((sbyte)mode)));
+            Assert.False(string.IsNullOrWhiteSpace(MotionCia402.DescribeModeOfOperation((sbyte)mode)));
         }
     }
 

@@ -47,7 +47,7 @@ public class Cia402ControlwordTests
     [InlineData(0x0080, Cia402Command.FaultReset)]
     public void The_canonical_word_for_each_command_decodes_to_it(int controlword, Cia402Command expected)
     {
-        Assert.Equal(expected, Cia402.DecodeControlword((ushort)controlword).Command);
+        Assert.Equal(expected, MotionCia402.DecodeControlword((ushort)controlword).Command);
     }
 
     [Theory]
@@ -60,7 +60,7 @@ public class Cia402ControlwordTests
     [InlineData(0x000D, Cia402Command.DisableVoltage)]
     public void Dont_care_bits_do_not_change_the_command(int controlword, Cia402Command expected)
     {
-        Assert.Equal(expected, Cia402.DecodeControlword((ushort)controlword).Command);
+        Assert.Equal(expected, MotionCia402.DecodeControlword((ushort)controlword).Command);
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class Cia402ControlwordTests
                 continue;
             }
 
-            Assert.Equal(Cia402Command.FaultReset, Cia402.DecodeControlword((ushort)word).Command);
+            Assert.Equal(Cia402Command.FaultReset, MotionCia402.DecodeControlword((ushort)word).Command);
         }
     }
 
@@ -85,7 +85,7 @@ public class Cia402ControlwordTests
     {
         for (int word = 0; word <= ushort.MaxValue; word++)
         {
-            Assert.Equal((word & 0x0100) != 0, Cia402.DecodeControlword((ushort)word).Halt);
+            Assert.Equal((word & 0x0100) != 0, MotionCia402.DecodeControlword((ushort)word).Halt);
         }
     }
 
@@ -94,7 +94,7 @@ public class Cia402ControlwordTests
     {
         for (int word = 0; word <= ushort.MaxValue; word++)
         {
-            var command = Cia402.DecodeControlword((ushort)word).Command;
+            var command = MotionCia402.DecodeControlword((ushort)word).Command;
 
             // Total: there is no word this decode cannot name, so no member outside the enum can
             // ever come back.
@@ -118,7 +118,7 @@ public class Cia402ControlwordTests
     [InlineData(Cia402Command.FaultReset, 0x0080)]
     public void Encode_produces_the_word_a_drive_expects(Cia402Command command, int expected)
     {
-        Assert.Equal((ushort)expected, Cia402.EncodeCommand(command));
+        Assert.Equal((ushort)expected, MotionCia402.EncodeCommand(command));
     }
 
     [Fact]
@@ -128,14 +128,14 @@ public class Cia402ControlwordTests
         // is not mirrored in the other fails here rather than in front of a drive.
         foreach (var command in Enum.GetValues<Cia402Command>())
         {
-            Assert.Equal(command, Cia402.DecodeControlword(Cia402.EncodeCommand(command)).Command);
+            Assert.Equal(command, MotionCia402.DecodeControlword(MotionCia402.EncodeCommand(command)).Command);
         }
     }
 
     [Fact]
     public void Encode_rejects_a_value_that_is_not_a_command()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => Cia402.EncodeCommand((Cia402Command)99));
+        Assert.Throws<ArgumentOutOfRangeException>(() => MotionCia402.EncodeCommand((Cia402Command)99));
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public class Cia402ControlwordTests
         // themselves. Encoding it silently would stop a drive that was asked to run.
         foreach (var command in Enum.GetValues<Cia402Command>())
         {
-            Assert.False(Cia402.DecodeControlword(Cia402.EncodeCommand(command)).Halt);
+            Assert.False(MotionCia402.DecodeControlword(MotionCia402.EncodeCommand(command)).Halt);
         }
     }
 
@@ -154,9 +154,9 @@ public class Cia402ControlwordTests
     {
         // 6, 7, 15 — the sequence written into 0x6040 by hand to bring the ACU drive up. This test
         // is the whole point of EncodeCommand existing.
-        Assert.Equal(0x0006, Cia402.EncodeCommand(Cia402Command.Shutdown));
-        Assert.Equal(0x0007, Cia402.EncodeCommand(Cia402Command.SwitchOn));
-        Assert.Equal(0x000F, Cia402.EncodeCommand(Cia402Command.EnableOperation));
+        Assert.Equal(0x0006, MotionCia402.EncodeCommand(Cia402Command.Shutdown));
+        Assert.Equal(0x0007, MotionCia402.EncodeCommand(Cia402Command.SwitchOn));
+        Assert.Equal(0x000F, MotionCia402.EncodeCommand(Cia402Command.EnableOperation));
     }
 
     [Theory]
@@ -168,7 +168,7 @@ public class Cia402ControlwordTests
     [InlineData(0x0000, "DisableVoltage")]
     public void Describe_names_the_command_and_says_when_halt_is_set(int controlword, string expected)
     {
-        Assert.Equal(expected, Cia402.DescribeControlword((ushort)controlword));
+        Assert.Equal(expected, MotionCia402.DescribeControlword((ushort)controlword));
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public class Cia402ControlwordTests
     {
         for (int word = 0; word <= ushort.MaxValue; word++)
         {
-            Assert.False(string.IsNullOrWhiteSpace(Cia402.DescribeControlword((ushort)word)));
+            Assert.False(string.IsNullOrWhiteSpace(MotionCia402.DescribeControlword((ushort)word)));
         }
     }
 }

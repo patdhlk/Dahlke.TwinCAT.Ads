@@ -54,7 +54,7 @@ public class Cia402StatuswordTests
     [InlineData(0x0008, Cia402State.Fault)]
     public void Every_row_of_the_state_table_decodes_to_its_state(int statusword, Cia402State expected)
     {
-        Assert.Equal(expected, Cia402.DecodeStatusword((ushort)statusword).State);
+        Assert.Equal(expected, MotionCia402.DecodeStatusword((ushort)statusword).State);
     }
 
     [Theory]
@@ -72,7 +72,7 @@ public class Cia402StatuswordTests
     [InlineData(0x0088, Cia402State.Fault)]
     public void Dont_care_bits_do_not_change_the_state(int statusword, Cia402State expected)
     {
-        Assert.Equal(expected, Cia402.DecodeStatusword((ushort)statusword).State);
+        Assert.Equal(expected, MotionCia402.DecodeStatusword((ushort)statusword).State);
     }
 
     /// <summary>
@@ -93,20 +93,20 @@ public class Cia402StatuswordTests
     public void Words_read_off_the_commissioned_drive_decode_as_they_were_read_by_hand(
         int statusword, Cia402State expected)
     {
-        Assert.Equal(expected, Cia402.DecodeStatusword((ushort)statusword).State);
+        Assert.Equal(expected, MotionCia402.DecodeStatusword((ushort)statusword).State);
     }
 
     [Fact]
     public void The_five_flag_bits_are_decoded_independently_of_the_state()
     {
         // Each flag is set on its own, so a mask error cannot hide behind another flag being set.
-        Assert.True(Cia402.DecodeStatusword(0x0010).VoltageEnabled);
-        Assert.True(Cia402.DecodeStatusword(0x0080).Warning);
-        Assert.True(Cia402.DecodeStatusword(0x0200).Remote);
-        Assert.True(Cia402.DecodeStatusword(0x0400).TargetReached);
-        Assert.True(Cia402.DecodeStatusword(0x0800).InternalLimitActive);
+        Assert.True(MotionCia402.DecodeStatusword(0x0010).VoltageEnabled);
+        Assert.True(MotionCia402.DecodeStatusword(0x0080).Warning);
+        Assert.True(MotionCia402.DecodeStatusword(0x0200).Remote);
+        Assert.True(MotionCia402.DecodeStatusword(0x0400).TargetReached);
+        Assert.True(MotionCia402.DecodeStatusword(0x0800).InternalLimitActive);
 
-        var none = Cia402.DecodeStatusword(0x0000);
+        var none = MotionCia402.DecodeStatusword(0x0000);
         Assert.False(none.VoltageEnabled);
         Assert.False(none.Warning);
         Assert.False(none.Remote);
@@ -118,7 +118,7 @@ public class Cia402StatuswordTests
     public void A_drive_reporting_every_flag_at_once_reports_every_flag()
     {
         // Operation enabled (0x0027) with the voltage bit and bits 7, 9, 10 and 11 all set.
-        var status = Cia402.DecodeStatusword(0x0EB7);
+        var status = MotionCia402.DecodeStatusword(0x0EB7);
 
         Assert.Equal(Cia402State.OperationEnabled, status.State);
         Assert.True(status.VoltageEnabled);
@@ -137,7 +137,7 @@ public class Cia402StatuswordTests
     {
         for (int word = 0; word <= ushort.MaxValue; word++)
         {
-            var status = Cia402.DecodeStatusword((ushort)word);
+            var status = MotionCia402.DecodeStatusword((ushort)word);
 
             Assert.Equal((word & 0x0010) != 0, status.VoltageEnabled);
             Assert.Equal((word & 0x0080) != 0, status.Warning);
@@ -162,7 +162,7 @@ public class Cia402StatuswordTests
             // the order they are tested in.
             Assert.True(matches.Length <= 1, $"0x{word:X4} matched {matches.Length} rows");
 
-            var state = Cia402.DecodeStatusword((ushort)word).State;
+            var state = MotionCia402.DecodeStatusword((ushort)word).State;
 
             Assert.Equal(matches.Length == 1 ? matches[0] : Cia402State.Unknown, state);
         }
@@ -178,8 +178,8 @@ public class Cia402StatuswordTests
         for (int word = 0; word <= ushort.MaxValue; word++)
         {
             Assert.Equal(
-                Cia402.DecodeStatusword((ushort)(word & ~Ignored)),
-                Cia402.DecodeStatusword((ushort)(word | Ignored)));
+                MotionCia402.DecodeStatusword((ushort)(word & ~Ignored)),
+                MotionCia402.DecodeStatusword((ushort)(word | Ignored)));
         }
     }
 
@@ -196,7 +196,7 @@ public class Cia402StatuswordTests
     [InlineData(0x1591, "Unknown(0x1591): voltage enabled, warning, target reached")]
     public void Describe_names_the_state_and_lists_the_flags_that_are_set(int statusword, string expected)
     {
-        Assert.Equal(expected, Cia402.DescribeStatusword((ushort)statusword));
+        Assert.Equal(expected, MotionCia402.DescribeStatusword((ushort)statusword));
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public class Cia402StatuswordTests
     {
         for (int word = 0; word <= ushort.MaxValue; word++)
         {
-            Assert.False(string.IsNullOrWhiteSpace(Cia402.DescribeStatusword((ushort)word)));
+            Assert.False(string.IsNullOrWhiteSpace(MotionCia402.DescribeStatusword((ushort)word)));
         }
     }
 
@@ -213,7 +213,7 @@ public class Cia402StatuswordTests
     {
         // Cia402Status is a record struct precisely so a caller can compare two polls for change
         // without writing a comparison. Worth pinning: it is the property a polling loop rests on.
-        Assert.Equal(Cia402.DecodeStatusword(0x0637), Cia402.DecodeStatusword(0x0637));
-        Assert.NotEqual(Cia402.DecodeStatusword(0x0637), Cia402.DecodeStatusword(0x0237));
+        Assert.Equal(MotionCia402.DecodeStatusword(0x0637), MotionCia402.DecodeStatusword(0x0637));
+        Assert.NotEqual(MotionCia402.DecodeStatusword(0x0637), MotionCia402.DecodeStatusword(0x0237));
     }
 }

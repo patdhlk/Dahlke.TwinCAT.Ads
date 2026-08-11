@@ -1,5 +1,4 @@
 #nullable enable
-Dahlke.EtherCAT.Cia402.Cia402
 Dahlke.EtherCAT.Cia402.Cia402Command
 Dahlke.EtherCAT.Cia402.Cia402Command.DisableVoltage = 0 -> Dahlke.EtherCAT.Cia402.Cia402Command
 Dahlke.EtherCAT.Cia402.Cia402Command.EnableOperation = 4 -> Dahlke.EtherCAT.Cia402.Cia402Command
@@ -55,19 +54,20 @@ Dahlke.EtherCAT.Cia402.Cia402Status.VoltageEnabled.get -> bool
 Dahlke.EtherCAT.Cia402.Cia402Status.VoltageEnabled.init -> void
 Dahlke.EtherCAT.Cia402.Cia402Status.Warning.get -> bool
 Dahlke.EtherCAT.Cia402.Cia402Status.Warning.init -> void
+Dahlke.EtherCAT.Cia402.MotionCia402
 override Dahlke.EtherCAT.Cia402.Cia402Controlword.GetHashCode() -> int
 override Dahlke.EtherCAT.Cia402.Cia402Status.GetHashCode() -> int
-static Dahlke.EtherCAT.Cia402.Cia402.DecodeControlword(ushort controlword) -> Dahlke.EtherCAT.Cia402.Cia402Controlword
-static Dahlke.EtherCAT.Cia402.Cia402.DecodeModeOfOperation(sbyte mode) -> Dahlke.EtherCAT.Cia402.Cia402Mode?
-static Dahlke.EtherCAT.Cia402.Cia402.DecodeStatusword(ushort statusword) -> Dahlke.EtherCAT.Cia402.Cia402Status
-static Dahlke.EtherCAT.Cia402.Cia402.DescribeControlword(ushort controlword) -> string!
-static Dahlke.EtherCAT.Cia402.Cia402.DescribeModeOfOperation(sbyte mode) -> string!
-static Dahlke.EtherCAT.Cia402.Cia402.DescribeStatusword(ushort statusword) -> string!
-static Dahlke.EtherCAT.Cia402.Cia402.EncodeCommand(Dahlke.EtherCAT.Cia402.Cia402Command command) -> ushort
 static Dahlke.EtherCAT.Cia402.Cia402Controlword.operator !=(Dahlke.EtherCAT.Cia402.Cia402Controlword left, Dahlke.EtherCAT.Cia402.Cia402Controlword right) -> bool
 static Dahlke.EtherCAT.Cia402.Cia402Controlword.operator ==(Dahlke.EtherCAT.Cia402.Cia402Controlword left, Dahlke.EtherCAT.Cia402.Cia402Controlword right) -> bool
 static Dahlke.EtherCAT.Cia402.Cia402Status.operator !=(Dahlke.EtherCAT.Cia402.Cia402Status left, Dahlke.EtherCAT.Cia402.Cia402Status right) -> bool
 static Dahlke.EtherCAT.Cia402.Cia402Status.operator ==(Dahlke.EtherCAT.Cia402.Cia402Status left, Dahlke.EtherCAT.Cia402.Cia402Status right) -> bool
+static Dahlke.EtherCAT.Cia402.MotionCia402.DecodeControlword(ushort controlword) -> Dahlke.EtherCAT.Cia402.Cia402Controlword
+static Dahlke.EtherCAT.Cia402.MotionCia402.DecodeModeOfOperation(sbyte mode) -> Dahlke.EtherCAT.Cia402.Cia402Mode?
+static Dahlke.EtherCAT.Cia402.MotionCia402.DecodeStatusword(ushort statusword) -> Dahlke.EtherCAT.Cia402.Cia402Status
+static Dahlke.EtherCAT.Cia402.MotionCia402.DescribeControlword(ushort controlword) -> string!
+static Dahlke.EtherCAT.Cia402.MotionCia402.DescribeModeOfOperation(sbyte mode) -> string!
+static Dahlke.EtherCAT.Cia402.MotionCia402.DescribeStatusword(ushort statusword) -> string!
+static Dahlke.EtherCAT.Cia402.MotionCia402.EncodeCommand(Dahlke.EtherCAT.Cia402.Cia402Command command) -> ushort
 ~override Dahlke.EtherCAT.Cia402.Cia402Controlword.Equals(object obj) -> bool
 ~override Dahlke.EtherCAT.Cia402.Cia402Controlword.ToString() -> string
 ~override Dahlke.EtherCAT.Cia402.Cia402Status.Equals(object obj) -> bool

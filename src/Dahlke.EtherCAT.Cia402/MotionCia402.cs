@@ -16,8 +16,17 @@ namespace Dahlke.EtherCAT.Cia402;
 /// state machine across calls, and does not decide what command to send next. The state a drive
 /// reaches from a given command depends on the state it was in, which one word cannot tell you.
 /// </para>
+/// <para>
+/// <b>Why the name is not just <c>Cia402</c>.</b> A type called <c>Cia402</c> inside a namespace also
+/// called <c>Dahlke.EtherCAT.Cia402</c> compiles, but it is unusable from anywhere else under
+/// <c>Dahlke.EtherCAT</c>: C# resolves a bare <c>Cia402</c> by walking the enclosing namespaces
+/// first, finds the member NAMESPACE of that name, and fails with CS0234 before it ever considers
+/// the type. <c>Dahlke.EtherCAT.Diagnostics</c> is exactly such a caller, and it had to carry a
+/// <c>using</c> alias to work around it — measured, not predicted. The prefix removes the collision
+/// outright, so every caller writes the same thing and none of them needs an alias.
+/// </para>
 /// </summary>
-public static class Cia402
+public static class MotionCia402
 {
     // Statusword bit positions (object 0x6041). The four state-machine bits 0-3 and bits 5-6 are
     // consumed by the mask table below rather than named here, because their MEANING is only the

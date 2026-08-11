@@ -1,21 +1,10 @@
+using Dahlke.EtherCAT.Cia402;
 using Dahlke.TwinCAT.Ads;
 using Microsoft.Extensions.Logging;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
 using TwinCAT.Ads;
-
-// AN ALIAS, not a plain `using Dahlke.EtherCAT.Cia402`, and it cannot be tidied into one. The
-// decoder package's static class is named Cia402 INSIDE a namespace also named
-// Dahlke.EtherCAT.Cia402, and C# resolves a bare `Cia402` here by walking the enclosing namespaces
-// first: Dahlke.EtherCAT contains a member namespace called Cia402, so the name binds to the
-// NAMESPACE and `Cia402.DecodeStatusword` fails to compile with CS0234 — measured, not predicted.
-// Only code inside Dahlke.EtherCAT.* hits this; a consumer in their own namespace writes
-// `Cia402.DecodeStatusword` with no ceremony, which is the API issue #74 asked for.
-//
-// Ds402 rather than an arbitrary name because it is what the profile is also called — the CANopen
-// drive profile CiA-402 was DSP-402/DS-402, and drive manuals still say DS402.
-using Ds402 = Dahlke.EtherCAT.Cia402.Cia402;
 
 namespace Dahlke.EtherCAT.Diagnostics;
 
@@ -1084,10 +1073,10 @@ internal sealed class EtherCatClient : IEtherCatClient
         }
 
         var statusword = BinaryPrimitives.ReadUInt16LittleEndian(read.Data);
-        var status = Ds402.DecodeStatusword(statusword);
+        var status = MotionCia402.DecodeStatusword(statusword);
 
         _logger.LogDebug("CiA-402 statusword 0x{Word:X4} from slave {Addr} decodes as {Description}",
-            statusword, physicalAddress, Ds402.DescribeStatusword(statusword));
+            statusword, physicalAddress, MotionCia402.DescribeStatusword(statusword));
 
         return new Cia402StatusResult
         {

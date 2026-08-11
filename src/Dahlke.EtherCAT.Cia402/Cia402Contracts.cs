@@ -197,7 +197,7 @@ public readonly record struct Cia402Controlword(Cia402Command Command, bool Halt
 /// <para>
 /// Backed by <see cref="sbyte"/> because both objects are SINT, so this enum cannot hold a value the
 /// objects cannot carry. Values the standard leaves reserved or hands to the manufacturer are
-/// deliberately absent — see <see cref="Cia402.DecodeModeOfOperation"/>.
+/// deliberately absent — see <see cref="MotionCia402.DecodeModeOfOperation"/>.
 /// </para>
 /// </summary>
 public enum Cia402Mode : sbyte

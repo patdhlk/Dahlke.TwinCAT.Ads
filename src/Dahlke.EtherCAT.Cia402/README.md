@@ -13,28 +13,30 @@ dotnet add package Dahlke.EtherCAT.Cia402
 ```csharp
 using Dahlke.EtherCAT.Cia402;
 
-var status = Cia402.DecodeStatusword(0x0637);
+var status = MotionCia402.DecodeStatusword(0x0637);
 
 status.State;          // Cia402State.OperationEnabled
 status.TargetReached;  // true
 status.Remote;         // true — clear this and the drive is in local control
 
-Cia402.DescribeStatusword(0x0637);
+MotionCia402.DescribeStatusword(0x0637);
 // "OperationEnabled: voltage enabled, remote, target reached"
 ```
 
 The other two objects:
 
 ```csharp
-Cia402.DescribeControlword(0x010F);      // "EnableOperation: halt"
-Cia402.DescribeModeOfOperation(8);       // "Cyclic Synchronous Position (csp)"
+MotionCia402.DescribeControlword(0x010F);      // "EnableOperation: halt"
+MotionCia402.DescribeModeOfOperation(8);       // "Cyclic Synchronous Position (csp)"
 
-Cia402.EncodeCommand(Cia402Command.Shutdown);         // 0x0006
-Cia402.EncodeCommand(Cia402Command.SwitchOn);         // 0x0007
-Cia402.EncodeCommand(Cia402Command.EnableOperation);  // 0x000F
+MotionCia402.EncodeCommand(Cia402Command.Shutdown);         // 0x0006
+MotionCia402.EncodeCommand(Cia402Command.SwitchOn);         // 0x0007
+MotionCia402.EncodeCommand(Cia402Command.EnableOperation);  // 0x000F
 ```
 
 Those last three are the enable sequence, in order. `EncodeCommand` is the exact inverse of `DecodeControlword`, and a test pins the round trip for every command.
+
+The decoders live on `MotionCia402` rather than a bare `Cia402`, which would collide with this package's own namespace: a type and a namespace of the same name compile fine but leave the type unreachable from anywhere else under `Dahlke.EtherCAT`, where a bare `Cia402` binds to the namespace and fails with CS0234. The prefix means every caller writes the same thing. The types themselves — `Cia402Status`, `Cia402State`, `Cia402Command`, `Cia402Mode`, `Cia402Controlword` — are unprefixed.
 
 ## The parts that are easy to get wrong
 
