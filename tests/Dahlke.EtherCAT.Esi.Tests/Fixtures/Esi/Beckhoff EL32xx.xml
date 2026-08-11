@@ -24,6 +24,104 @@
             <EBusCurrent>190</EBusCurrent>
           </Electrical>
         </Info>
+        <Profile>
+          <ProfileNo>5001</ProfileNo>
+          <Dictionary>
+            <DataTypes>
+              <DataType>
+                <Name>UDINT</Name>
+                <BitSize>32</BitSize>
+              </DataType>
+              <DataType>
+                <Name>USINT</Name>
+                <BitSize>8</BitSize>
+              </DataType>
+              <DataType>
+                <Name>DT1018</Name>
+                <BitSize>144</BitSize>
+                <SubItem>
+                  <SubIdx>0</SubIdx>
+                  <Name>SubIndex 000</Name>
+                  <Type>USINT</Type>
+                  <BitSize>8</BitSize>
+                  <BitOffs>0</BitOffs>
+                  <Flags>
+                    <Access>ro</Access>
+                  </Flags>
+                </SubItem>
+                <SubItem>
+                  <SubIdx>1</SubIdx>
+                  <Name>Vendor ID</Name>
+                  <Type>UDINT</Type>
+                  <BitSize>32</BitSize>
+                  <BitOffs>16</BitOffs>
+                  <Flags>
+                    <Access>ro</Access>
+                  </Flags>
+                </SubItem>
+                <SubItem>
+                  <SubIdx>2</SubIdx>
+                  <Name>Product code</Name>
+                  <Type>UDINT</Type>
+                  <BitSize>32</BitSize>
+                  <BitOffs>48</BitOffs>
+                  <Flags>
+                    <Access>ro</Access>
+                  </Flags>
+                </SubItem>
+              </DataType>
+            </DataTypes>
+            <Objects>
+              <Object>
+                <Index>#x1000</Index>
+                <Name>Device type</Name>
+                <Type>UDINT</Type>
+                <BitSize>32</BitSize>
+                <Info>
+                  <DefaultData>89134001</DefaultData>
+                </Info>
+                <Flags>
+                  <Access>ro</Access>
+                </Flags>
+              </Object>
+              <Object>
+                <Index>#x8000</Index>
+                <Name>RTD Settings</Name>
+                <Type>UDINT</Type>
+                <BitSize>32</BitSize>
+                <Info>
+                  <DefaultValue>0</DefaultValue>
+                </Info>
+                <Flags>
+                  <Access WriteRestrictions="PreOP">rw</Access>
+                </Flags>
+              </Object>
+              <Object>
+                <Index>#x1018</Index>
+                <Name>Identity</Name>
+                <Type>DT1018</Type>
+                <BitSize>144</BitSize>
+                <Info>
+                  <SubItem>
+                    <Name>SubIndex 000</Name>
+                    <Info>
+                      <DefaultData>04</DefaultData>
+                    </Info>
+                  </SubItem>
+                  <SubItem>
+                    <Name>Vendor ID</Name>
+                    <Info>
+                      <DefaultData>02000000</DefaultData>
+                    </Info>
+                  </SubItem>
+                </Info>
+                <Flags>
+                  <Access>ro</Access>
+                </Flags>
+              </Object>
+            </Objects>
+          </Dictionary>
+        </Profile>
       </Device>
       <Device>
         <Type ProductCode="#x0c843052" RevisionNo="#x00110000">EL3204</Type>
