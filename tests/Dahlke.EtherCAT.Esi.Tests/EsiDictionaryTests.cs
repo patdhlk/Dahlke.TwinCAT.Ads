@@ -137,10 +137,14 @@ public class EsiDictionaryTests
         identity.SubItems[1].Access.Should().Be(EsiAccess.ReadOnly);
     }
 
-    // The trap #66 does not mention. <Object><Info><SubItem> is sparse and prefix-truncated: it
-    // lists only the sub-items carrying default data. The fixture's 0x1018 lists 2 where DT1018
-    // declares 3. Joining by NAME keeps the defaults on the right members; joining by position
-    // would too, here — the next test is the one a positional join fails.
+    // <Object><Info><SubItem> is sparse and prefix-truncated: it lists only the sub-items
+    // carrying default data. The fixture's 0x1018 lists 2 where DT1018 declares 3. This
+    // particular truncation is a PREFIX ([SubIndex 000, Vendor ID] of [SubIndex 000, Vendor ID,
+    // Product code]), so a positional join would pass this test too — it reads info[0]/info[1]
+    // onto declared[0]/declared[1], which happen to be the same members the name join picks. The
+    // fixture can't be changed to make this one discriminate: Beckhoff EL32xx.xml is frozen. See
+    // Parse_joins_a_non_prefix_default_by_name_not_position below for the case a positional join
+    // actually gets wrong.
     [Fact]
     public async Task Parse_joins_sub_item_default_data_by_name()
     {
@@ -152,10 +156,11 @@ public class EsiDictionaryTests
         identity.SubItems[2].DefaultData.Should().BeNull();
     }
 
-    // A positional join would put "SubIndex 000"'s default data ("02") onto whichever member
-    // happens to sit at index 0 of the DATATYPE's list — correct here by luck. This fixture's
-    // truncation is on the SECOND member, so the assertion that "Elements" carries no default is
-    // what a positional join gets wrong once the lists differ in length in a real way.
+    // 0x1C12's <Info> names only "SubIndex 000" — the FIRST of DT1C12's two declared members —
+    // so this, too, is a prefix a positional join gets right by luck: info[0] lands on
+    // declared[0], and there is no declared[1] entry in <Info> to misplace. This test exists to
+    // pin the shape (unmatched member kept, not dropped, default null), not to distinguish the
+    // two joins. Parse_joins_a_non_prefix_default_by_name_not_position is the one that does.
     [Fact]
     public async Task Parse_leaves_an_unmatched_sub_item_without_default_data()
     {
@@ -167,6 +172,59 @@ public class EsiDictionaryTests
         assign.SubItems[0].DefaultData.Should().Be("02");
         assign.SubItems[1].Name.Should().Be("Elements");
         assign.SubItems[1].DefaultData.Should().BeNull();
+    }
+
+    // The case a positional join actually fails: 0x1C13's <Info> names only "Beta", the LAST of
+    // three declared members ([SubIndex 000, Alpha, Beta]) — not a prefix. A positional join
+    // reads info[0] ("Beta"'s default) onto declared[0] ("SubIndex 000") and leaves declared[1]
+    // and declared[2] without one, misattributing the default and losing it from where it
+    // belongs. The name join must instead leave SubIndex 000 and Alpha untouched and give Beta
+    // the default the file states for it.
+    [Fact]
+    public async Task Parse_joins_a_non_prefix_default_by_name_not_position()
+    {
+        var device = await EsiDeviceReader.TryReadAsync(El6xxx, new EsiKey(Beckhoff, El6001, Rev1));
+
+        device!.ObjectDictionary!.TryGetObject(0x1C13, out EsiObject? assign).Should().BeTrue();
+        assign!.SubItems.Should().HaveCount(3);
+        assign.SubItems[0].Name.Should().Be("SubIndex 000");
+        assign.SubItems[0].DefaultData.Should().BeNull();
+        assign.SubItems[1].Name.Should().Be("Alpha");
+        assign.SubItems[1].DefaultData.Should().BeNull();
+        assign.SubItems[2].Name.Should().Be("Beta");
+        assign.SubItems[2].DefaultData.Should().Be("03");
+    }
+
+    // The name join is by UNIQUE name — a name that is ambiguous on the declared side must not
+    // receive a default even though <Info> names it once. 0x1C14's DT1C14 declares two sub-items
+    // both named "Dup"; <Info> names "Dup" once with a default. Deleting the declared-count guard
+    // from EsiDictionaryParser would let both "Dup" members claim it.
+    [Fact]
+    public async Task Parse_leaves_sub_items_without_default_data_when_the_declared_name_is_duplicated()
+    {
+        var device = await EsiDeviceReader.TryReadAsync(El6xxx, new EsiKey(Beckhoff, El6001, Rev1));
+
+        device!.ObjectDictionary!.TryGetObject(0x1C14, out EsiObject? duplicate).Should().BeTrue();
+        duplicate!.SubItems.Should().HaveCount(2);
+        duplicate.SubItems[0].DefaultData.Should().BeNull();
+        duplicate.SubItems[1].DefaultData.Should().BeNull();
+    }
+
+    // The mirror case: a name that is ambiguous on the <Info> side must not receive a default
+    // even though it is unique among the declared members. 0x1C15's DT1C15 declares "Gamma"
+    // once, but <Info> names "Gamma" twice with two different defaults. Deleting the info-count
+    // guard from EsiDictionaryParser would let the later <Info><SubItem> silently win.
+    [Fact]
+    public async Task Parse_leaves_sub_items_without_default_data_when_the_info_name_is_duplicated()
+    {
+        var device = await EsiDeviceReader.TryReadAsync(El6xxx, new EsiKey(Beckhoff, El6001, Rev1));
+
+        device!.ObjectDictionary!.TryGetObject(0x1C15, out EsiObject? duplicate).Should().BeTrue();
+        duplicate!.SubItems.Should().HaveCount(2);
+        duplicate.SubItems[0].Name.Should().Be("Gamma");
+        duplicate.SubItems[0].DefaultData.Should().BeNull();
+        duplicate.SubItems[1].Name.Should().Be("Delta");
+        duplicate.SubItems[1].DefaultData.Should().BeNull();
     }
 
     // 19,967 of 637,647 sub-items in Beckhoff's set omit <SubIdx> because they are array members
