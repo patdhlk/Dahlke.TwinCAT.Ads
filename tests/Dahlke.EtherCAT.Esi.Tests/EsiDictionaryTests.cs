@@ -113,4 +113,82 @@ public class EsiDictionaryTests
         device.Should().NotBeNull();
         device!.ObjectDictionary.Should().BeNull();
     }
+
+    private const uint El6001 = 0x17CD3052;
+    private const uint El6002 = 0x17CE3052;
+
+    private static string El6xxx =>
+        Path.Combine(AppContext.BaseDirectory, "Fixtures", "EsiDetail", "Beckhoff EL6xxx.xml");
+
+    // #66's core requirement: record sub-items are NESTED under their parent, not flattened, and
+    // carry the sub-index a consumer needs to render 0xIIII:SS.
+    [Fact]
+    public async Task Parse_nests_record_sub_items_under_their_parent_object()
+    {
+        var dictionary = await El3204DictionaryAsync();
+
+        dictionary.TryGetObject(0x1018, out EsiObject? identity).Should().BeTrue();
+        identity!.SubItems.Should().HaveCount(3);
+        identity.SubItems.Select(s => s.SubIndex).Should().Equal(new byte?[] { 0, 1, 2 });
+        identity.SubItems[1].Name.Should().Be("Vendor ID");
+        identity.SubItems[1].DataType.Should().Be("UDINT");
+        identity.SubItems[1].BitSize.Should().Be(32);
+        identity.SubItems[1].BitOffset.Should().Be(16);
+        identity.SubItems[1].Access.Should().Be(EsiAccess.ReadOnly);
+    }
+
+    // The trap #66 does not mention. <Object><Info><SubItem> is sparse and prefix-truncated: it
+    // lists only the sub-items carrying default data. The fixture's 0x1018 lists 2 where DT1018
+    // declares 3. Joining by NAME keeps the defaults on the right members; joining by position
+    // would too, here — the next test is the one a positional join fails.
+    [Fact]
+    public async Task Parse_joins_sub_item_default_data_by_name()
+    {
+        var dictionary = await El3204DictionaryAsync();
+
+        dictionary.TryGetObject(0x1018, out EsiObject? identity).Should().BeTrue();
+        identity!.SubItems[0].DefaultData.Should().Be("04");
+        identity.SubItems[1].DefaultData.Should().Be("02000000");
+        identity.SubItems[2].DefaultData.Should().BeNull();
+    }
+
+    // A positional join would put "SubIndex 000"'s default data ("02") onto whichever member
+    // happens to sit at index 0 of the DATATYPE's list — correct here by luck. This fixture's
+    // truncation is on the SECOND member, so the assertion that "Elements" carries no default is
+    // what a positional join gets wrong once the lists differ in length in a real way.
+    [Fact]
+    public async Task Parse_leaves_an_unmatched_sub_item_without_default_data()
+    {
+        var device = await EsiDeviceReader.TryReadAsync(El6xxx, new EsiKey(Beckhoff, El6001, Rev1));
+
+        device!.ObjectDictionary!.TryGetObject(0x1C12, out EsiObject? assign).Should().BeTrue();
+        assign!.SubItems.Should().HaveCount(2);
+        assign.SubItems[0].Name.Should().Be("SubIndex 000");
+        assign.SubItems[0].DefaultData.Should().Be("02");
+        assign.SubItems[1].Name.Should().Be("Elements");
+        assign.SubItems[1].DefaultData.Should().BeNull();
+    }
+
+    // 19,967 of 637,647 sub-items in Beckhoff's set omit <SubIdx> because they are array members
+    // whose indices are implied by <ArrayInfo>. Deriving one would be inference, so absence is
+    // reported as absence.
+    [Fact]
+    public async Task Parse_reports_an_array_sub_item_without_a_sub_index_as_null()
+    {
+        var device = await EsiDeviceReader.TryReadAsync(El6xxx, new EsiKey(Beckhoff, El6001, Rev1));
+
+        device!.ObjectDictionary!.TryGetObject(0x1C12, out EsiObject? assign).Should().BeTrue();
+        assign!.SubItems[0].SubIndex.Should().Be(0);
+        assign.SubItems[1].SubIndex.Should().BeNull();
+    }
+
+    // #66: a declared-but-empty dictionary is NOT the same answer as no dictionary at all.
+    [Fact]
+    public async Task Parse_distinguishes_an_empty_dictionary_from_an_absent_one()
+    {
+        var device = await EsiDeviceReader.TryReadAsync(El6xxx, new EsiKey(Beckhoff, El6002, Rev1));
+
+        device!.ObjectDictionary.Should().NotBeNull();
+        device.ObjectDictionary!.Objects.Should().BeEmpty();
+    }
 }
