@@ -31,12 +31,17 @@ public readonly record struct EsiKey(uint VendorId, uint ProductCode, uint Revis
 /// draws across a segment must be able to tell an unknown contributor from one that draws
 /// nothing. Text that cannot be parsed as a number is also null, which does conflate "states
 /// something unreadable" with "states nothing"; no such device exists in Beckhoff's 868 MB set,
-/// so a third state would be surface with no reader.
+/// so a third state would be surface with no reader for it.
 /// </para>
 /// <para>
 /// Aggregating these into a per-segment load against a segment budget is the consumer's job.
 /// This library reports the per-device figure.
 /// </para>
+/// </param>
+/// <param name="ObjectDictionary">
+/// The CoE object dictionary the device declares, or null when it declares none. A device that
+/// declares an EMPTY dictionary reports a non-null value whose <c>Objects</c> is empty — the two
+/// are deliberately different answers.
 /// </param>
 public sealed record EsiDevice(
     string? VendorName,
@@ -44,7 +49,8 @@ public sealed record EsiDevice(
     string? NameDe,
     string? Group,
     string? Url,
-    int? EBusCurrentMa);
+    int? EBusCurrentMa,
+    EsiObjectDictionary? ObjectDictionary);
 
 /// <summary>Why an ESI lookup produced a device, or why it did not.</summary>
 public enum EsiStatus
