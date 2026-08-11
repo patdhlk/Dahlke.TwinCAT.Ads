@@ -92,6 +92,26 @@ stated — deriving one would be inference, so absence is reported as absence.
 `null` means the device declares no dictionary. A device declaring an *empty* one reports a
 non-null value with an empty `Objects` — a different answer, deliberately.
 
+**Reports the declared process-data map.** `EsiDevice.ProcessData` answers "what does this slave
+put on and take off the wire, through which sync manager", entirely offline:
+
+```csharp
+foreach (var pdo in device.ProcessData?.Pdos ?? [])
+{
+    // Direction is slave-relative: Transmit is the slave transmitting,
+    // which is the master's process INPUTS.
+    Console.WriteLine($"{pdo.Direction} 0x{pdo.Index:X4} {pdo.Name} -> Sm {pdo.SyncManager}");
+}
+```
+
+`SyncManager` is nullable and null is the *majority* case — 37,541 of 58,128 PDOs in Beckhoff's
+published set declare no `Sm`. Padding entries (index `0`, a bit length, nothing else) are
+reported rather than filtered, because dropping them corrupts any bit-offset arithmetic a
+consumer does over the entries.
+
+`null` means the device declares no sync managers and no PDOs at all; a device declaring an empty
+map reports a non-null value with empty lists.
+
 ## Registration is not eager
 
 `AddEsiCatalog` does not resolve the catalogue. Whether a misconfigured ESI directory should be reported at startup or on first use is a hosting decision, so it is left to you:

@@ -11,7 +11,7 @@ A minor, not the patch this section was opened as: it adds two members to the pu
 `IEtherCatClient` interface and a seventh package to the repository. Additive for everyone who
 *calls* the interface — existing code compiles and behaves identically — and source-breaking for
 anyone who *implements* it, who gains two unimplemented methods, or who constructs or deconstructs
-an `EsiDevice`, which now takes seven positional parameters, up from five. The ESI ranking fix
+an `EsiDevice`, which now takes eight positional parameters, up from five. The ESI ranking fix
 below was the whole of the release when it was numbered 0.9.2 and is unchanged by the renumber.
 
 ### Added
@@ -188,8 +188,9 @@ below was the whole of the release when it was numbered 0.9.2 and is unchanged b
 
   **This reshapes a released record.** `EsiDevice`'s five-argument constructor and five-output
   `Deconstruct` — both recorded in `PublicAPI.Shipped.txt` since 0.9.0 — are gone. The record now
-  takes seven positional parameters: the original five, plus `EBusCurrentMa` and
-  `ObjectDictionary` ([#66](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/66)). Code that
+  takes eight positional parameters: the original five, plus `EBusCurrentMa`,
+  `ObjectDictionary` ([#66](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/66)) and
+  `ProcessData` ([#67](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/67)). Code that
   constructs or deconstructs `EsiDevice` positionally must be updated to match. Reading the
   properties is unaffected. Pre-1.0.0, which is where the allowance to do this comes from.
 
@@ -217,6 +218,33 @@ below was the whole of the release when it was numbered 0.9.2 and is unchanged b
 
   A device declaring no dictionary reports `null`; one declaring an empty dictionary reports a
   non-null value with an empty `Objects`.
+
+- **`EsiDevice` reports each device's declared process-data map.**
+  ([#67](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/67)) `ProcessData`, from
+  `<TxPdo>` / `<RxPdo>` / `<Sm>`: every PDO with its entries (index, sub-index, bit length, name,
+  data type) and its sync-manager assignment, plus the declared sync managers themselves. The
+  offline complement to a live process-image read.
+
+  **`EsiPdoDirection` is slave-relative and says so.** `Transmit` is `<TxPdo>` — what the slave
+  transmits, which is the master's process *inputs*. Reversing that is the classic EtherCAT
+  confusion, so the perspective is documented on the enum rather than left to a reader's
+  assumption. It comes from the element name, never inferred from a string.
+
+  Three shapes chosen against the obvious ones:
+
+  | | |
+  |---|---|
+  | One `Pdos` list, not `TxPdos` and `RxPdos` | Each PDO carries its own `Direction`, so it stays self-describing wherever it is passed. Two lists *plus* a direction field is redundant state that can disagree; two lists *without* one means a PDO handed to a function alone no longer knows what it is. Group with `Pdos.Where(p => p.Direction == EsiPdoDirection.Transmit)`. |
+  | `EsiPdo.SyncManager` is nullable | The `Sm` attribute is absent on 37,541 of 58,128 PDOs in Beckhoff's published set — the majority, not an edge case — so a non-nullable field would have to invent an assignment for most of them. |
+  | Padding entries are reported, not filtered | `<Entry><Index>#x0</Index><BitLen>7</BitLen></Entry>` with no name, sub-index or type is normal ESI. Dropping it would silently corrupt any consumer computing bit offsets down the PDO, which is worse than reporting an entry with three nulls. |
+
+  `EsiSyncManager.Number` is the element's ordinal position, because that is what a PDO's `Sm`
+  attribute dereferences. Note this is a sync *manager*, not a sync *unit* — a different concept,
+  carried by ESI's `Su` attribute, and unrelated to `IEtherCatClient.GetSyncUnitsAsync` despite
+  the similar name.
+
+  A device declaring no sync managers and no PDOs reports `null`; one declaring an empty map
+  reports a non-null value with empty lists.
 
 ### Changed
 
