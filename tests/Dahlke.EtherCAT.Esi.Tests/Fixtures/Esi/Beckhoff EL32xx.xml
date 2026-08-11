@@ -19,6 +19,11 @@
         <Name LcId="1031">EL3204 4K. Ana. Eingang PT100 (RTD) Meﬂbereich</Name>
         <GroupType>AnaIn</GroupType>
         <URL>http://www.beckhoff.de/EL3204-rev1</URL>
+        <Info>
+          <Electrical>
+            <EBusCurrent>190</EBusCurrent>
+          </Electrical>
+        </Info>
       </Device>
       <Device>
         <Type ProductCode="#x0c843052" RevisionNo="#x00110000">EL3204</Type>
@@ -31,6 +36,19 @@
         <Type ProductCode="#x0c823052" RevisionNo="#x00100000">EL3202</Type>
         <Name LcId="1033">EL3202 2Ch. Ana. Input PT100 (RTD)</Name>
         <GroupType>AnaIn</GroupType>
+      </Device>
+      <Device>
+        <Type ProductCode="#x0c803052" RevisionNo="#x00100000">EL3200</Type>
+        <Name LcId="1033">EL3200 zero-draw device</Name>
+        <Info>
+          <Electrical>
+            <EBusCurrent>0</EBusCurrent>
+          </Electrical>
+        </Info>
+      </Device>
+      <Device>
+        <Type ProductCode="#x0c853052" RevisionNo="#x00100000">EL3205</Type>
+        <Name LcId="1033">EL3205 device with no Info element</Name>
       </Device>
     </Devices>
   </Descriptions>

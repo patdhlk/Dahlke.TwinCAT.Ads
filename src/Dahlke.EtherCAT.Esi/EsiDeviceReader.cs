@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -146,7 +145,9 @@ internal static class EsiDeviceReader
             NameEn: LocalizedName(device, "1033") ?? BareName(device),
             NameDe: LocalizedName(device, "1031"),
             Group: GroupName(device, groups),
-            Url: EsiXml.Text(device.Element("URL")));
+            Url: EsiXml.Text(device.Element("URL")),
+            EBusCurrentMa: EsiXml.ParseInt(
+                EsiXml.Text(device.Element("Info")?.Element("Electrical")?.Element("EBusCurrent"))));
 
     /// <summary>
     /// The group's own name, matched from the device's <c>&lt;GroupType&gt;</c>. Null when the
@@ -181,5 +182,4 @@ internal static class EsiDeviceReader
     /// </summary>
     private static string? BareName(XElement device) =>
         EsiXml.Text(device.Elements("Name").FirstOrDefault(n => n.Attribute("LcId") is null));
-
 }

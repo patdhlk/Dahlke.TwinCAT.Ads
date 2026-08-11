@@ -1,1 +1,7 @@
 #nullable enable
+*REMOVED*Dahlke.EtherCAT.Esi.EsiDevice.Deconstruct(out string? VendorName, out string? NameEn, out string? NameDe, out string? Group, out string? Url) -> void
+*REMOVED*Dahlke.EtherCAT.Esi.EsiDevice.EsiDevice(string? VendorName, string? NameEn, string? NameDe, string? Group, string? Url) -> void
+Dahlke.EtherCAT.Esi.EsiDevice.Deconstruct(out string? VendorName, out string? NameEn, out string? NameDe, out string? Group, out string? Url, out int? EBusCurrentMa) -> void
+Dahlke.EtherCAT.Esi.EsiDevice.EBusCurrentMa.get -> int?
+Dahlke.EtherCAT.Esi.EsiDevice.EBusCurrentMa.init -> void
+Dahlke.EtherCAT.Esi.EsiDevice.EsiDevice(string? VendorName, string? NameEn, string? NameDe, string? Group, string? Url, int? EBusCurrentMa) -> void

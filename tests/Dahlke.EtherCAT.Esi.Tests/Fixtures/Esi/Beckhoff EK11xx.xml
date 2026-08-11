@@ -16,6 +16,11 @@
         <Type ProductCode="#x044c2c52" RevisionNo="#x00100000">EK1100</Type>
         <Name LcId="1033">EK1100 EtherCAT Coupler</Name>
         <GroupType>NoSuchGroup</GroupType>
+        <Info>
+          <Electrical>
+            <EBusCurrent>-500</EBusCurrent>
+          </Electrical>
+        </Info>
       </Device>
     </Devices>
   </Descriptions>
