@@ -28,6 +28,10 @@ internal static class EsiDictionaryParser
         {
             if (EsiXml.Text(dataType.Element("Name")) is string name)
             {
+                // A duplicated data-type name is malformed ESI. Keeping the first and carrying on
+                // beats throwing, for the same reason EsiObjectDictionary keeps the first of a
+                // duplicated object index: one bad declaration must not cost a caller the whole
+                // device.
                 dataTypes.TryAdd(name, dataType);
             }
         }
@@ -69,6 +73,12 @@ internal static class EsiDictionaryParser
     /// <c>&lt;Type&gt;</c> names a data type this file does not declare — which is an absence,
     /// not something to invent members for.
     /// </summary>
+    /// <remarks>
+    /// ESI splits a record object's declaration in two, and this is the only place that split is
+    /// reconciled. <c>&lt;DataTypes&gt;&lt;DataType&gt;</c> holds the STRUCTURE — <c>SubIdx</c>,
+    /// <c>Type</c>, <c>BitSize</c>, <c>BitOffs</c>, <c>Flags</c> — and the object's own
+    /// <c>&lt;Info&gt;&lt;SubItem&gt;</c> list holds nothing but names and DEFAULT DATA.
+    /// </remarks>
     private static IReadOnlyList<EsiObjectSubItem> SubItems(
         XElement obj, IReadOnlyDictionary<string, XElement> dataTypes)
     {
@@ -84,27 +94,91 @@ internal static class EsiDictionaryParser
             return [];
         }
 
+        Dictionary<string, string?> defaults = DefaultDataByUniqueName(obj, declared);
+
         var result = new List<EsiObjectSubItem>(declared.Count);
         foreach (XElement subItem in declared)
         {
             (EsiAccess? access, string? accessRaw, string? writeRestrictions) =
                 ReadAccess(subItem.Element("Flags"));
 
+            string? name = EsiXml.Text(subItem.Element("Name"));
+
             result.Add(new EsiObjectSubItem(
                 SubIndex: EsiXml.ParseByte(EsiXml.Text(subItem.Element("SubIdx"))),
-                Name: EsiXml.Text(subItem.Element("Name")),
+                Name: name,
                 DataType: EsiXml.Text(subItem.Element("Type")),
                 BitSize: EsiXml.ParseInt(EsiXml.Text(subItem.Element("BitSize"))),
                 BitOffset: EsiXml.ParseInt(EsiXml.Text(subItem.Element("BitOffs"))),
                 Access: access,
                 AccessRaw: accessRaw,
                 WriteRestrictions: writeRestrictions,
-                // Task 6 replaces this with the name-join against the object's own
-                // <Info><SubItem> list. Null until then, and the tests there are what force it.
-                DefaultData: null));
+                DefaultData: name is not null && defaults.TryGetValue(name, out string? d) ? d : null));
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Default data from the object's own <c>&lt;Info&gt;&lt;SubItem&gt;</c> list, keyed by name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>By name, never by position.</b> That list is sparse and prefix-truncated — it holds only
+    /// the sub-items that carry a default. In Beckhoff's published set, 55,729 objects list a
+    /// different NUMBER of sub-items than their data type declares (31,087 from truncation, 24,642
+    /// from array-element expansion, where an object of an array type lists one entry per element
+    /// while the type declares two), and a further 2,081 agree on count but disagree on names. A
+    /// positional merge is therefore wrong for 57,810 of 165,490 objects — 35% — and it fails
+    /// silently, attributing "Product code"'s default to "Revision".
+    /// </para>
+    /// <para>
+    /// A name is accepted only when it occurs EXACTLY ONCE on both sides. Anything ambiguous is
+    /// dropped, and the sub-item reports a null default: no default at all beats one that might
+    /// belong to a different member.
+    /// </para>
+    /// </remarks>
+    private static Dictionary<string, string?> DefaultDataByUniqueName(
+        XElement obj, List<XElement> declared)
+    {
+        List<XElement> info = obj.Element("Info")?.Elements("SubItem").ToList() ?? [];
+        if (info.Count == 0)
+        {
+            return new();
+        }
+
+        Dictionary<string, int> declaredCounts = CountNames(declared);
+        Dictionary<string, int> infoCounts = CountNames(info);
+
+        var result = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (XElement subItem in info)
+        {
+            if (EsiXml.Text(subItem.Element("Name")) is not string name ||
+                declaredCounts.GetValueOrDefault(name) != 1 ||
+                infoCounts.GetValueOrDefault(name) != 1)
+            {
+                continue;
+            }
+
+            result[name] = EsiXml.Text(subItem.Element("Info")?.Element("DefaultData"));
+        }
+
+        return result;
+    }
+
+    /// <summary>How many times each name occurs across <paramref name="subItems"/>.</summary>
+    private static Dictionary<string, int> CountNames(IEnumerable<XElement> subItems)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (XElement subItem in subItems)
+        {
+            if (EsiXml.Text(subItem.Element("Name")) is string name)
+            {
+                counts[name] = counts.GetValueOrDefault(name) + 1;
+            }
+        }
+
+        return counts;
     }
 
     /// <summary>
