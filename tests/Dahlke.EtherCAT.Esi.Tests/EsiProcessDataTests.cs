@@ -195,10 +195,13 @@ public class EsiProcessDataTests
         device!.ProcessData.Should().BeNull();
     }
 
-    // #67: a device declaring an EMPTY map is not the same answer as one declaring none. EL6002
-    // declares a sync manager and no PDOs.
+    // Partial process data is still process data: EL6002 declares one sync manager and no PDOs,
+    // so it reports an instance with an empty Pdos rather than null. Deliberately NOT named after
+    // "an empty map" — ESI has no container element for process data, so a device declaring an
+    // empty map is indistinguishable from one declaring none and both report null (the test
+    // above). This is the only shape of emptiness the format can actually express.
     [Fact]
-    public async Task Parse_distinguishes_an_empty_process_data_map_from_an_absent_one()
+    public async Task Parse_reports_a_device_with_sync_managers_but_no_pdos_as_an_empty_pdo_list()
     {
         var device = await EsiDeviceReader.TryReadAsync(El6xxx, new EsiKey(Beckhoff, El6002, Rev1));
 

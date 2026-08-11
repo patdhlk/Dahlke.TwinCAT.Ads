@@ -11,8 +11,13 @@ internal static class EsiProcessDataParser
     /// <summary>
     /// The device's process data, or null when it declares no <c>&lt;Sm&gt;</c>,
     /// <c>&lt;TxPdo&gt;</c> and <c>&lt;RxPdo&gt;</c> at all. A device declaring any of the three
-    /// returns an instance, so "declares an empty map" and "declares none" stay different
-    /// answers.
+    /// returns an instance.
+    /// <para>
+    /// Note this is NOT the dictionary's absent-versus-empty distinction: ESI gives process data
+    /// no container element — the three are direct children of <c>&lt;Device&gt;</c> — so a device
+    /// declaring an empty map writes the same XML as one declaring none, and both report null.
+    /// See <see cref="EsiDevice.ProcessData"/>, which states the same limitation to callers.
+    /// </para>
     /// </summary>
     public static EsiProcessData? Parse(XElement device)
     {
