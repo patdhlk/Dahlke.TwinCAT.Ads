@@ -48,6 +48,104 @@
                   </Flags>
                 </SubItem>
               </DataType>
+              <!--
+                Non-prefix truncation: <Info> names only the LAST of three declared members. A
+                positional join reads info[0] as SubIndex 000's default and leaves Alpha/Beta
+                without one; the name join must instead leave SubIndex 000 and Alpha untouched and
+                give Beta the only default the file states.
+              -->
+              <DataType>
+                <Name>DT1C13</Name>
+                <BitSize>96</BitSize>
+                <SubItem>
+                  <SubIdx>0</SubIdx>
+                  <Name>SubIndex 000</Name>
+                  <Type>UDINT</Type>
+                  <BitSize>8</BitSize>
+                  <BitOffs>0</BitOffs>
+                  <Flags>
+                    <Access>ro</Access>
+                  </Flags>
+                </SubItem>
+                <SubItem>
+                  <SubIdx>1</SubIdx>
+                  <Name>Alpha</Name>
+                  <Type>UDINT</Type>
+                  <BitSize>32</BitSize>
+                  <BitOffs>16</BitOffs>
+                  <Flags>
+                    <Access>rw</Access>
+                  </Flags>
+                </SubItem>
+                <SubItem>
+                  <SubIdx>2</SubIdx>
+                  <Name>Beta</Name>
+                  <Type>UDINT</Type>
+                  <BitSize>32</BitSize>
+                  <BitOffs>48</BitOffs>
+                  <Flags>
+                    <Access>rw</Access>
+                  </Flags>
+                </SubItem>
+              </DataType>
+              <!--
+                Duplicated name on the DECLARED side: both sub-items are named "Dup". <Info> names
+                "Dup" once, but the name is ambiguous among the declared members, so neither may
+                receive the default.
+              -->
+              <DataType>
+                <Name>DT1C14</Name>
+                <BitSize>64</BitSize>
+                <SubItem>
+                  <SubIdx>0</SubIdx>
+                  <Name>Dup</Name>
+                  <Type>UDINT</Type>
+                  <BitSize>32</BitSize>
+                  <BitOffs>0</BitOffs>
+                  <Flags>
+                    <Access>ro</Access>
+                  </Flags>
+                </SubItem>
+                <SubItem>
+                  <SubIdx>1</SubIdx>
+                  <Name>Dup</Name>
+                  <Type>UDINT</Type>
+                  <BitSize>32</BitSize>
+                  <BitOffs>32</BitOffs>
+                  <Flags>
+                    <Access>rw</Access>
+                  </Flags>
+                </SubItem>
+              </DataType>
+              <!--
+                Duplicated name on the INFO side: "Gamma" is declared once, but <Info> lists it
+                twice with two different defaults, so it is ambiguous which one applies and neither
+                may be attached.
+              -->
+              <DataType>
+                <Name>DT1C15</Name>
+                <BitSize>64</BitSize>
+                <SubItem>
+                  <SubIdx>0</SubIdx>
+                  <Name>Gamma</Name>
+                  <Type>UDINT</Type>
+                  <BitSize>32</BitSize>
+                  <BitOffs>0</BitOffs>
+                  <Flags>
+                    <Access>ro</Access>
+                  </Flags>
+                </SubItem>
+                <SubItem>
+                  <SubIdx>1</SubIdx>
+                  <Name>Delta</Name>
+                  <Type>UDINT</Type>
+                  <BitSize>32</BitSize>
+                  <BitOffs>32</BitOffs>
+                  <Flags>
+                    <Access>rw</Access>
+                  </Flags>
+                </SubItem>
+              </DataType>
             </DataTypes>
             <Objects>
               <Object>
@@ -60,6 +158,63 @@
                     <Name>SubIndex 000</Name>
                     <Info>
                       <DefaultData>02</DefaultData>
+                    </Info>
+                  </SubItem>
+                </Info>
+                <Flags>
+                  <Access>ro</Access>
+                </Flags>
+              </Object>
+              <Object>
+                <Index>#x1c13</Index>
+                <Name>RxPDO assign non-prefix</Name>
+                <Type>DT1C13</Type>
+                <BitSize>96</BitSize>
+                <Info>
+                  <SubItem>
+                    <Name>Beta</Name>
+                    <Info>
+                      <DefaultData>03</DefaultData>
+                    </Info>
+                  </SubItem>
+                </Info>
+                <Flags>
+                  <Access>ro</Access>
+                </Flags>
+              </Object>
+              <Object>
+                <Index>#x1c14</Index>
+                <Name>Duplicate declared name</Name>
+                <Type>DT1C14</Type>
+                <BitSize>64</BitSize>
+                <Info>
+                  <SubItem>
+                    <Name>Dup</Name>
+                    <Info>
+                      <DefaultData>04</DefaultData>
+                    </Info>
+                  </SubItem>
+                </Info>
+                <Flags>
+                  <Access>ro</Access>
+                </Flags>
+              </Object>
+              <Object>
+                <Index>#x1c15</Index>
+                <Name>Duplicate info name</Name>
+                <Type>DT1C15</Type>
+                <BitSize>64</BitSize>
+                <Info>
+                  <SubItem>
+                    <Name>Gamma</Name>
+                    <Info>
+                      <DefaultData>05</DefaultData>
+                    </Info>
+                  </SubItem>
+                  <SubItem>
+                    <Name>Gamma</Name>
+                    <Info>
+                      <DefaultData>06</DefaultData>
                     </Info>
                   </SubItem>
                 </Info>

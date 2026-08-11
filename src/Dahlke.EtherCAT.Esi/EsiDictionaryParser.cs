@@ -113,7 +113,7 @@ internal static class EsiDictionaryParser
                 Access: access,
                 AccessRaw: accessRaw,
                 WriteRestrictions: writeRestrictions,
-                DefaultData: name is not null && defaults.TryGetValue(name, out string? d) ? d : null));
+                DefaultData: name is null ? null : defaults.GetValueOrDefault(name)));
         }
 
         return result;
@@ -139,12 +139,12 @@ internal static class EsiDictionaryParser
     /// </para>
     /// </remarks>
     private static Dictionary<string, string?> DefaultDataByUniqueName(
-        XElement obj, List<XElement> declared)
+        XElement obj, IReadOnlyList<XElement> declared)
     {
         List<XElement> info = obj.Element("Info")?.Elements("SubItem").ToList() ?? [];
         if (info.Count == 0)
         {
-            return new();
+            return new(StringComparer.Ordinal);
         }
 
         Dictionary<string, int> declaredCounts = CountNames(declared);
