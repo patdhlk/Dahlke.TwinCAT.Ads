@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.2]
 
+> **Version number to confirm before release.** This section adds a member to the public
+> `IEtherCatClient` interface, which is source-breaking for anyone who *implements* it (additive for
+> everyone who only calls it), so a patch number understates it. `0.10.0` is the honest label; the
+> heading is left as it was found rather than renumbered on this branch, because which release this
+> ships in is a release decision.
+
+### Added
+
+- **`IEtherCatClient` can now write CoE objects, and reports the slave's own SDO abort code when it
+  refuses.** ([#73](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/73)) The client could read
+  a slave's object dictionary and not write it: `ReadCoeObjectAsync` existed, and the only write in
+  the whole class was the IG 0x12 error-counter reset. `WriteCoeObjectAsync` is the SDO download that
+  completes it — same addressing (the slave's fixed address as the **ADS port**, not the index offset
+  the diagnostic reads use), same index group 0xF302, same on-demand-only rule.
+
+  It exists because its absence was measured in days. A Bonfiglioli ACU drive commissioning had to
+  change roughly ten drive parameters over CoE — control mode, enable release, setpoint source,
+  minimum frequency, bus-fault reaction, speed cap — and none of it was reachable through this
+  library, so all of it was done by hand with `tcadstool raw` over SSH.
+
+  **A refusal is a result, not an exception**, and the point of the result is the slave's reason:
+
+  | `CoeWriteResult.Reason` | What answered |
+  |---|---|
+  | `NoMailbox` | The router, or nothing at all — a coupler or plain I/O terminal cannot serve CoE |
+  | `ObjectNotFound` | The router, with `DeviceInvalidOffset` |
+  | `SdoAbort` | **The slave itself**, naming a reason — `AbortCode` carries it verbatim |
+  | `AdsError` | Anything else |
+
+  `CoeFailureReason.SdoAbort` and `AbortCode` are the part that was asked for by name. An abort code
+  reaching a caller as a generic failure is the diagnosis being thrown away: 0x06010002 means the
+  object is read-only, 0x06090030 that the value is out of the parameter's range, 0x08000021 that the
+  drive is in local control, and those are three different next actions for whoever is standing at
+  the machine. `Error` carries the code in hex plus its ETG.1000-6 description where one is known,
+  and a code with no description is still reported as an abort with its number — a vendor's own abort
+  is still the answer.
+
+  Abort codes and ADS error codes arrive in the same 32-bit field, so telling them apart rests on the
+  two spaces not overlapping. Every ETG.1000-6 abort has 0x05, 0x06 or 0x08 as its top byte and no
+  member of Beckhoff's `AdsErrorCode` does — checked across the whole enum in TwinCAT.Ads 7.0.292 and
+  pinned by a test, so a future release that added such a member fails the build rather than quietly
+  reporting an ADS error as a slave abort.
+
+  **Not verified against hardware in this repository.** That the master passes a slave's abort code
+  through the ADS error field is what the commissioning above reported; the rack this repository's
+  notes come from has no drive to abort a write, and nothing here re-measured it. If a master
+  answered some other way, the call lands in `AdsError` exactly as it would have before — the cost of
+  the assumption being wrong is an unused code path, not a wrong reading. Everything else is covered
+  in simulation: the write round-trips through the seeded raw-channel store and the classification of
+  every failure shape is pinned.
+
+  **A write that gets no answer is retried, so it can reach the slave twice.** `RawChannels:RetryCount`
+  (1 by default) applies to this call like every other, which is right for a parameter store —
+  writing 2500 twice leaves 2500 — and wrong for an object whose write is a *command*: a
+  save-to-EEPROM trigger such as 0x1010:01, a counter, a queue push. A slave that received the first
+  write and only lost the answer cannot tell the retry from a fresh request. Set `RetryCount` to 0 in
+  a host that writes those. This is documented on the method, in the package README and in the
+  per-call-site retry table on `EtherCatClient` rather than left for a commissioning engineer to
+  discover.
+
+  Three things the method deliberately does not do: read the value back (a device may clamp, round,
+  or store to a shadow copy pending a save command), encode CoE data types for the caller (`data`
+  goes on the wire as given, so a width or byte-order mismatch is answered with abort 0x06070010
+  rather than silently padded), and touch the polling loop.
+
+### Changed
+
+- **A CoE read that a slave aborts is now reported as `SdoAbort` rather than `AdsError`.** `Classify`
+  is shared between the read and the write, so the read path gained the same abort recognition and
+  `CoeReadResult.AbortCode` alongside it. A caller matching on `CoeFailureReason.AdsError` to catch
+  aborted reads — 0x06010001, an attempt to read a write-only object, is a real answer a read can get
+  — needs to match `SdoAbort` too. `CoeReadResult.Error` also renders an undefined error code in hex
+  now: `AdsErrorCode.ToString()` renders one in **decimal**, so 0x06010002 previously arrived as
+  `"100728834"`, which is unreadable whether or not it is an abort. A code the enum does define still
+  renders as its member name, unchanged.
+
 ### Fixed
 
 - **ESI candidate ranking now reads the `x` in a vendor file name as the digit it stands for, so
