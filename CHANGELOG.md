@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 A minor, not the patch this section was opened as: it adds two members to the public
 `IEtherCatClient` interface and a seventh package to the repository. Additive for everyone who
 *calls* the interface — existing code compiles and behaves identically — and source-breaking for
-anyone who *implements* it, who gains two unimplemented methods. The ESI ranking fix below was the
-whole of the release when it was numbered 0.9.2 and is unchanged by the renumber.
+anyone who *implements* it, who gains two unimplemented methods, or who constructs or deconstructs
+an `EsiDevice`, which gained a sixth positional parameter. The ESI ranking fix below was the whole
+of the release when it was numbered 0.9.2 and is unchanged by the renumber.
 
 ### Added
 
@@ -166,6 +167,30 @@ whole of the release when it was numbered 0.9.2 and is unchanged by the renumber
   or store to a shadow copy pending a save command), encode CoE data types for the caller (`data`
   goes on the wire as given, so a width or byte-order mismatch is answered with abort 0x06070010
   rather than silently padded), and touch the polling loop.
+
+- **`EsiDevice` reports each device's declared E-bus current.**
+  ([#65](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/65)) `EBusCurrentMa`, in mA, from
+  `<Info><Electrical><EBusCurrent>`.
+
+  **Absent is `null`, never `0`.** 478 devices in Beckhoff's published set declare a genuine `0`,
+  so a consumer summing draws across an E-bus segment must be able to tell an unknown contributor
+  from one that genuinely draws nothing. That is the defect class of [#61](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/61)
+  — a hardcoded zero a caller cannot tell from a reading.
+
+  **The sign is ESI's own, and is documented rather than normalised: positive draws from the
+  E-bus, negative supplies it.** An EL3201 terminal declares `190`; an EK1100 coupler declares
+  `-500`, and its own name reads "EK1100 EtherCAT Coupler (0.5A E-Bus)". The issue asked for the
+  convention to be documented *or* the two modelled separately — ESI carries a single signed
+  integer and does not distinguish them structurally, so there is nothing to separate.
+
+  Aggregating per-device figures into a per-segment load against a segment budget stays the
+  consumer's job, as the issue specifies.
+
+  **This reshapes a released record.** `EsiDevice` gained a sixth positional parameter, so its
+  five-argument constructor and five-output `Deconstruct` — both recorded in
+  `PublicAPI.Shipped.txt` since 0.9.0 — are gone. Code that writes `new EsiDevice(vendor, en, de,
+  group, url)` or deconstructs into five variables must add the sixth. Reading the properties is
+  unaffected. Pre-1.0.0, which is where the allowance to do this comes from.
 
 ### Changed
 
