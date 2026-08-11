@@ -5,12 +5,14 @@ Dahlke.EtherCAT.Esi.EsiAccess
 Dahlke.EtherCAT.Esi.EsiAccess.ReadOnly = 0 -> Dahlke.EtherCAT.Esi.EsiAccess
 Dahlke.EtherCAT.Esi.EsiAccess.ReadWrite = 2 -> Dahlke.EtherCAT.Esi.EsiAccess
 Dahlke.EtherCAT.Esi.EsiAccess.WriteOnly = 1 -> Dahlke.EtherCAT.Esi.EsiAccess
-Dahlke.EtherCAT.Esi.EsiDevice.Deconstruct(out string? VendorName, out string? NameEn, out string? NameDe, out string? Group, out string? Url, out int? EBusCurrentMa, out Dahlke.EtherCAT.Esi.EsiObjectDictionary? ObjectDictionary) -> void
+Dahlke.EtherCAT.Esi.EsiDevice.Deconstruct(out string? VendorName, out string? NameEn, out string? NameDe, out string? Group, out string? Url, out int? EBusCurrentMa, out Dahlke.EtherCAT.Esi.EsiObjectDictionary? ObjectDictionary, out Dahlke.EtherCAT.Esi.EsiProcessData? ProcessData) -> void
 Dahlke.EtherCAT.Esi.EsiDevice.EBusCurrentMa.get -> int?
 Dahlke.EtherCAT.Esi.EsiDevice.EBusCurrentMa.init -> void
-Dahlke.EtherCAT.Esi.EsiDevice.EsiDevice(string? VendorName, string? NameEn, string? NameDe, string? Group, string? Url, int? EBusCurrentMa, Dahlke.EtherCAT.Esi.EsiObjectDictionary? ObjectDictionary) -> void
+Dahlke.EtherCAT.Esi.EsiDevice.EsiDevice(string? VendorName, string? NameEn, string? NameDe, string? Group, string? Url, int? EBusCurrentMa, Dahlke.EtherCAT.Esi.EsiObjectDictionary? ObjectDictionary, Dahlke.EtherCAT.Esi.EsiProcessData? ProcessData) -> void
 Dahlke.EtherCAT.Esi.EsiDevice.ObjectDictionary.get -> Dahlke.EtherCAT.Esi.EsiObjectDictionary?
 Dahlke.EtherCAT.Esi.EsiDevice.ObjectDictionary.init -> void
+Dahlke.EtherCAT.Esi.EsiDevice.ProcessData.get -> Dahlke.EtherCAT.Esi.EsiProcessData?
+Dahlke.EtherCAT.Esi.EsiDevice.ProcessData.init -> void
 Dahlke.EtherCAT.Esi.EsiObject
 Dahlke.EtherCAT.Esi.EsiObject.<Clone>$() -> Dahlke.EtherCAT.Esi.EsiObject!
 Dahlke.EtherCAT.Esi.EsiObject.Access.get -> Dahlke.EtherCAT.Esi.EsiAccess?

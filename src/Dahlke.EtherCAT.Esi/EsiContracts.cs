@@ -43,6 +43,10 @@ public readonly record struct EsiKey(uint VendorId, uint ProductCode, uint Revis
 /// declares an EMPTY dictionary reports a non-null value whose <c>Objects</c> is empty — the two
 /// are deliberately different answers.
 /// </param>
+/// <param name="ProcessData">
+/// The process-data map the device declares — its PDOs and sync managers — or null when it
+/// declares none. A device declaring an EMPTY map reports a non-null value with empty lists.
+/// </param>
 public sealed record EsiDevice(
     string? VendorName,
     string? NameEn,
@@ -50,7 +54,8 @@ public sealed record EsiDevice(
     string? Group,
     string? Url,
     int? EBusCurrentMa,
-    EsiObjectDictionary? ObjectDictionary);
+    EsiObjectDictionary? ObjectDictionary,
+    EsiProcessData? ProcessData);
 
 /// <summary>Why an ESI lookup produced a device, or why it did not.</summary>
 public enum EsiStatus

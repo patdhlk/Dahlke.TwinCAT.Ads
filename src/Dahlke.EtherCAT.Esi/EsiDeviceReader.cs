@@ -148,7 +148,8 @@ internal static class EsiDeviceReader
             Url: EsiXml.Text(device.Element("URL")),
             EBusCurrentMa: EsiXml.ParseInt(
                 EsiXml.Text(device.Element("Info")?.Element("Electrical")?.Element("EBusCurrent"))),
-            ObjectDictionary: EsiDictionaryParser.Parse(device));
+            ObjectDictionary: EsiDictionaryParser.Parse(device),
+            ProcessData: EsiProcessDataParser.Parse(device));
 
     /// <summary>
     /// The group's own name, matched from the device's <c>&lt;GroupType&gt;</c>. Null when the

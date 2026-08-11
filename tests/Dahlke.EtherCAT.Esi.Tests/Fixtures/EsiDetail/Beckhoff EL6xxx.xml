@@ -235,6 +235,7 @@
             <Objects />
           </Dictionary>
         </Profile>
+        <Sm StartAddress="#x1000" ControlByte="#x26" Enable="1">MBoxOut</Sm>
       </Device>
     </Devices>
   </Descriptions>
