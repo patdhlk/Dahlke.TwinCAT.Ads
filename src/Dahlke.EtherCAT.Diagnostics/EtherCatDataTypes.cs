@@ -334,13 +334,57 @@ public sealed class CoeReadResult
     /// <summary>Why the read failed, or <see cref="CoeFailureReason.None"/> when it succeeded.</summary>
     public CoeFailureReason Reason { get; init; } = CoeFailureReason.None;
 
+    /// <inheritdoc cref="CoeWriteResult.AbortCode"/>
+    public uint? AbortCode { get; init; }
+
     /// <summary>Underlying ADS error, kept for diagnostics even when <see cref="Reason"/> is set.</summary>
     public string? Error { get; init; }
 }
 
 /// <summary>
-/// Why a CoE read failed, classified so the API can answer stably rather than leaking whichever
-/// ADS error the router happened to produce.
+/// Result of a CoE (CANopen over EtherCAT) SDO download.
+/// </summary>
+/// <remarks>
+/// Deliberately not <see cref="bool"/>, unlike <c>ResetSlaveErrorCountersAsync</c>. A rejected
+/// parameter write is the normal case during commissioning — a drive refuses a value because the
+/// object is read-only in the current state, because the value is out of range, or because it is in
+/// local control — and each of those is a different next action for whoever is holding the
+/// terminal. A bare false makes them one thing.
+/// </remarks>
+public sealed class CoeWriteResult
+{
+    /// <summary>
+    /// Whether the slave accepted the download. False for a mailbox absence, an unrecognised
+    /// object, an SDO abort or any other ADS failure — see <see cref="Reason"/>.
+    /// </summary>
+    public required bool Succeeded { get; init; }
+
+    /// <summary>Why the write failed, or <see cref="CoeFailureReason.None"/> when it succeeded.</summary>
+    public CoeFailureReason Reason { get; init; } = CoeFailureReason.None;
+
+    /// <summary>
+    /// The slave's own SDO abort code, verbatim, when <see cref="Reason"/> is
+    /// <see cref="CoeFailureReason.SdoAbort"/>; otherwise <see langword="null"/>.
+    ///
+    /// This is the value the device put on the wire — 0x06010002 for a write to a read-only object,
+    /// 0x06090030 for a value outside the parameter's range, 0x08000021 for a device in local
+    /// control, and so on through ETG.1000-6. It is surfaced unmapped and unfiltered, including
+    /// codes this library has no description for, because a vendor's own abort in that space is
+    /// still the answer to "why did the drive refuse this".
+    /// </summary>
+    public uint? AbortCode { get; init; }
+
+    /// <summary>
+    /// Underlying ADS error, kept for diagnostics even when <see cref="Reason"/> is set: the
+    /// <c>AdsErrorCode</c> member name for a code Beckhoff's enum defines, and for an SDO abort
+    /// the code in hex followed by its ETG.1000-6 description where one is known.
+    /// </summary>
+    public string? Error { get; init; }
+}
+
+/// <summary>
+/// Why a CoE read or write failed, classified so the API can answer stably rather than leaking
+/// whichever ADS error the router happened to produce.
 /// </summary>
 public enum CoeFailureReason
 {
@@ -362,4 +406,17 @@ public enum CoeFailureReason
 
     /// <summary>Anything else — a genuine transport or device fault.</summary>
     AdsError,
+
+    /// <summary>
+    /// The slave's mailbox answered and the slave itself refused the transfer, naming a reason:
+    /// <see cref="CoeWriteResult.AbortCode"/> carries the ETG.1000-6 abort code it gave.
+    ///
+    /// EVERY abort lands here, including 0x06020000 "the object does not exist in the object
+    /// dictionary", which is deliberately NOT folded into <see cref="ObjectNotFound"/>. The two are
+    /// different findings: <see cref="ObjectNotFound"/> is the router answering
+    /// <c>DeviceInvalidOffset</c>, while an abort is the SLAVE answering, which proves its mailbox
+    /// works and hands back a code that says more than this enum can. Collapsing them would throw
+    /// away that distinction to save a comparison.
+    /// </summary>
+    SdoAbort,
 }

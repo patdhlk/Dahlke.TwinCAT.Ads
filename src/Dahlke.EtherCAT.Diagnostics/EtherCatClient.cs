@@ -43,8 +43,8 @@ namespace Dahlke.EtherCAT.Diagnostics;
 /// probe cannot — <see cref="IAdsRawChannel.ReadStateAsync"/> has no <see cref="TimeSpan"/>
 /// overload — so it is bounded by <c>ProbeTimeoutMs</c> (2 s) via a linked
 /// <see cref="CancellationTokenSource"/> AND by the library's configured
-/// <c>RawChannels:TimeoutMs</c>, whichever is shorter. <c>ReadCoeObjectAsync</c> passes the
-/// caller's own <c>timeoutMs</c> instead of either constant.
+/// <c>RawChannels:TimeoutMs</c>, whichever is shorter. <c>ReadCoeObjectAsync</c> and
+/// <c>WriteCoeObjectAsync</c> pass the caller's own <c>timeoutMs</c> instead of either constant.
 ///
 /// <c>GetMastersAsync</c> caches which candidate Net ID(s) the last successful discovery found,
 /// per PLC, for up to <see cref="FullSweepInterval"/> — see <see cref="_knownMasters"/>. Steady
@@ -92,6 +92,16 @@ namespace Dahlke.EtherCAT.Diagnostics;
 ///     but rejects the object, or the router already knows the port has no mailbox) is unaffected
 ///     — never retried, either version. A slave whose mailbox absence surfaces as a bare timeout
 ///     now pays that timeout twice before giving up.</description></item>
+///   <item><term><see cref="WriteCoeObjectAsync"/></term><description>2×<c>timeoutMs</c>, with no
+///     "before" to compare against — the method is new. It inherits the library's
+///     <c>RetryCount</c> like every other call here, so a slave that answers nothing is written to
+///     TWICE. That is safe for the SDO downloads this exists for, which are idempotent parameter
+///     stores: writing 2500 to the same object twice leaves 2500. It is NOT safe in general — an
+///     object whose write is a COMMAND rather than a value (a save-to-EEPROM trigger such as
+///     0x1010:01, a counter, a queue push) would be issued twice on a retry, and a slave that
+///     actually received the first write and only lost the answer cannot tell this apart from a
+///     genuine second request. Set <c>RawChannels:RetryCount</c> to 0 for a host that writes such
+///     objects.</description></item>
 /// </list>
 /// See <c>DEVELOPMENT.md</c>'s "<c>RawChannels</c>" section for the same table aimed at an
 /// operator tuning <c>appsettings.json</c>.
@@ -913,7 +923,8 @@ internal sealed class EtherCatClient : IEtherCatClient
                 Succeeded = false,
                 Data = [],
                 Reason = Classify(ex.ErrorCode),
-                Error = ex.ErrorCode.ToString(),
+                AbortCode = AbortCodeOf(ex.ErrorCode),
+                Error = Describe(ex.ErrorCode),
             };
         }
         catch (TimeoutException)
@@ -938,18 +949,196 @@ internal sealed class EtherCatClient : IEtherCatClient
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<CoeWriteResult> WriteCoeObjectAsync(
+        string masterAmsNetId,
+        ushort physicalAddress,
+        ushort index,
+        byte subIndex,
+        ReadOnlyMemory<byte> data,
+        int timeoutMs,
+        CancellationToken ct)
+    {
+        // Information, not Debug, and deliberately unlike the read beside it: this changes a
+        // device's stored parameters. ResetSlaveErrorCountersAsync — the only other write here —
+        // logs at the same level for the same reason.
+        _logger.LogInformation(
+            "CoE write 0x{Index:X4}:{Sub:X2} ({Bytes}b) to slave {Addr} on {AmsNetId}",
+            index, subIndex, data.Length, physicalAddress, masterAmsNetId);
+
+        try
+        {
+            // Addressing is the read's, exactly: AmsPort is the slave's fixed address and the
+            // object is the index offset. See ReadCoeObjectAsync for what port 0xFFFF would do
+            // instead — answer from the MASTER's own dictionary, which for a write means silently
+            // parameterising the wrong device.
+            var channel = _channels.Get(masterAmsNetId, physicalAddress);
+
+            await channel
+                .WriteAsync(IgCoeSdo, CoeOffset(index, subIndex), data,
+                    TimeSpan.FromMilliseconds(timeoutMs), ct)
+                .ConfigureAwait(false);
+
+            _logger.LogDebug("CoE write 0x{Index:X4}:{Sub:X2} to slave {Addr} accepted",
+                index, subIndex, physicalAddress);
+
+            return new CoeWriteResult { Succeeded = true };
+        }
+        catch (AdsErrorException ex)
+        {
+            var described = Describe(ex.ErrorCode);
+
+            _logger.LogWarning("CoE write 0x{Index:X4}:{Sub:X2} to slave {Addr} answered {Error}",
+                index, subIndex, physicalAddress, described);
+
+            return new CoeWriteResult
+            {
+                Succeeded = false,
+                Reason = Classify(ex.ErrorCode),
+                AbortCode = AbortCodeOf(ex.ErrorCode),
+                Error = described,
+            };
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning("CoE write 0x{Index:X4}:{Sub:X2} to slave {Addr} timed out",
+                index, subIndex, physicalAddress);
+
+            return new CoeWriteResult
+            {
+                Succeeded = false, Reason = CoeFailureReason.NoMailbox, Error = "Timeout",
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "CoE write 0x{Index:X4}:{Sub:X2} to slave {Addr} threw",
+                index, subIndex, physicalAddress);
+
+            return new CoeWriteResult
+            {
+                Succeeded = false, Reason = CoeFailureReason.AdsError, Error = ex.GetType().Name,
+            };
+        }
+    }
+
     /// <summary>
-    /// Classifies a CoE read failure. Observed on a live EK1100 bus: a mailbox-less terminal
-    /// answers PortNotConnected once the router knows the port is absent and simply times out
-    /// before that, while a slave that does have a mailbox rejects an unknown object with
+    /// Classifies a CoE read or write failure. Observed on a live EK1100 bus: a mailbox-less
+    /// terminal answers PortNotConnected once the router knows the port is absent and simply times
+    /// out before that, while a slave that does have a mailbox rejects an unknown object with
     /// DeviceInvalidOffset.
+    ///
+    /// The abort case is last on purpose. The named codes above are checked first, so a documented
+    /// ADS error can never be read as an abort — and it could not be anyway, per
+    /// <see cref="IsSdoAbort"/>.
     /// </summary>
     internal static CoeFailureReason Classify(AdsErrorCode error) => error switch
     {
         AdsErrorCode.PortNotConnected or AdsErrorCode.TargetPortNotFound
             or AdsErrorCode.ClientSyncTimeOut or AdsErrorCode.DeviceTimeOut => CoeFailureReason.NoMailbox,
         AdsErrorCode.DeviceInvalidOffset => CoeFailureReason.ObjectNotFound,
+        _ when IsSdoAbort(error) => CoeFailureReason.SdoAbort,
         _ => CoeFailureReason.AdsError,
+    };
+
+    /// <summary>
+    /// Whether this ADS error code is in fact an SDO abort code the slave produced and the master
+    /// passed through, rather than an error the ADS stack itself named.
+    ///
+    /// The two arrive in the SAME 32-bit field, so telling them apart rests on the two spaces not
+    /// overlapping. Every abort code in ETG.1000-6 (and CiA 301, which it follows) has 0x05, 0x06
+    /// or 0x08 as its most significant byte, and NO member of Beckhoff's own
+    /// <see cref="AdsErrorCode"/> does — measured across all of it, and pinned by
+    /// <c>No_AdsErrorCode_Beckhoff_defines_falls_in_the_SDO_abort_space</c> so a future TwinCAT.Ads
+    /// release that added one fails the build instead of quietly turning an ADS error into a
+    /// reported slave abort.
+    ///
+    /// What this is NOT: a claim that a given master passes aborts through. That was reported from
+    /// hardware — a multi-day Bonfiglioli ACU commissioning, where the abort code was what made
+    /// each refusal diagnosable (issue #73) — and not re-measured here; the rack this repository's
+    /// notes come from has no drive to abort a write. A master that answered some other way would
+    /// simply land in <see cref="CoeFailureReason.AdsError"/> as before, so the cost of the
+    /// assumption being wrong is that this path stays unused, not that anything is misreported.
+    /// </summary>
+    internal static bool IsSdoAbort(AdsErrorCode error) =>
+        (RawCode(error) >> 24) is 0x05 or 0x06 or 0x08;
+
+    /// <summary>
+    /// The abort code as the wire carried it, or <see langword="null"/> for an ADS error that is
+    /// not one — so a caller can tell "the slave refused, and here is its reason" from "the request
+    /// never got a slave's opinion".
+    /// </summary>
+    private static uint? AbortCodeOf(AdsErrorCode error) => IsSdoAbort(error) ? RawCode(error) : null;
+
+    /// <summary>
+    /// <see cref="AdsErrorCode"/> is <see cref="int"/>-backed and carries negative members, so an
+    /// unchecked round trip is the only way to read one as the unsigned code it represents.
+    /// </summary>
+    private static uint RawCode(AdsErrorCode error) => unchecked((uint)(int)error);
+
+    /// <summary>
+    /// Renders an ADS error for <see cref="CoeReadResult.Error"/>/<see cref="CoeWriteResult.Error"/>.
+    ///
+    /// A code the enum defines renders as its member name, as it always has. The other two branches
+    /// exist because <c>AdsErrorCode.ToString()</c> on an UNDEFINED value renders the raw number in
+    /// DECIMAL — 0x06010002 arrives at a caller as "100728834", which is the abort being swallowed
+    /// that issue #73 was raised about, and no more readable for a non-abort code either.
+    /// </summary>
+    private static string Describe(AdsErrorCode error)
+    {
+        if (Enum.IsDefined(error))
+            return error.ToString();
+
+        uint code = RawCode(error);
+
+        if (!IsSdoAbort(error))
+            return $"0x{code:X8}";
+
+        return SdoAbortDescriptions.TryGetValue(code, out var description)
+            ? $"SDO abort 0x{code:X8}: {description}"
+            : $"SDO abort 0x{code:X8}";
+    }
+
+    /// <summary>
+    /// The SDO abort codes ETG.1000-6 defines, in its own words.
+    ///
+    /// Not a filter and not a whitelist: <see cref="IsSdoAbort"/> decides what an abort IS, and a
+    /// code missing from this table is still reported as one, with its number and no description.
+    /// A vendor is free to abort with something of its own and the number is the diagnosis.
+    /// </summary>
+    private static readonly Dictionary<uint, string> SdoAbortDescriptions = new()
+    {
+        [0x05030000] = "Toggle bit not alternated",
+        [0x05040000] = "SDO protocol timed out",
+        [0x05040001] = "Client/server command specifier not valid or unknown",
+        [0x05040005] = "Out of memory",
+        [0x06010000] = "Unsupported access to an object",
+        [0x06010001] = "Attempt to read a write only object",
+        [0x06010002] = "Attempt to write a read only object",
+        [0x06010003] = "Subindex cannot be written, SI0 must be 0 for write access",
+        [0x06010004] = "SDO Complete access not supported for objects of variable length",
+        [0x06010005] = "Object length exceeds mailbox size",
+        [0x06010006] = "Object mapped to RxPDO, SDO download blocked",
+        [0x06020000] = "The object does not exist in the object dictionary",
+        [0x06040041] = "The object cannot be mapped into the PDO",
+        [0x06040042] = "The number and length of the objects to be mapped would exceed the PDO length",
+        [0x06040043] = "General parameter incompatibility reason",
+        [0x06040047] = "General internal incompatibility in the device",
+        [0x06060000] = "Access failed due to a hardware error",
+        [0x06070010] = "Data type does not match, length of service parameter does not match",
+        [0x06070012] = "Data type does not match, length of service parameter too high",
+        [0x06070013] = "Data type does not match, length of service parameter too low",
+        [0x06090011] = "Subindex does not exist",
+        [0x06090030] = "Value range of parameter exceeded",
+        [0x06090031] = "Value of parameter written too high",
+        [0x06090032] = "Value of parameter written too low",
+        [0x06090036] = "Maximum value is less than minimum value",
+        [0x08000000] = "General error",
+        [0x08000020] = "Data cannot be transferred or stored to the application",
+        [0x08000021] =
+            "Data cannot be transferred or stored to the application because of local control",
+        [0x08000022] =
+            "Data cannot be transferred or stored to the application because of the present device state",
+        [0x08000023] = "Object dictionary dynamic generation fails or no object dictionary is present",
     };
 
     /// <summary>
