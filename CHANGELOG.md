@@ -11,8 +11,8 @@ A minor, not the patch this section was opened as: it adds two members to the pu
 `IEtherCatClient` interface and a seventh package to the repository. Additive for everyone who
 *calls* the interface — existing code compiles and behaves identically — and source-breaking for
 anyone who *implements* it, who gains two unimplemented methods, or who constructs or deconstructs
-an `EsiDevice`, which gained a sixth positional parameter. The ESI ranking fix below was the whole
-of the release when it was numbered 0.9.2 and is unchanged by the renumber.
+an `EsiDevice`, which now takes seven positional parameters, up from five. The ESI ranking fix
+below was the whole of the release when it was numbered 0.9.2 and is unchanged by the renumber.
 
 ### Added
 
@@ -186,11 +186,37 @@ of the release when it was numbered 0.9.2 and is unchanged by the renumber.
   Aggregating per-device figures into a per-segment load against a segment budget stays the
   consumer's job, as the issue specifies.
 
-  **This reshapes a released record.** `EsiDevice` gained a sixth positional parameter, so its
-  five-argument constructor and five-output `Deconstruct` — both recorded in
-  `PublicAPI.Shipped.txt` since 0.9.0 — are gone. Code that writes `new EsiDevice(vendor, en, de,
-  group, url)` or deconstructs into five variables must add the sixth. Reading the properties is
-  unaffected. Pre-1.0.0, which is where the allowance to do this comes from.
+  **This reshapes a released record.** `EsiDevice`'s five-argument constructor and five-output
+  `Deconstruct` — both recorded in `PublicAPI.Shipped.txt` since 0.9.0 — are gone. The record now
+  takes seven positional parameters: the original five, plus `EBusCurrentMa` and
+  `ObjectDictionary` ([#66](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/66)). Code that
+  constructs or deconstructs `EsiDevice` positionally must be updated to match. Reading the
+  properties is unaffected. Pre-1.0.0, which is where the allowance to do this comes from.
+
+- **`EsiDevice` reports each device's declared CoE object dictionary.**
+  ([#66](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/66)) `ObjectDictionary`, from
+  `<Profile><Dictionary>`: per object its index, name, data type, bit size, access flags and
+  default value, with record sub-items nested under their parent rather than flattened.
+  `TryGetObject` looks one up by index in O(1), because annotating a single live
+  `ReadCoeObjectAsync` is the common case rather than walking the whole dictionary.
+
+  **The join between an object and its sub-items is by name, and that is the whole of the work.**
+  ESI splits a record object's declaration in two: `<DataTypes><DataType>` holds the structure
+  (`SubIdx`, `Type`, `BitSize`, `BitOffs`, `Flags`) and the object's own `<Info><SubItem>` list
+  holds nothing but names and default data. The obvious positional merge is wrong: that list is
+  sparse and prefix-truncated, so 55,729 objects in Beckhoff's published set list a different
+  number of sub-items than their type declares, and 2,081 more agree on count while disagreeing on
+  names — 35% of objects mis-joined, silently, attributing one member's default to another.
+
+  Two places where the answer is "ESI does not say" rather than a value:
+
+  | | |
+  |---|---|
+  | `EsiObjectSubItem.SubIndex` is nullable | 19,967 of 637,647 sub-items omit `<SubIdx>`, because they are members of an array type whose indices are implied by `<ArrayInfo>`'s `<LBound>` and `<Elements>`. Expanding those would be inference, so such a sub-item cannot be rendered as `0xIIII:SS` — which is honest, where a derived sub-index would not be. |
+  | `EsiAccess?` is paired with a raw string | `ro` and `rw` are the only values in all 879,175 occurrences in Beckhoff's set, and the schema adds `wo`. The enum covers those three and is null for anything else, but `AccessRaw` always carries what the vendor wrote — so unexpected text is never reported as the file having stated nothing. |
+
+  A device declaring no dictionary reports `null`; one declaring an empty dictionary reports a
+  non-null value with an empty `Objects`.
 
 ### Changed
 
