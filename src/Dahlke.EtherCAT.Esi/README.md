@@ -62,6 +62,16 @@ Ranking decides only the *order* files are opened; the identity match alone deci
 
 **Tolerates a bad folder.** A malformed or unreadable ESI file does not fail the lookup that happened to reach it; it is logged once and skipped, so one corrupt vendor file cannot take out the catalogue.
 
+**Reports the declared E-bus current.** `EsiDevice.EBusCurrentMa` carries what
+`<Info><Electrical><EBusCurrent>` states, in mA, with ESI's own sign convention: **positive draws
+from the E-bus, negative supplies it.** An EL3201 declares `190`; an EK1100 coupler declares
+`-500`, matching its own name, "EK1100 EtherCAT Coupler (0.5A E-Bus)".
+
+It is `null` when the file declares none, and **never `0`** for that case — 478 devices in
+Beckhoff's published set declare a genuine `0`, so summing draws across a segment would otherwise
+be unable to tell an unknown contributor from one that draws nothing. Aggregating per-device
+figures into a segment load against a segment budget is yours to do; this reports the figure.
+
 ## Registration is not eager
 
 `AddEsiCatalog` does not resolve the catalogue. Whether a misconfigured ESI directory should be reported at startup or on first use is a hosting decision, so it is left to you:

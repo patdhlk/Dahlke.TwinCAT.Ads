@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -70,7 +69,7 @@ internal static class EsiDeviceReader
                     // (mismatched) section, not the section `best` was actually found under, and
                     // attributing `best` to the wrong vendor would be exactly the kind of
                     // fabrication this catalog exists to avoid.
-                    if (ParseHex(vendor.Element("Id")?.Value) != key.VendorId)
+                    if (EsiXml.ParseHex(vendor.Element("Id")?.Value) != key.VendorId)
                     {
                         return best is null || bestVendor is null ? null : Map(best, bestVendor, bestGroups);
                     }
@@ -95,12 +94,12 @@ internal static class EsiDeviceReader
 
                     XElement? type = device.Element("Type");
                     if (type is null ||
-                        ParseHex(type.Attribute("ProductCode")?.Value) != key.ProductCode)
+                        EsiXml.ParseHex(type.Attribute("ProductCode")?.Value) != key.ProductCode)
                     {
                         break;
                     }
 
-                    long revision = ParseHex(type.Attribute("RevisionNo")?.Value);
+                    long revision = EsiXml.ParseHex(type.Attribute("RevisionNo")?.Value);
                     if (revision == key.RevisionNumber)
                     {
                         // Exact revision wins outright. Groups precedes Devices in the ESI schema,
@@ -146,7 +145,9 @@ internal static class EsiDeviceReader
             NameEn: LocalizedName(device, "1033") ?? BareName(device),
             NameDe: LocalizedName(device, "1031"),
             Group: GroupName(device, groups),
-            Url: Text(device.Element("URL")));
+            Url: EsiXml.Text(device.Element("URL")),
+            EBusCurrentMa: EsiXml.ParseInt(
+                EsiXml.Text(device.Element("Info")?.Element("Electrical")?.Element("EBusCurrent"))));
 
     /// <summary>
     /// The group's own name, matched from the device's <c>&lt;GroupType&gt;</c>. Null when the
@@ -155,24 +156,24 @@ internal static class EsiDeviceReader
     /// </summary>
     private static string? GroupName(XElement device, XElement? groups)
     {
-        string? groupType = Text(device.Element("GroupType"));
+        string? groupType = EsiXml.Text(device.Element("GroupType"));
         if (groupType is null || groups is null)
         {
             return null;
         }
 
         XElement? group = groups.Elements("Group")
-            .FirstOrDefault(g => string.Equals(Text(g.Element("Type")), groupType, StringComparison.Ordinal));
+            .FirstOrDefault(g => string.Equals(EsiXml.Text(g.Element("Type")), groupType, StringComparison.Ordinal));
 
         return group is null ? null : LocalizedOrFirst(group, "1033");
     }
 
     /// <summary>The <c>LcId</c>-matched name, falling back to the first name of any locale.</summary>
     private static string? LocalizedOrFirst(XElement parent, string lcId) =>
-        LocalizedName(parent, lcId) ?? Text(parent.Elements("Name").FirstOrDefault());
+        LocalizedName(parent, lcId) ?? EsiXml.Text(parent.Elements("Name").FirstOrDefault());
 
     private static string? LocalizedName(XElement parent, string lcId) =>
-        Text(parent.Elements("Name").FirstOrDefault(n => (string?)n.Attribute("LcId") == lcId));
+        EsiXml.Text(parent.Elements("Name").FirstOrDefault(n => (string?)n.Attribute("LcId") == lcId));
 
     /// <summary>
     /// A <c>&lt;Name&gt;</c> carrying no <c>LcId</c> at all. Used only as the ENGLISH fallback:
@@ -180,37 +181,5 @@ internal static class EsiDeviceReader
     /// German would be a fabrication, so <c>NameDe</c> has no equivalent fallback.
     /// </summary>
     private static string? BareName(XElement device) =>
-        Text(device.Elements("Name").FirstOrDefault(n => n.Attribute("LcId") is null));
-
-    /// <summary>Trimmed element text, or null when the element is absent or blank.</summary>
-    private static string? Text(XElement? element)
-    {
-        string? trimmed = element?.Value.Trim();
-
-        return string.IsNullOrEmpty(trimmed) ? null : trimmed;
-    }
-
-    /// <summary>
-    /// Parses an ESI hex literal (<c>#x0c843052</c> or <c>0x…</c>) to a value, or -1 when absent
-    /// or unparseable. -1 can never equal a uint field, so it fails every identity comparison.
-    /// </summary>
-    private static long ParseHex(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return -1;
-        }
-
-        string trimmed = raw.Trim();
-        if (trimmed.StartsWith("#x", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-        {
-            trimmed = trimmed[2..];
-        }
-
-        return trimmed.Length > 0 &&
-               long.TryParse(trimmed, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out long value)
-            ? value
-            : -1;
-    }
+        EsiXml.Text(device.Elements("Name").FirstOrDefault(n => n.Attribute("LcId") is null));
 }

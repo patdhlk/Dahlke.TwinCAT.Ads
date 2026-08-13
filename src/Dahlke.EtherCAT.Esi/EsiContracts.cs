@@ -8,15 +8,43 @@ namespace Dahlke.EtherCAT.Esi;
 public readonly record struct EsiKey(uint VendorId, uint ProductCode, uint RevisionNumber);
 
 /// <summary>
-/// A device's identity as read from vendor ESI XML. Every field is nullable and every null means
-/// "the ESI file does not state this" — never an empty or defaulted stand-in.
+/// A device's description as read from vendor ESI XML. Every field is nullable and every null
+/// means "the ESI file does not state this" — never an empty or defaulted stand-in.
 /// </summary>
+/// <param name="VendorName">The vendor's own name, English where the file offers a choice.</param>
+/// <param name="NameEn">The device's English name, or an unlabelled name where there is one.</param>
+/// <param name="NameDe">The device's German name. No unlabelled fallback: claiming an
+/// unlabelled name as German would be a fabrication.</param>
+/// <param name="Group">The device group's name, resolved from the device's group type.</param>
+/// <param name="Url">The vendor's URL for the device.</param>
+/// <param name="EBusCurrentMa">
+/// The E-bus current the device declares, in mA, from <c>&lt;Info&gt;&lt;Electrical&gt;</c>.
+/// <para>
+/// <b>Sign is ESI's own convention: positive DRAWS from the E-bus, negative SUPPLIES it.</b> An
+/// EL3201 terminal declares <c>190</c>; an EK1100 coupler declares <c>-500</c>, and its own name
+/// reads "EK1100 EtherCAT Coupler (0.5A E-Bus)". ESI does not distinguish the two structurally —
+/// it is a single signed integer — so there is nothing to model separately.
+/// </para>
+/// <para>
+/// Null when the file declares no <c>&lt;EBusCurrent&gt;</c>, and <b>never 0 for that case</b>:
+/// 478 devices in Beckhoff's published set declare a genuine <c>0</c>, so a consumer summing
+/// draws across a segment must be able to tell an unknown contributor from one that draws
+/// nothing. Text that cannot be parsed as a number is also null, which does conflate "states
+/// something unreadable" with "states nothing"; no such device exists in Beckhoff's 868 MB set,
+/// so a third state would be surface with no reader.
+/// </para>
+/// <para>
+/// Aggregating these into a per-segment load against a segment budget is the consumer's job.
+/// This library reports the per-device figure.
+/// </para>
+/// </param>
 public sealed record EsiDevice(
     string? VendorName,
     string? NameEn,
     string? NameDe,
     string? Group,
-    string? Url);
+    string? Url,
+    int? EBusCurrentMa);
 
 /// <summary>Why an ESI lookup produced a device, or why it did not.</summary>
 public enum EsiStatus
