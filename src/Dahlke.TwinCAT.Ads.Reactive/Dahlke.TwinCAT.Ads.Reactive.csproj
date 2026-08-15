@@ -3,6 +3,9 @@
   <PropertyGroup>
     <!-- What differs per package; the rest is in src/Directory.Build.props -->
     <PackageId>Dahlke.TwinCAT.Ads.Reactive</PackageId>
+    <!-- Temporary override while #47 lands project-by-project; consolidated back into
+         src/Directory.Build.props once every package ports. -->
+    <TargetFrameworks>net8.0;net9.0;net10.0;netstandard2.0</TargetFrameworks>
     <Description>Reactive (Rx) companion for Dahlke.TwinCAT.Ads — exposes ADS value-change and connection-state notifications as IObservable streams.</Description>
     <PackageTags>TwinCAT;ADS;Beckhoff;PLC;Automation;Reactive;Rx</PackageTags>
   </PropertyGroup>
@@ -11,6 +14,10 @@
     <ProjectReference Include="../Dahlke.TwinCAT.Ads/Dahlke.TwinCAT.Ads.csproj" />
     <!-- Versions and the reasoning behind their shape: src/Directory.Build.props -->
     <PackageReference Include="System.Reactive" Version="$(SystemReactiveVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="Polyfill" Version="$(PolyfillVersion)" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>

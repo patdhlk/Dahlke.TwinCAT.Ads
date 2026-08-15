@@ -3,6 +3,9 @@
   <PropertyGroup>
     <!-- What differs per package; the rest is in src/Directory.Build.props -->
     <PackageId>Dahlke.TwinCAT.Ads.Testing</PackageId>
+    <!-- Temporary override while #47 lands project-by-project; consolidated back into
+         src/Directory.Build.props once every package ports. -->
+    <TargetFrameworks>net8.0;net9.0;net10.0;netstandard2.0</TargetFrameworks>
     <Description>Test harness for Dahlke.TwinCAT.Ads — a started, seeded, simulated PLC pool and a record of what the code under test wrote, with no generic-host boilerplate and no test-framework dependency.</Description>
     <PackageTags>TwinCAT;ADS;Beckhoff;PLC;Automation;Testing;Simulation</PackageTags>
   </PropertyGroup>
@@ -22,6 +25,12 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="Polyfill" Version="$(PolyfillVersion)" PrivateAssets="all" />
+    <!-- TestPlc is IAsyncDisposable, which the netstandard2.0 BCL lacks. -->
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="$(MicrosoftBclAsyncInterfacesVersion)" />
   </ItemGroup>
 
 </Project>
