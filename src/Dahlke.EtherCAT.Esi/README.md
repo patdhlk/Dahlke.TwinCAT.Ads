@@ -72,6 +72,47 @@ Beckhoff's published set declare a genuine `0`, so summing draws across a segmen
 be unable to tell an unknown contributor from one that draws nothing. Aggregating per-device
 figures into a segment load against a segment budget is yours to do; this reports the figure.
 
+**Reports the declared CoE object dictionary.** `EsiDevice.ObjectDictionary` carries what
+`<Profile><Dictionary>` declares — per object its index, name, data type, bit size, access flags
+and default — which is the metadata a live SDO upload does not carry. Look one up without scanning:
+
+```csharp
+if (device.ObjectDictionary?.TryGetObject(0x1018, out var identity) == true)
+{
+    Console.WriteLine(identity.Name);                        // "Identity"
+    Console.WriteLine(identity.SubItems[1].Name);            // "Vendor ID"
+    Console.WriteLine(identity.SubItems[1].SubIndex);        // 1  -> render as 0x1018:01
+}
+```
+
+Record sub-items are nested under their parent, not flattened. `SubIndex` is nullable because ESI
+genuinely omits it for array members, whose indices are implied by `<ArrayInfo>` rather than
+stated — deriving one would be inference, so absence is reported as absence.
+
+`null` means the device declares no dictionary. A device declaring an *empty* one reports a
+non-null value with an empty `Objects` — a different answer, deliberately.
+
+**Reports the declared process-data map.** `EsiDevice.ProcessData` answers "what does this slave
+put on and take off the wire, through which sync manager", entirely offline:
+
+```csharp
+foreach (var pdo in device.ProcessData?.Pdos ?? [])
+{
+    // Direction is slave-relative: Transmit is the slave transmitting,
+    // which is the master's process INPUTS.
+    Console.WriteLine($"{pdo.Direction} 0x{pdo.Index:X4} {pdo.Name} -> Sm {pdo.SyncManager}");
+}
+```
+
+`SyncManager` is nullable and null is the *majority* case — 37,541 of 58,128 PDOs in Beckhoff's
+published set declare no `Sm`. Padding entries (index `0`, a bit length, nothing else) are
+reported rather than filtered, because dropping them corrupts any bit-offset arithmetic a
+consumer does over the entries.
+
+Unlike the object dictionary above, ESI gives process data no container element — `<Sm>`,
+`<TxPdo>` and `<RxPdo>` are direct children of `<Device>` — so a device with no sync managers and
+no PDOs is indistinguishable from one declaring an empty map, and both report `null`.
+
 ## Registration is not eager
 
 `AddEsiCatalog` does not resolve the catalogue. Whether a misconfigured ESI directory should be reported at startup or on first use is a hosting decision, so it is left to you:
