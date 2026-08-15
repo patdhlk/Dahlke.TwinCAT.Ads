@@ -136,6 +136,48 @@ public class EtherCatClientRawChannelTests
         counters.Ports[0].CrcErrors.Should().Be(7);
     }
 
+    // #61: IG 0x12 is one CRC counter per port and nothing else. These three counters have no read
+    // behind them, so they must be absent — a 0 here is indistinguishable from a healthy reading
+    // and hides a flapping link from anyone watching for it.
+    [Fact]
+    public async Task GetSlaveErrorCountersAsync_reports_the_counters_it_never_reads_as_absent()
+    {
+        using var fixture = EightSlaveRack();
+        fixture.SeedMaster(IgCrcErrors, 1008, SimulatedRawChannelFixture.U32(7));
+
+        var counters = await fixture.Client.GetSlaveErrorCountersAsync(
+            SimulatedRawChannelFixture.MasterNetId, 1008, CancellationToken.None);
+
+        counters.Should().NotBeNull();
+        counters!.AbnormalStateChanges.Should().BeNull();
+        counters.Ports[0].ForwardedCrcErrors.Should().BeNull();
+        counters.Ports[0].LostLinkCount.Should().BeNull();
+    }
+
+    // #62: no read tells what is actually wired on the bus, so the scanned identity and the
+    // match verdict must be absent — copying the configured identity and asserting a match
+    // reports a comparison that never happened as having passed.
+    [Fact]
+    public async Task GetSlaveDetailAsync_reports_the_identity_it_never_scans_as_absent()
+    {
+        using var fixture = EightSlaveRack();
+        fixture.SeedMaster(IgSlaveIdentity, 1001, Identity(BeckhoffVendorId, Ek1100ProductCode, 1, 42));
+        fixture.SeedMaster(IgSlaveStates, 1001, [0x08, 0x01]);
+        fixture.SeedMaster(IgCrcErrors, 1001,
+            [.. SimulatedRawChannelFixture.U32(0), .. SimulatedRawChannelFixture.U32(0)]);
+
+        var detail = await fixture.Client.GetSlaveDetailAsync(
+            SimulatedRawChannelFixture.MasterNetId, 1001, CancellationToken.None);
+
+        detail.Should().NotBeNull();
+        detail!.ConfiguredVendorId.Should().Be(BeckhoffVendorId);
+        detail.ScannedVendorId.Should().BeNull();
+        detail.ScannedProductCode.Should().BeNull();
+        detail.ScannedRevisionNumber.Should().BeNull();
+        detail.ScannedSerialNumber.Should().BeNull();
+        detail.IdentityMatch.Should().BeNull();
+    }
+
     // -- degradation signal -------------------------------------------------------
     //
     // These replace GetConfiguredSlavesAsync_returns_empty_when_the_master_answers_nothing, which
@@ -496,9 +538,9 @@ public class EtherCatClientRawChannelTests
         stats.CyclicLostFrames.Should().Be(7);
         stats.QueuedSendFrames.Should().Be(512);
         stats.QueuedLostFrames.Should().Be(3);
-        // Not readings: IG 0x0C has no Tx/Rx error counters and adsify reads none elsewhere.
-        stats.CyclicTxRxErrors.Should().Be(0);
-        stats.QueuedTxRxErrors.Should().Be(0);
+        // #61: IG 0x0C has no Tx/Rx error counters and nothing else reads one — absent, not 0.
+        stats.CyclicTxRxErrors.Should().BeNull();
+        stats.QueuedTxRxErrors.Should().BeNull();
     }
 
     [Fact]

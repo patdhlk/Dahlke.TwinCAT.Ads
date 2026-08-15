@@ -28,3 +28,23 @@ Dahlke.EtherCAT.Diagnostics.CoeWriteResult.Succeeded.get -> bool
 Dahlke.EtherCAT.Diagnostics.CoeWriteResult.Succeeded.init -> void
 Dahlke.EtherCAT.Diagnostics.IEtherCatClient.ReadCia402StatusAsync(string! masterAmsNetId, ushort physicalAddress, int timeoutMs, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.EtherCAT.Diagnostics.Cia402StatusResult!>!
 Dahlke.EtherCAT.Diagnostics.IEtherCatClient.WriteCoeObjectAsync(string! masterAmsNetId, ushort physicalAddress, ushort index, byte subIndex, System.ReadOnlyMemory<byte> data, int timeoutMs, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<Dahlke.EtherCAT.Diagnostics.CoeWriteResult!>!
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.IdentityMatch.get -> bool?
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedProductCode.get -> uint?
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedRevisionNumber.get -> uint?
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedSerialNumber.get -> uint?
+Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedVendorId.get -> uint?
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.CyclicTxRxErrors.get -> long?
+Dahlke.EtherCAT.Diagnostics.FrameStatistics.QueuedTxRxErrors.get -> long?
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.ForwardedCrcErrors.get -> int?
+Dahlke.EtherCAT.Diagnostics.PortErrorCounters.LostLinkCount.get -> int?
+Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters.AbnormalStateChanges.get -> int?
+*REMOVED*Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.IdentityMatch.get -> bool
+*REMOVED*Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedProductCode.get -> uint
+*REMOVED*Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedRevisionNumber.get -> uint
+*REMOVED*Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedSerialNumber.get -> uint
+*REMOVED*Dahlke.EtherCAT.Diagnostics.EtherCatSlaveDetail.ScannedVendorId.get -> uint
+*REMOVED*Dahlke.EtherCAT.Diagnostics.FrameStatistics.CyclicTxRxErrors.get -> long
+*REMOVED*Dahlke.EtherCAT.Diagnostics.FrameStatistics.QueuedTxRxErrors.get -> long
+*REMOVED*Dahlke.EtherCAT.Diagnostics.PortErrorCounters.ForwardedCrcErrors.get -> int
+*REMOVED*Dahlke.EtherCAT.Diagnostics.PortErrorCounters.LostLinkCount.get -> int
+*REMOVED*Dahlke.EtherCAT.Diagnostics.SlaveErrorCounters.AbnormalStateChanges.get -> int

@@ -68,13 +68,14 @@ public sealed class FrameStatistics
     public double? QueuedFramesPerSecond { get; init; }
 
     /// <summary>
-    /// Always 0. IG 0x0C carries five counters and none of them is a cyclic Tx/Rx error count, and
-    /// no other index group supplies one — this is a fixed constant, not a reading of zero errors.
+    /// Always null. IG 0x0C carries five counters and none of them is a cyclic Tx/Rx error count,
+    /// and no other index group supplies one — there is no reading to report, and a 0 here would
+    /// be indistinguishable from a genuine reading of zero errors.
     /// </summary>
-    public long CyclicTxRxErrors { get; init; }
+    public long? CyclicTxRxErrors { get; init; }
 
-    /// <summary>Always 0, for the same reason as <see cref="CyclicTxRxErrors"/>.</summary>
-    public long QueuedTxRxErrors { get; init; }
+    /// <summary>Always null, for the same reason as <see cref="CyclicTxRxErrors"/>.</summary>
+    public long? QueuedTxRxErrors { get; init; }
 }
 
 /// <summary>
@@ -168,11 +169,12 @@ public sealed class EtherCatScannedSlave
 /// (IG 0x11/0x09/0x12).
 ///
 /// <para>
-/// <b>Known limitation:</b> the scanned identity fields (<see cref="ScannedVendorId"/> and the
-/// rest) are populated from the same read as the configured ones, so they are always equal to
-/// them, and <see cref="IdentityMatch"/> is therefore always <see langword="true"/> — this ADS
-/// interface has no read that tells what is actually wired on the bus apart from what TwinCAT is
-/// configured to expect. A genuine identity mismatch cannot be detected through this type today.
+/// <b>Known limitation:</b> this ADS interface has no read that tells what is actually wired on
+/// the bus apart from what TwinCAT is configured to expect, so the scanned identity fields
+/// (<see cref="ScannedVendorId"/> and the rest) and <see cref="IdentityMatch"/> are always null —
+/// reading the bus-level identity would need ESC register access or EoE mailbox queries. A
+/// genuine identity mismatch cannot be detected through this type today, and null says so, where
+/// a copied identity and a hardcoded <see langword="true"/> claimed a comparison that never ran.
 /// </para>
 /// </summary>
 public sealed class EtherCatSlaveDetail
@@ -190,34 +192,34 @@ public sealed class EtherCatSlaveDetail
     public required uint ConfiguredSerialNumber { get; init; }
 
     /// <summary>
-    /// Vendor id as scanned off the bus. See the class remarks — currently always equal to
-    /// <see cref="ConfiguredVendorId"/>.
+    /// Vendor id as scanned off the bus. See the class remarks — currently always null, because
+    /// no read supplies it.
     /// </summary>
-    public required uint ScannedVendorId { get; init; }
+    public required uint? ScannedVendorId { get; init; }
 
     /// <summary>
-    /// Product code as scanned off the bus. See the class remarks — currently always equal to
-    /// <see cref="ConfiguredProductCode"/>.
+    /// Product code as scanned off the bus. See the class remarks — currently always null,
+    /// because no read supplies it.
     /// </summary>
-    public required uint ScannedProductCode { get; init; }
+    public required uint? ScannedProductCode { get; init; }
 
     /// <summary>
-    /// Revision number as scanned off the bus. See the class remarks — currently always equal to
-    /// <see cref="ConfiguredRevisionNumber"/>.
+    /// Revision number as scanned off the bus. See the class remarks — currently always null,
+    /// because no read supplies it.
     /// </summary>
-    public required uint ScannedRevisionNumber { get; init; }
+    public required uint? ScannedRevisionNumber { get; init; }
 
     /// <summary>
-    /// Serial number as scanned off the bus. See the class remarks — currently always equal to
-    /// <see cref="ConfiguredSerialNumber"/>.
+    /// Serial number as scanned off the bus. See the class remarks — currently always null,
+    /// because no read supplies it.
     /// </summary>
-    public required uint ScannedSerialNumber { get; init; }
+    public required uint? ScannedSerialNumber { get; init; }
 
     /// <summary>
     /// Whether the scanned identity matches the configured one. See the class remarks — currently
-    /// always <see langword="true"/>, since both identities are read from the same source.
+    /// always null: no scanned identity is ever read, so no comparison ever runs.
     /// </summary>
-    public required bool IdentityMatch { get; init; }
+    public required bool? IdentityMatch { get; init; }
 
     /// <summary>
     /// Whether this slave's device state reports the error flag (bit 4 of IG 0x09) — the same bit
@@ -267,10 +269,11 @@ public sealed class SlaveErrorCounters
     public required IReadOnlyList<PortErrorCounters> Ports { get; init; }
 
     /// <summary>
-    /// Always 0. IG 0x12 carries no abnormal-state-change count and no other index group supplies
-    /// one — this is a fixed constant, not a reading of zero state changes.
+    /// Always null. IG 0x12 carries no abnormal-state-change count and no other index group
+    /// supplies one — there is no reading to report, and a 0 here would be indistinguishable
+    /// from a genuine reading of zero state changes.
     /// </summary>
-    public required int AbnormalStateChanges { get; init; }
+    public required int? AbnormalStateChanges { get; init; }
 }
 
 /// <summary>One port's CRC error counters, from the per-slave counter block (IG 0x12).</summary>
@@ -287,13 +290,14 @@ public sealed class PortErrorCounters
     public required int CrcErrors { get; init; }
 
     /// <summary>
-    /// Always 0. IG 0x12 carries one CRC counter per port and nothing else — no forwarded-CRC
-    /// count is ever read, so this is a fixed constant rather than a reading of zero.
+    /// Always null. IG 0x12 carries one CRC counter per port and nothing else — no forwarded-CRC
+    /// count is ever read, so there is no reading to report, and a 0 here would be
+    /// indistinguishable from a genuine reading of zero.
     /// </summary>
-    public required int ForwardedCrcErrors { get; init; }
+    public required int? ForwardedCrcErrors { get; init; }
 
-    /// <summary>Always 0, for the same reason as <see cref="ForwardedCrcErrors"/>.</summary>
-    public required int LostLinkCount { get; init; }
+    /// <summary>Always null, for the same reason as <see cref="ForwardedCrcErrors"/>.</summary>
+    public required int? LostLinkCount { get; init; }
 }
 
 /// <summary>

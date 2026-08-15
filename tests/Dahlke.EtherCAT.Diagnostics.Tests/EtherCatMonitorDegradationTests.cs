@@ -105,7 +105,7 @@ public class EtherCatMonitorDegradationTests
             .Returns(ci => new SlaveErrorCounters
             {
                 PhysicalAddress = ci.ArgAt<ushort>(1),
-                AbnormalStateChanges = 0,
+                AbnormalStateChanges = null,
                 Ports = [],
             });
     }
@@ -185,11 +185,11 @@ public class EtherCatMonitorDegradationTests
         ConfiguredProductCode = 1,
         ConfiguredRevisionNumber = 1,
         ConfiguredSerialNumber = 0,
-        ScannedVendorId = 2,
-        ScannedProductCode = 1,
-        ScannedRevisionNumber = 1,
-        ScannedSerialNumber = 0,
-        IdentityMatch = true,
+        ScannedVendorId = null,
+        ScannedProductCode = null,
+        ScannedRevisionNumber = null,
+        ScannedSerialNumber = null,
+        IdentityMatch = null,
         InitError = false,
         Ports = [],
     };
@@ -650,9 +650,10 @@ public class EtherCatMonitorDegradationTests
         stats.CyclicFramesPerSecond.Should().BeNull("there is no previous counter to delta against");
     }
 
-    // The sharpest instance of #42. EtherCatClient hardcodes IdentityMatch = true, and the polling
-    // service used to fall back to false when the detail read failed — so a dropped read rendered as
-    // "this slave is not the device the project configured", a fabricated fault on a healthy rack.
+    // The sharpest instance of #42. EtherCatClient used to hardcode IdentityMatch = true (now null
+    // per #62), and the polling service used to fall back to false when the detail read failed — so
+    // a dropped read rendered as "this slave is not the device the project configured", a
+    // fabricated fault on a healthy rack.
     [Fact]
     public async Task A_failed_detail_read_leaves_identity_absent_rather_than_mismatched()
     {
@@ -692,9 +693,9 @@ public class EtherCatMonitorDegradationTests
             .Returns(Task.FromResult<SlaveErrorCounters?>(new SlaveErrorCounters
             {
                 PhysicalAddress = 1001,
-                AbnormalStateChanges = 0,
+                AbnormalStateChanges = null,
                 Ports = [new PortErrorCounters
-                    { Port = "A", CrcErrors = 500, ForwardedCrcErrors = 0, LostLinkCount = 0 }],
+                    { Port = "A", CrcErrors = 500, ForwardedCrcErrors = null, LostLinkCount = null }],
             }));
         MasterAnswers("Op", 1001);
         await PollOnce();  // baseline
@@ -712,9 +713,9 @@ public class EtherCatMonitorDegradationTests
             .Returns(Task.FromResult<SlaveErrorCounters?>(new SlaveErrorCounters
             {
                 PhysicalAddress = 1001,
-                AbnormalStateChanges = 0,
+                AbnormalStateChanges = null,
                 Ports = [new PortErrorCounters
-                    { Port = "A", CrcErrors = 500, ForwardedCrcErrors = 0, LostLinkCount = 0 }],
+                    { Port = "A", CrcErrors = 500, ForwardedCrcErrors = null, LostLinkCount = null }],
             }));
         await PollOnce();
 

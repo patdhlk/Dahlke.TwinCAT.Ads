@@ -54,22 +54,22 @@ public class EtherCatMonitorTests
         IsDisabled = false,
         Detail = new EtherCatSlaveDetail
         {
-            IdentityMatch = true,
+            IdentityMatch = null,
             InitError = false,
             ConfiguredVendorId = 2,
             ConfiguredProductCode = 0x03F83052,
             ConfiguredRevisionNumber = 0x00120000,
             ConfiguredSerialNumber = 0,
-            ScannedVendorId = 2,
-            ScannedProductCode = 0x03F83052,
-            ScannedRevisionNumber = 0x00120000,
-            ScannedSerialNumber = 0,
+            ScannedVendorId = null,
+            ScannedProductCode = null,
+            ScannedRevisionNumber = null,
+            ScannedSerialNumber = null,
             Ports = [new SlavePortInfo { Port = "A", Physic = "EBus", Configured = true, LinkState = true }],
         },
         ErrorCounters = new SlaveErrorCounters
         {
             PhysicalAddress = address,
-            AbnormalStateChanges = 0,
+            AbnormalStateChanges = null,
             Ports = portErrors ?? [],
         },
         Scanned = null,
@@ -336,7 +336,7 @@ public class EtherCatMonitorTests
     {
         var portErrors = new List<PortErrorCounters>
         {
-            new() { Port = "A", CrcErrors = 150, ForwardedCrcErrors = 0, LostLinkCount = 0 },
+            new() { Port = "A", CrcErrors = 150, ForwardedCrcErrors = null, LostLinkCount = null },
         };
         var previous = CreateSnapshot(slaves: [CreateSlave()]);
         var current = CreateSnapshot(slaves: [CreateSlave(portErrors: portErrors)]);
@@ -361,7 +361,7 @@ public class EtherCatMonitorTests
     {
         var portErrors = new List<PortErrorCounters>
         {
-            new() { Port = "A", CrcErrors = 200, ForwardedCrcErrors = 0, LostLinkCount = 0 },
+            new() { Port = "A", CrcErrors = 200, ForwardedCrcErrors = null, LostLinkCount = null },
         };
         var previous = CreateSnapshot(slaves: [CreateSlave()]);
         var current = CreateSnapshot(slaves: [CreateSlave(portErrors: portErrors)]);
@@ -377,7 +377,7 @@ public class EtherCatMonitorTests
     {
         var portErrors = new List<PortErrorCounters>
         {
-            new() { Port = "A", CrcErrors = 150, ForwardedCrcErrors = 0, LostLinkCount = 0 },
+            new() { Port = "A", CrcErrors = 150, ForwardedCrcErrors = null, LostLinkCount = null },
         };
         var previous = CreateSnapshot(slaves: [CreateSlave()]);
         var current = CreateSnapshot(slaves: [CreateSlave(portErrors: portErrors)]);
