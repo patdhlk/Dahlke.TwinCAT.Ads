@@ -3,6 +3,9 @@
   <PropertyGroup>
     <!-- What differs per package; the rest is in src/Directory.Build.props -->
     <PackageId>Dahlke.EtherCAT.Cia402</PackageId>
+    <!-- Temporary override while #47 lands project-by-project; consolidated back into
+         src/Directory.Build.props once every package ports. -->
+    <TargetFrameworks>net8.0;net9.0;net10.0;netstandard2.0</TargetFrameworks>
     <Description>CiA-402 (DS402) drive profile decoders — turns a statusword, controlword or modes-of-operation byte into the state, command and mode it stands for. Pure functions over integers: no ADS, no TwinCAT, no EtherCAT transport, and no package dependencies at all.</Description>
     <PackageTags>CiA402;DS402;EtherCAT;CANopen;Drive;Servo;Motion;Automation;Fieldbus</PackageTags>
   </PropertyGroup>
@@ -20,8 +23,9 @@
   -->
 
   <!--
-    THE ONLY PACKAGEREFERENCE IS THE API TRACKER, and that one is PrivateAssets=all, so this package
-    ships with an EMPTY dependency list on every target framework. That is not an accident of it
+    EVERY PACKAGEREFERENCE HERE IS PrivateAssets=all — the API tracker below, and on the
+    netstandard2.0 leg the source-only Polyfill that supplies the compiler-support attributes the
+    older BCL lacks — so this package ships with an EMPTY dependency list on every target framework. That is not an accident of it
     being small — it is the reason it is its own package rather than a class inside
     Dahlke.EtherCAT.Diagnostics.
 
@@ -40,6 +44,10 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="Polyfill" Version="$(PolyfillVersion)" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>
