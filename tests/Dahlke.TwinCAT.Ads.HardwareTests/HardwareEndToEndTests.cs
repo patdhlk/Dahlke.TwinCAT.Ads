@@ -307,6 +307,29 @@ public sealed class HardwareEndToEndTests : IAsyncLifetime
     }
 
     // ------------------------------------------------------------------
+    // 5b. Single-symbol write — a rejected write must throw
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// The single-symbol write path must surface a PLC-rejected write as an
+    /// <see cref="AdsErrorException"/>, exactly like the read paths and the batch write do. A write
+    /// whose <c>ResultWrite</c> is discarded completes as a successful <c>await</c>, and a caller
+    /// beating a watchdog counter through it (the 118-3 dryer HMI heartbeat, 2026-08-15) has no way
+    /// to tell its beats are not landing.
+    /// </summary>
+    [HardwareFact]
+    public async Task WriteValueAsync_BogusSymbol_ThrowsAdsErrorException()
+    {
+        const string bogusSymbol = "__HARDWARE_TEST_BOGUS_SYMBOL_THAT_DOES_NOT_EXIST__";
+        using var cts = new CancellationTokenSource(TestTimeoutMs);
+
+        var ex = await Assert.ThrowsAsync<AdsErrorException>(
+            () => Connection.WriteValueAsync(bogusSymbol, (object)1, cts.Token));
+
+        Assert.Equal(AdsErrorCode.DeviceSymbolNotFound, ex.ErrorCode);
+    }
+
+    // ------------------------------------------------------------------
     // 6. GetAdsStateAsync
     // ------------------------------------------------------------------
 

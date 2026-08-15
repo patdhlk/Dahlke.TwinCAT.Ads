@@ -265,6 +265,21 @@ below was the whole of the release when it was numbered 0.9.2 and is unchanged b
 
 ### Fixed
 
+- **`WriteValueAsync` no longer reports a PLC-rejected write as success.**
+  ([#85](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/85)) Beckhoff's `WriteSymbolAsync`
+  returns its error in `ResultWrite` rather than throwing, and the single-symbol write path
+  discarded that result — the one result-check omission in a file where every read path throws on
+  `Failed` and the batch write maps per-symbol errors through `SumResultMapper`. A rejected write
+  therefore completed as a successful `await`: no exception, nothing to log, nothing for any caller
+  to observe.
+
+  Found live, not in review (118-3 dryer, 2026-08-15): the HMI heartbeat counter, written through
+  this path at 1 Hz, froze on the PLC while the same connection's reads stayed green — the PLC-side
+  watchdog declared the panel dead and no layer above the wire could say why. Rejected writes now
+  throw `AdsErrorException` carrying the ADS error code, mirroring the read paths, and the hardware
+  suite pins the contract: a write to a nonexistent symbol throws `DeviceSymbolNotFound` instead of
+  succeeding.
+
 - **ESI candidate ranking now reads the `x` in a vendor file name as the digit it stands for, so
   safety terminals stop being the devices least likely to resolve.**
   ([#63](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/63)) `EsiCandidateRanker` orders ESI

@@ -265,16 +265,29 @@ internal sealed class AdsConnection : IManagedConnection
     /// Writes <paramref name="value"/> to the PLC symbol identified by <paramref name="symbolPath"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Concurrent calls are safe: the underlying <see cref="AdsClient"/> multiplexes requests over
     /// invoke-ids and correlates responses independently. No write lock is held; concurrent writes
     /// to different (or the same) symbols interleave freely at the ADS transport layer.
+    /// </para>
+    /// <para>
+    /// A write the PLC rejects throws <see cref="AdsErrorException"/> carrying the ADS error code —
+    /// Beckhoff's <c>WriteSymbolAsync</c> RETURNS its error in <c>ResultWrite</c> rather than
+    /// throwing, so completing the <c>await</c> proves nothing on its own. This path discarded that
+    /// result until 2026-08-15, when a heartbeat counter written through it froze on a live machine
+    /// with every layer above reporting success.
+    /// </para>
     /// </remarks>
     public async Task WriteValueAsync(string symbolPath, object value, CancellationToken ct, TimeSpan? timeout = null)
     {
         using var cts = CreateTimeoutCts(ct, timeout);
         try
         {
-            await _client.WriteSymbolAsync(symbolPath, value, cts.Token).ConfigureAwait(false);
+            var result = await _client.WriteSymbolAsync(symbolPath, value, cts.Token).ConfigureAwait(false);
+            if (result.Failed)
+                throw new AdsErrorException(
+                    $"Write of symbol '{symbolPath}' on PLC '{PlcId}' failed: {result.ErrorCode}",
+                    result.ErrorCode);
         }
         catch (OperationCanceledException)
         {
