@@ -50,15 +50,14 @@ internal static class EsiDeviceReader
                 continue;
             }
 
-            // XNode.ReadFromAsync consumes a whole subtree and leaves the reader on the NEXT node,
+            // ReadSubtreeAsync consumes a whole subtree and leaves the reader on the NEXT node,
             // so these branches must NOT read again. Anything else (the EtherCATInfo root,
             // Descriptions, Devices) is descended into with ReadAsync. Every branch advances the
             // reader, so the loop always terminates.
             switch (reader.LocalName)
             {
                 case "Vendor":
-                    vendor = (XElement)await XNode
-                        .ReadFromAsync(reader, CancellationToken.None).ConfigureAwait(false);
+                    vendor = (XElement)await ReadSubtreeAsync(reader).ConfigureAwait(false);
 
                     // A wrong-vendor SECTION cannot contain this device, so stop streaming devices
                     // under it rather than reading every one. Not a bare null, though: an
@@ -77,8 +76,7 @@ internal static class EsiDeviceReader
                     break;
 
                 case "Groups":
-                    groups = (XElement)await XNode
-                        .ReadFromAsync(reader, CancellationToken.None).ConfigureAwait(false);
+                    groups = (XElement)await ReadSubtreeAsync(reader).ConfigureAwait(false);
                     break;
 
                 case "Device":
@@ -89,8 +87,7 @@ internal static class EsiDeviceReader
                         return null;
                     }
 
-                    var device = (XElement)await XNode
-                        .ReadFromAsync(reader, CancellationToken.None).ConfigureAwait(false);
+                    var device = (XElement)await ReadSubtreeAsync(reader).ConfigureAwait(false);
 
                     XElement? type = device.Element("Type");
                     if (type is null ||
@@ -138,6 +135,18 @@ internal static class EsiDeviceReader
         // assignment — so the disjunct below exists only for nullable flow analysis.
         return best is null || bestVendor is null ? null : Map(best, bestVendor, bestGroups);
     }
+
+#if NETSTANDARD2_0
+    // XNode.ReadFromAsync arrived in .NET Core 3.0. On this leg the subtree is consumed
+    // synchronously instead — a reader created with Async=true permits both call styles, and
+    // either way the reader is left on the node AFTER the subtree, which is the contract the
+    // loop above depends on.
+    private static Task<XNode> ReadSubtreeAsync(XmlReader reader) =>
+        Task.FromResult(XNode.ReadFrom(reader));
+#else
+    private static Task<XNode> ReadSubtreeAsync(XmlReader reader) =>
+        XNode.ReadFromAsync(reader, CancellationToken.None);
+#endif
 
     private static EsiDevice Map(XElement device, XElement vendor, XElement? groups) =>
         new(

@@ -106,7 +106,7 @@ internal static class EsiCandidateRanker
 
         while (i < n
             && (char.ToUpperInvariant(model[i]) == char.ToUpperInvariant(name[i])
-                || (name[i] is 'x' or 'X' && char.IsAsciiDigit(model[i]))))
+                || (name[i] is 'x' or 'X' && model[i] is >= '0' and <= '9')))
         {
             i++;
         }
