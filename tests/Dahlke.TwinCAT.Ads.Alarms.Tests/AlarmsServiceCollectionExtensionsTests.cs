@@ -22,10 +22,10 @@ public class AlarmsServiceCollectionExtensionsTests : IDisposable
     private const string Key = "BMK1Err404";
 
     private readonly string _contentRoot =
-        Directory.CreateTempSubdirectory("alarm-content-root").FullName;
+        Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "alarm-content-root-" + Path.GetRandomFileName())).FullName;
 
     private readonly string _elsewhere =
-        Directory.CreateTempSubdirectory("alarm-elsewhere").FullName;
+        Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "alarm-elsewhere-" + Path.GetRandomFileName())).FullName;
 
     public void Dispose()
     {

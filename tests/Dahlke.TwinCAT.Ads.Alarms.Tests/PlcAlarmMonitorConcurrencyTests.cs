@@ -650,7 +650,7 @@ public class PlcAlarmMonitorConcurrencyTests
     private sealed class StubConnection(string plcId, bool failFirstSubscribe) : IAdsConnection
     {
         private readonly List<Action<string, object?>> _callbacks = [];
-        private TaskCompletionSource? _block;
+        private TaskCompletionSource<bool>? _block;
         private Func<Exception>? _failure;
 
         // A holder rather than the value itself, so "deliver null on registration" stays
@@ -709,9 +709,9 @@ public class PlcAlarmMonitorConcurrencyTests
         /// passed while asserting a count that had never been incremented.
         /// </remarks>
         public void BlockNextSubscribe() => Volatile.Write(
-            ref _block, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+            ref _block, new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
 
-        public void ReleaseBlockedSubscribe() => Interlocked.Exchange(ref _block, null)?.TrySetResult();
+        public void ReleaseBlockedSubscribe() => Interlocked.Exchange(ref _block, null)?.TrySetResult(true);
 
         /// <summary>
         /// Makes every successful <c>SubscribeAsync</c> deliver <paramref name="value"/> to the

@@ -1,0 +1,21 @@
+<Project>
+
+  <!-- Adding a Directory.Build.props here shadows the repository root's, so chain it. -->
+  <Import Project="../Directory.Build.props" />
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+    <!-- Microsoft.Extensions.TimeProvider.Testing's targets warn that net48 is untested and
+         point at exactly this switch. The suites run its netstandard2.0 leg — the same code a
+         real .NET Framework consumer of these libraries gets — and the Windows CI job exists
+         precisely to test that configuration, so the warning is answered rather than ignored. -->
+    <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <!-- The net48 leg (#47) compiles the suites against APIs .NET Framework lacks; this one
+         shared file supplies them. Linked rather than duplicated per project so the polyfilled
+         semantics cannot drift between suites. -->
+    <Compile Include="$(MSBuildThisFileDirectory)Shared/Net48TestCompat.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+</Project>

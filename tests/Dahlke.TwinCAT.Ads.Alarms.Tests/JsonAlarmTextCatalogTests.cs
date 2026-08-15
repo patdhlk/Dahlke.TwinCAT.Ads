@@ -6,7 +6,7 @@ namespace Dahlke.TwinCAT.Ads.Alarms.Tests;
 public class JsonAlarmTextCatalogTests : IDisposable
 {
     private readonly string _directory =
-        Directory.CreateTempSubdirectory("alarm-catalog-tests").FullName;
+        Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "alarm-catalog-tests-" + Path.GetRandomFileName())).FullName;
 
     private string WriteCatalog(string fileName, string json)
     {

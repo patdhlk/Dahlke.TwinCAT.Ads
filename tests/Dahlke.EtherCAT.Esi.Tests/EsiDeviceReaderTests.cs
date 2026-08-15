@@ -134,7 +134,7 @@ public class EsiDeviceReaderTests
     public async Task TryReadAsync_keeps_a_match_from_an_earlier_section_despite_a_later_vendor_mismatch()
     {
         string path = Path.Combine(Path.GetTempPath(), $"esi-multi-vendor-{Guid.NewGuid():N}.xml");
-        await File.WriteAllTextAsync(
+        File.WriteAllText(
             path,
             """
             <?xml version="1.0" encoding="ISO-8859-1"?>
@@ -199,7 +199,7 @@ public class EsiDeviceReaderTests
     public async Task TryReadAsync_throws_for_malformed_xml()
     {
         string path = Path.Combine(Path.GetTempPath(), $"esi-malformed-{Guid.NewGuid():N}.xml");
-        await File.WriteAllTextAsync(path, "<EtherCATInfo><Vendor><Id>#x00000002</Id>");
+        File.WriteAllText(path, "<EtherCATInfo><Vendor><Id>#x00000002</Id>");
 
         try
         {

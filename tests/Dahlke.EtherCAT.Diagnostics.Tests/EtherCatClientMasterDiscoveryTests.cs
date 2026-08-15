@@ -59,7 +59,7 @@ public class EtherCatClientMasterDiscoveryTests
         var channel = Substitute.For<IAdsRawChannel>();
         channel.ReadStateAsync(Arg.Any<CancellationToken>()).Returns(_ =>
         {
-            _probeCounts[netId] = _probeCounts.GetValueOrDefault(netId) + 1;
+            _probeCounts[netId] = (_probeCounts.TryGetValue(netId, out var seen) ? seen : 0) + 1;
 
             // "An answer of any kind confirms the master" (EtherCatClient's own comment) — a bare
             // AdsState.Invalid is a legitimate "found" reply, matching real port-0xFFFF behaviour.
@@ -73,7 +73,7 @@ public class EtherCatClientMasterDiscoveryTests
         return channel;
     }
 
-    private int ProbeCount(string netId) => _probeCounts.GetValueOrDefault(netId);
+    private int ProbeCount(string netId) => (_probeCounts.TryGetValue(netId, out var seen) ? seen : 0);
 
     [Fact]
     public async Task GetMastersAsync_probes_only_the_cached_master_once_the_bus_is_known()

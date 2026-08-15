@@ -104,7 +104,7 @@ public class AdsConnectionPoolHandleDisposeAsyncTests
     /// </summary>
     private sealed class ReleasableBlockingHostedService : IHostedService
     {
-        private readonly TaskCompletionSource _release =
+        private readonly TaskCompletionSource<bool> _release =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public CancellationToken CapturedToken { get; private set; }
@@ -117,7 +117,7 @@ public class AdsConnectionPoolHandleDisposeAsyncTests
             return _release.Task.WaitAsync(ct);
         }
 
-        public void Release() => _release.TrySetResult();
+        public void Release() => _release.TrySetResult(true);
     }
 
     [Fact]

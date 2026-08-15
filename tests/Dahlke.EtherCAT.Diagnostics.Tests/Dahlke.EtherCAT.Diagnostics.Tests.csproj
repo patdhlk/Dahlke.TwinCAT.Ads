@@ -2,8 +2,17 @@
 
   <PropertyGroup>
     <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <!-- net48 resolves the libraries' netstandard2.0 legs and runs them on the .NET Framework
+         runtime #47 exists for. Windows-only: the framework cannot execute elsewhere, and the
+         ubuntu CI matrix must keep building without it. Compile-checking this leg from
+         macOS/Linux works via -p:TargetFrameworks=net48 — the reference-assemblies package below
+         makes that hermetic. -->
+    <TargetFrameworks Condition="'$(OS)' == 'Windows_NT'">net8.0;net9.0;net10.0;net48</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Explicit because the net48 leg would otherwise fall back to C# 7.3 — the modern TFMs
+         already compile at this level via the SDK default. -->
+    <LangVersion>latest</LangVersion>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -47,6 +56,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Dahlke.EtherCAT.Diagnostics\Dahlke.EtherCAT.Diagnostics.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>

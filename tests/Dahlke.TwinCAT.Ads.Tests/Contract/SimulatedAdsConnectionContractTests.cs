@@ -25,7 +25,7 @@ public sealed class SimulatedAdsConnectionContractTests : AdsConnectionContractT
         Func<ValueTask> dispose = () =>
         {
             sim.Dispose();
-            return ValueTask.CompletedTask;
+            return default;
         };
 
         return Task.FromResult(new ContractHarness(sim, writeRaw, dispose));

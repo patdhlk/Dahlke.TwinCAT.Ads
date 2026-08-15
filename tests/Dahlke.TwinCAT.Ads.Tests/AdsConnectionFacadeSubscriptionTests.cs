@@ -280,7 +280,7 @@ public class AdsConnectionFacadeSubscriptionTests
         var handle = await facade.SubscribeAsync("MAIN.x", 100, (_, _) => { }, CancellationToken.None).WaitAsync(RealTimeout);
 
         // The new connection holds its SubscribeAsync open on a gate the test controls.
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var second = new FakeManagedConnection("plc1") { IsConnected = true, SubscribeGate = gate.Task };
         facade.SetCurrent(second);
 
@@ -292,7 +292,7 @@ public class AdsConnectionFacadeSubscriptionTests
 
         // Release the gate: the in-flight re-registration completes and produces a
         // registration that the facade must dispose (record already removed).
-        gate.SetResult();
+        gate.SetResult(true);
 
         // The registration lands in the fake's list, but must be disposed by the facade.
         await WaitUntil(() => second.Subscriptions.Count == 1);
@@ -312,7 +312,7 @@ public class AdsConnectionFacadeSubscriptionTests
         var handle = await facade.SubscribeAsync("MAIN.x", 100, (_, _) => { }, CancellationToken.None).WaitAsync(RealTimeout);
 
         // Second connection's re-registration is gated open.
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var second = new FakeManagedConnection("plc1") { IsConnected = true, SubscribeGate = gate.Task };
         facade.SetCurrent(second);
         await second.SubscribeCalled.WaitAsync(RealTimeout);
@@ -325,7 +325,7 @@ public class AdsConnectionFacadeSubscriptionTests
         // Now let second's in-flight re-registration finish. It is stale (third is
         // current), so what it created must be disposed, not stored as the record's
         // live registration.
-        gate.SetResult();
+        gate.SetResult(true);
         await WaitUntil(() => second.Subscriptions.Count == 1);
         var staleRec = Only(second);
         await WaitUntil(() => staleRec.IsDisposed);

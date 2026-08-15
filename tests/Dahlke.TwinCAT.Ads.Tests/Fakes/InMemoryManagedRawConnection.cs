@@ -22,7 +22,8 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
         new(changeComparer: ByteSequenceEqualityComparer.Instance);
     private readonly SubscriberRegistry<(uint Ig, uint Io), byte[]> _subscribers = new();
     private readonly ConcurrentDictionary<uint, IDisposable> _notifications = new();
-    private uint _nextHandle;
+    // int + unchecked cast: Interlocked gained unsigned overloads only in net5.
+    private int _nextHandle;
 
     /// <summary>Number of times <see cref="Connect"/> has been called on this instance.</summary>
     public int ConnectCount { get; private set; }
@@ -67,7 +68,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
     /// </remarks>
     public Task Stalled => _stalled.Task;
 
-    private readonly TaskCompletionSource _stalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _stalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>Handles currently registered — asserts re-registration happened exactly once.</summary>
     public IReadOnlyCollection<uint> LiveHandles => _notifications.Keys.ToArray();
@@ -142,7 +143,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
     {
         await GateAsync(ct).ConfigureAwait(false);
         OnAddNotification?.Invoke();
-        var handle = Interlocked.Increment(ref _nextHandle);
+        var handle = unchecked((uint)Interlocked.Increment(ref _nextHandle));
         _notifications[handle] = _subscribers.Subscribe((ig, io), (_, data) => onData(data));
         return handle;
     }
@@ -168,7 +169,7 @@ internal sealed class InMemoryManagedRawConnection : IManagedRawConnection
         if (StallNext || StallAlways)
         {
             StallNext = false;
-            _stalled.TrySetResult();
+            _stalled.TrySetResult(true);
             await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
         }
 
