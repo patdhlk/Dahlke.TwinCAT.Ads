@@ -219,7 +219,7 @@ internal sealed class EtherCatMonitor(
 
         var limit = TimeSpan.FromMilliseconds(etherCatOptions.PollCycleBudgetMs);
 
-        using var budgetCts = new CancellationTokenSource(limit, _timeProvider);
+        using var budgetCts = _timeProvider.CreateCancellationTokenSource(limit);
         using var cycleCts = CancellationTokenSource.CreateLinkedTokenSource(ct, budgetCts.Token);
 
         var budget = new CycleBudget(_timeProvider, _timeProvider.GetTimestamp(), limit);
