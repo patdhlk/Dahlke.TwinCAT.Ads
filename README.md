@@ -32,6 +32,11 @@ A .NET library for TwinCAT ADS with durable connections, typed symbol access, si
 dotnet add package Dahlke.TwinCAT.Ads
 ```
 
+Every package targets `net8.0`, `net9.0`, `net10.0` and `netstandard2.0` — the last one for the
+.NET Framework 4.8 WinForms/WPF HMIs and in-house tooling that TwinCAT shops keep in service for
+decades. The CI test suites run on .NET Framework 4.8 against the `netstandard2.0` assemblies,
+so that target is tested, not merely compiled.
+
 Optionally add the Rx companion for `IObservable<T>` streams (see [Reactive (Rx) companion](#reactive-rx-companion)). It depends on the core package, so this pulls both:
 
 ```bash
