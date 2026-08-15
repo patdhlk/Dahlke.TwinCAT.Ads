@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0]
+
+Ten properties on the `Dahlke.EtherCAT.Diagnostics` models became nullable, and the client now
+reports them as null. Source-breaking for anyone reading them into a non-nullable variable — the
+compiler now points at every place that treated a fabricated value as a reading, which is the
+point. No behaviour changes otherwise: every one of these fields was a constant before, so no
+consumer was acting on real information from them.
+
+### Fixed
+
+- **The six diagnostic counters no ADS read ever fed now report as absent instead of zero.**
+  ([#61](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/61))
+  `SlaveErrorCounters.AbnormalStateChanges`, `PortErrorCounters.ForwardedCrcErrors` and
+  `.LostLinkCount`, and `FrameStatistics.CyclicTxRxErrors` and `.QueuedTxRxErrors` were fixed
+  constants: IG 0x12 is one CRC counter per linked port and nothing else, and IG 0x0C carries no
+  Tx/Rx error count, so no bus event could ever move them. They never appeared in
+  `IncompleteReads` either — no read feeds them, so no read could fail.
+
+  That combination is the trap: an EK1122 branch dropping link every few seconds still reported
+  `LostLinkCount = 0` on every port on every cycle, with `diagnosticsDegraded: false`, and an
+  operator dashboarding those saw a healthy bus. The fields were *documented* as constants
+  ("Always 0"), which was honest, but an earlier change had established the guarantee that this
+  client never renders a plausible-looking reading it did not take — these six were the exception
+  the docs carried. They are now `int?`/`long?` and always null, which folds them under the
+  guarantee instead of documenting their exemption from it. A future lower-level access path
+  (the ESC's per-port registers do exist) can fill them with real readings without another model
+  change.
+
+- **`EtherCatSlaveDetail` no longer asserts an identity match it never checked.**
+  ([#62](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/62)) `IdentityMatch` was hardcoded
+  `true` and the four `Scanned*` fields were copies of the configured identity — this ADS
+  interface has no read that tells what is actually wired on the bus, so "scanned" was configured
+  wearing a different name and the match verdict reported a comparison that never ran as having
+  passed. The same defect as #61, inverted: there *absence* rendered as a zero, here *unverified*
+  rendered as *verified*. A consumer alerting on a wrong-device swap after a rack repair got a
+  field that looked purpose-built for exactly that and could never fire.
+
+  `IdentityMatch` is now `bool?` and the `Scanned*` fields `uint?`, all always null. Implementing
+  the real comparison needs ESC register access or EoE mailbox queries, neither reachable through
+  the master's standard ADS interface — until then, null says "nobody checked", where `true` said
+  "checked and passed".
+
 ## [0.10.0] - 2026-08-15
 
 A minor, not the patch this section was opened as: it adds two members to the public

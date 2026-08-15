@@ -716,15 +716,17 @@ internal sealed class EtherCatClient : IEtherCatClient
             ConfiguredProductCode    = cfgProduct,
             ConfiguredRevisionNumber = cfgRevision,
             ConfiguredSerialNumber   = cfgSerial,
-            // Known limitation: scanned identity is set to configured identity because
-            // reading the actual scanned (bus-level) identity would require a different
-            // ADS read mechanism (e.g., ESC register access or EoE mailbox queries)
-            // that is not available through the standard EtherCAT master ADS interface.
-            ScannedVendorId          = cfgVendor,
-            ScannedProductCode       = cfgProduct,
-            ScannedRevisionNumber    = cfgRevision,
-            ScannedSerialNumber      = cfgSerial,
-            IdentityMatch            = true,
+            // Known limitation: reading the actual scanned (bus-level) identity would require a
+            // different ADS read mechanism (e.g., ESC register access or EoE mailbox queries)
+            // that is not available through the standard EtherCAT master ADS interface. Absent,
+            // not a copy of the configured identity with IdentityMatch = true: that rendered a
+            // comparison that never ran as having passed, so a wrong-device swap after a rack
+            // repair could never be reported (#62).
+            ScannedVendorId          = null,
+            ScannedProductCode       = null,
+            ScannedRevisionNumber    = null,
+            ScannedSerialNumber      = null,
+            IdentityMatch            = null,
             InitError                = (slaveStateBytes[0] & 0x10) != 0,
             Ports                    = BuildPortInfo(portBytes),
         };
@@ -764,29 +766,25 @@ internal sealed class EtherCatClient : IEtherCatClient
             {
                 Port               = PortNames[i],
                 CrcErrors          = (int)crc,
-                // CONSTANTS, NOT READINGS — see AbnormalStateChanges below.
-                ForwardedCrcErrors = 0,
-                LostLinkCount      = 0,
+                // NOT READINGS — see AbnormalStateChanges below.
+                ForwardedCrcErrors = null,
+                LostLinkCount      = null,
             });
         }
 
         return new SlaveErrorCounters
         {
             PhysicalAddress      = physicalAddress,
-            // CONSTANT, NOT A READING, and the same is true of the two per-port fields above. The
-            // IG 0x12 block is one uint32 CRC counter per linked port and nothing else — it carries
-            // no abnormal-state-change count, no forwarded-CRC count and no lost-link count, and
-            // adsify reads no other index group that would supply them. All three are fixed 0 on
-            // every response and no bus event will move them.
-            //
-            // They are therefore NOT covered by this branch's "a field fed by a read that did not
-            // answer is null" guarantee: no read feeds them, so there is nothing to be absent, and
-            // they never appear in EtherCatReads/incompleteReads either. An operator watching a
-            // flapping link for connectionLosses to rise will wait forever — which is why they are
-            // named as constants in docs/site/content/docs/api/ethercat.md under "Fields adsify
-            // never reads", in the same terms as the Sync Units gap, rather than left to look like
-            // a healthy reading of zero.
-            AbnormalStateChanges = 0,
+            // NOT A READING, and the same is true of the two per-port fields above. The IG 0x12
+            // block is one uint32 CRC counter per linked port and nothing else — it carries no
+            // abnormal-state-change count, no forwarded-CRC count and no lost-link count, and
+            // adsify reads no other index group that would supply them. Null, not 0: a fixed 0
+            // that no bus event can move is indistinguishable from a healthy reading, so an
+            // operator watching a flapping link for connection losses to rise would wait forever
+            // in front of a dashboard that says the bus is fine (#61). They never appear in
+            // EtherCatReads/incompleteReads either — no read feeds them, so there is no read to
+            // have failed.
+            AbnormalStateChanges = null,
             Ports                = portCounters,
         };
     }
@@ -1442,13 +1440,10 @@ internal sealed class EtherCatClient : IEtherCatClient
             // Null, not 0: this method has no previous reading to delta against.
             CyclicFramesPerSecond = null,
             QueuedFramesPerSecond = null,
-            // CONSTANTS, NOT READINGS. IG 0x0C carries five uint32s and none of them is a Tx/Rx
-            // error count; adsify reads no other index group that would supply one. These two are
-            // fixed 0 on every response and nothing on any bus will move them — documented as such
-            // under "Fields adsify never reads" in docs/site/content/docs/api/ethercat.md. They are
-            // NOT covered by the branch's null-means-absent guarantee, because there is no read
-            // behind them to be absent.
-            CyclicTxRxErrors    = 0,
-            QueuedTxRxErrors    = 0,
+            // NOT READINGS. IG 0x0C carries five uint32s and none of them is a Tx/Rx error count;
+            // adsify reads no other index group that would supply one. Null, not 0: a fixed 0 no
+            // bus event can move is indistinguishable from a genuine reading of zero errors (#61).
+            CyclicTxRxErrors    = null,
+            QueuedTxRxErrors    = null,
         };
 }
