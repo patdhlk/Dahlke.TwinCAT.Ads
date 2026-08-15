@@ -30,6 +30,44 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
 
+  test-net-framework:
+    # The netstandard2.0 legs exist for .NET Framework consumers (#47), and this job is the only
+    # place they ever EXECUTE: the test projects' net48 target — Windows-conditioned, so the
+    # ubuntu matrix above never sees it — resolves each library's netstandard2.0 build and runs
+    # the full suites on the .NET Framework 4.8 runtime those consumers actually have. The SDK
+    # pinned here only drives the build; the tests run on the Framework runtime the image carries
+    # in-box. Tested per project rather than on the solution because HardwareTests has no net48
+    # target and a solution-level --framework would fail on it.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test on .NET Framework 4.8
+        run: |
+          $projects = @(
+            "tests/Dahlke.TwinCAT.Ads.Tests",
+            "tests/Dahlke.TwinCAT.Ads.Testing.Tests",
+            "tests/Dahlke.TwinCAT.Ads.Alarms.Tests",
+            "tests/Dahlke.EtherCAT.Esi.Tests",
+            "tests/Dahlke.EtherCAT.Cia402.Tests",
+            "tests/Dahlke.EtherCAT.Diagnostics.Tests"
+          )
+          foreach ($p in $projects) {
+            dotnet test $p --no-build --configuration Release --framework net48 --verbosity normal
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
   package:
     # Packaging can regress silently: nothing in the test suite notices if the symbol package
     # stops being produced or the PDB loses its Source Link map, and the first report would come
@@ -73,13 +111,17 @@ jobs:
 
   all_good:
     if: always()
-    needs: [build-and-test, package]
+    needs: [build-and-test, test-net-framework, package]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all jobs passed
         run: |
           if [[ "${{ needs.build-and-test.result }}" != "success" ]]; then
             echo "build-and-test failed"
+            exit 1
+          fi
+          if [[ "${{ needs.test-net-framework.result }}" != "success" ]]; then
+            echo "test-net-framework failed"
             exit 1
           fi
           if [[ "${{ needs.package.result }}" != "success" ]]; then
