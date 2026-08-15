@@ -17,6 +17,11 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- Lets Polyfill supply ArgumentNullException.ThrowIfNull and friends on netstandard2.0 at
+         unchanged call sites. Inert on TFMs whose BCL already has them, and inert in projects
+         that never reference Polyfill. -->
+    <PolyArgumentExceptions>true</PolyArgumentExceptions>
   </PropertyGroup>
 
   <PropertyGroup>
