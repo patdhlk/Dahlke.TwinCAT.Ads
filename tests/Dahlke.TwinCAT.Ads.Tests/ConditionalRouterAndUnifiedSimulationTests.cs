@@ -284,6 +284,15 @@ public class ConditionalRouterAndUnifiedSimulationTests
                 ["sim1"] = new PlcTargetOptions { Mode = ConnectionMode.Simulated },
             },
             Router = new AmsRouterOptions { NetId = "127.0.0.1.1.1" }, // NetId is set but no Real targets
+
+            // Stated, not defaulted: AdsRawChannelOptions.Mode defaults to Real, and NeedsRouter
+            // treats a Real raw-channel mode as needing the router even with every PLC target
+            // simulated. Left on the default, this test never reached the no-router branch it is
+            // named for — it passed because the embedded router genuinely started on loopback
+            // and signalled Ready from its status hook. The net48 CI leg exposed that: the
+            // router attempt does not reach Ready there, and the retry loop then awaits a delay
+            // on this test's FakeTimeProvider, which never advances — a deterministic hang.
+            RawChannels = new AdsRawChannelOptions { Mode = ConnectionMode.Simulated },
         };
 
         var svc = new AdsRouterService(
@@ -295,34 +304,11 @@ public class ConditionalRouterAndUnifiedSimulationTests
 
         using var cts = new CancellationTokenSource(RealTimeout);
 
-        // ExecuteAsync runs the hosted service body. Started from the thread pool rather than
-        // awaited directly: ExecuteAsync's first await (the deliberate Task.Yield) captures the
-        // ambient SynchronizationContext, and under xunit on .NET Framework 4.8 that captured
-        // context never ran the yielded continuation — the SetReady this test asserts — so the
-        // net48 leg timed out here deterministically while every other framework passed. Real
-        // hosts don't hit this (Generic Host threads have no context; a UI context keeps
-        // pumping), and the pool's own loops are immune the same way this is: they run under
-        // Task.Run, where no context exists to capture.
-        await Task.Run(() => svc.StartAsync(cts.Token));
+        // ExecuteAsync runs the hosted service body
+        await svc.StartAsync(cts.Token);
 
         // Signal must become ready very quickly (no router bind occurs)
-        try
-        {
-            await signal.WaitAsync(cts.Token).WaitAsync(RealTimeout);
-        }
-        catch (Exception ex)
-        {
-            // TEMPORARY DIAGNOSTIC (#47): the net48 leg times out here deterministically while
-            // every other framework passes in milliseconds. ExecuteTask's state names which side
-            // is stuck — never started, still running, faulted, or completed with the wait side
-            // hanging — which cannot be told apart from the TimeoutException alone.
-            var et = svc.ExecuteTask;
-            throw new InvalidOperationException(
-                $"signal wait failed with {ex.GetType().Name}; ExecuteTask is " +
-                $"{(et is null ? "null" : et.Status.ToString())}" +
-                $"{(et?.Exception is { } agg ? $", exception: {agg.GetBaseException()}" : "")}",
-                ex);
-        }
+        await signal.WaitAsync(cts.Token).WaitAsync(RealTimeout);
 
         await svc.StopAsync(CancellationToken.None);
     }
