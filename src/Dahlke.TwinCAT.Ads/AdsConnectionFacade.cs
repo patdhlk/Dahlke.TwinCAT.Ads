@@ -300,7 +300,12 @@ internal sealed class AdsConnectionFacade : IAdsConnection
             return new ValueTask<IManagedConnection>(current);
 
         if (_stopped)
-            return ValueTask.FromException<IManagedConnection>(StoppedException());
+        {
+            // Task-backed rather than ValueTask.FromException (net5+): this path is cold — it
+            // only runs on a stopped facade — so the wrapper Task costs nothing that matters.
+            return new ValueTask<IManagedConnection>(
+                Task.FromException<IManagedConnection>(StoppedException()));
+        }
 
         return new ValueTask<IManagedConnection>(WaitForConnectionAsync(ct, timeout));
     }

@@ -98,7 +98,7 @@ public class Cia402ControlwordTests
 
             // Total: there is no word this decode cannot name, so no member outside the enum can
             // ever come back.
-            Assert.True(Enum.IsDefined(command), $"0x{word:X4} decoded to {(int)command}");
+            Assert.True(Enum.IsDefined(typeof(Cia402Command), command), $"0x{word:X4} decoded to {(int)command}");
 
             // The table's rows overlap by design (fault reset covers half the domain, and disable
             // voltage's mask is narrower than shutdown's), so the FIRST matching row is the answer —
@@ -126,7 +126,7 @@ public class Cia402ControlwordTests
     {
         // The property that keeps the two tables honest: they are inverses, so an edit to one that
         // is not mirrored in the other fails here rather than in front of a drive.
-        foreach (var command in Enum.GetValues<Cia402Command>())
+        foreach (var command in Enum.GetValues(typeof(Cia402Command)).Cast<Cia402Command>())
         {
             Assert.Equal(command, MotionCia402.DecodeControlword(MotionCia402.EncodeCommand(command)).Command);
         }
@@ -143,7 +143,7 @@ public class Cia402ControlwordTests
     {
         // Halt is orthogonal to the command, and a caller that wants it must say so by setting bit 8
         // themselves. Encoding it silently would stop a drive that was asked to run.
-        foreach (var command in Enum.GetValues<Cia402Command>())
+        foreach (var command in Enum.GetValues(typeof(Cia402Command)).Cast<Cia402Command>())
         {
             Assert.False(MotionCia402.DecodeControlword(MotionCia402.EncodeCommand(command)).Halt);
         }

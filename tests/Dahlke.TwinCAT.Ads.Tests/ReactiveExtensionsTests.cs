@@ -90,10 +90,10 @@ public class ReactiveExtensionsTests
         var facade = NewFacade(conn);
 
         Exception? error = null;
-        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         using var sub = facade.ObserveValue("MAIN.missing", cycleTimeMs: 100)
-            .Subscribe(_ => { }, ex => { error = ex; done.TrySetResult(); });
+            .Subscribe(_ => { }, ex => { error = ex; done.TrySetResult(true); });
 
         await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.IsType<InvalidOperationException>(error);

@@ -81,7 +81,7 @@ public static class MotionCia402
         var status = DecodeStatusword(statusword);
 
         var name = status.State == Cia402State.Unknown
-            ? string.Create(CultureInfo.InvariantCulture, $"Unknown(0x{statusword:X4})")
+            ? FormattableString.Invariant($"Unknown(0x{statusword:X4})")
             : status.State.ToString();
 
         var flags = new List<string>(5);
@@ -235,8 +235,8 @@ public static class MotionCia402
             // Negative is the manufacturer's range by definition; everything else undefined is
             // reserved by the standard, whether it is the lone 5 or anything from 12 up.
             _ => mode < 0
-                ? string.Create(CultureInfo.InvariantCulture, $"Manufacturer-specific ({mode})")
-                : string.Create(CultureInfo.InvariantCulture, $"Reserved ({mode})"),
+                ? FormattableString.Invariant($"Manufacturer-specific ({mode})")
+                : FormattableString.Invariant($"Reserved ({mode})"),
         };
     }
 

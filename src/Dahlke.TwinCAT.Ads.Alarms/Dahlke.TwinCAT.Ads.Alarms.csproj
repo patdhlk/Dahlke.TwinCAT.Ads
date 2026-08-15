@@ -29,4 +29,18 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="$(MicrosoftExtensionsVersion)" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <!-- The netstandard2.0 compatibility set (#47): Polyfill is compile-time source only; the
+         rest carry what the older BCL lacks — IAsyncEnumerable (the monitor's stream),
+         ImmutableArray (the store), and System.Text.Json (the JSON text catalog; 8.0.5 floor,
+         see root Directory.Build.props). -->
+    <PackageReference Include="Polyfill" Version="$(PolyfillVersion)" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="$(MicrosoftBclAsyncInterfacesVersion)" />
+    <PackageReference Include="System.Collections.Immutable" Version="$(SystemCollectionsImmutableVersion)" />
+    <PackageReference Include="System.Text.Json" Version="$(SystemTextJsonVersion)" />
+    <!-- PlcAlarmBinder's DLR fallback: the dynamic runtime binder is in-box on the modern
+         frameworks and a package on netstandard2.0. -->
+    <PackageReference Include="Microsoft.CSharp" Version="$(MicrosoftCSharpVersion)" />
+  </ItemGroup>
+
 </Project>

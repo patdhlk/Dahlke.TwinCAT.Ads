@@ -78,7 +78,7 @@ internal sealed class AdsRawChannel : IAdsRawChannel
             discard: RemoveNotification,
             restoreBound: () =>
             {
-                var timeout = new CancellationTokenSource(DefaultTimeout, _timeProvider);
+                var timeout = _timeProvider.CreateCancellationTokenSource(DefaultTimeout);
                 var linked = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, timeout.Token);
                 return new SubscriptionRestoreBound(linked.Token, linked, timeout);
             },
@@ -176,7 +176,7 @@ internal sealed class AdsRawChannel : IAdsRawChannel
                 // as TimeoutException. It covers the transport build too, because
                 // a subscribe that is queued behind a slow rebuild is just as
                 // stuck as one waiting on the device.
-                using var timeoutCts = new CancellationTokenSource(DefaultTimeout, _timeProvider);
+                using var timeoutCts = _timeProvider.CreateCancellationTokenSource(DefaultTimeout);
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
                 try
@@ -319,9 +319,10 @@ internal sealed class AdsRawChannel : IAdsRawChannel
 
             // NOTE: CancelAfter(TimeSpan, TimeProvider) does NOT exist — only
             // CancelAfter(TimeSpan) and CancelAfter(int). The TimeProvider-aware
-            // path is the CONSTRUCTOR, so the timeout source is built with the
-            // clock and then linked to the caller's token.
-            using var timeoutCts = new CancellationTokenSource(timeout, _timeProvider);
+            // path is CONSTRUCTION of the source (CreateCancellationTokenSource),
+            // so the timeout source is built with the clock and then linked to
+            // the caller's token.
+            using var timeoutCts = _timeProvider.CreateCancellationTokenSource(timeout);
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
             try

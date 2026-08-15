@@ -127,7 +127,9 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
         var simFirstConnects = new List<Task>(simTargets.Count);
         foreach (var (plcId, options) in simTargets)
         {
-            var firstConnect = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            // TaskCompletionSource<bool> rather than the non-generic one (net5+): the value is
+            // never read, only awaited, and the generic form exists on every target framework.
+            var firstConnect = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             simFirstConnects.Add(firstConnect.Task);
             StartConnectionLoop(plcId, options, firstConnectSignal: firstConnect);
         }
@@ -575,7 +577,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
     /// </remarks>
     private void StartConnectionLoop(
         string plcId, PlcTargetOptions options, Task? predecessor = null,
-        TaskCompletionSource? firstConnectSignal = null)
+        TaskCompletionSource<bool>? firstConnectSignal = null)
     {
         var signal = new OwnedLoopCancellation();
         _reconnectCts[plcId] = signal;
@@ -646,7 +648,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                         SetState(plcId, ConnectionState.Connected);
                         // Release StartAsync's first-connect await as soon as this
                         // target publishes its first live connection.
-                        firstConnectSignal?.TrySetResult();
+                        firstConnectSignal?.TrySetResult(true);
                         delay = MinReconnectDelay;
 
                         _logger.LogInformation("PLC {PlcId} connected, starting health check", plcId);
@@ -658,7 +660,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                         // Health check loop: checks if connection is still alive
                         while (!signal.Token.IsCancellationRequested)
                         {
-                            await Task.Delay(HealthCheckInterval, _timeProvider, signal.Token).ConfigureAwait(false);
+                            await _timeProvider.Delay(HealthCheckInterval, signal.Token).ConfigureAwait(false);
 
                             if (!await ads.IsAliveAsync(signal.Token).ConfigureAwait(false))
                             {
@@ -719,7 +721,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                     // finish. On the cancelled path the token is already
                     // signalled, so this falls through immediately — StopAsync
                     // must not stall here.
-                    try { await Task.Delay(DisposeGracePeriod, _timeProvider, signal.Token).ConfigureAwait(false); }
+                    try { await _timeProvider.Delay(DisposeGracePeriod, signal.Token).ConfigureAwait(false); }
                     catch { /* Clean up anyway on cancellation */ }
 
                     ads.ForceDisconnect();
@@ -729,7 +731,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
                 if (cancelled || signal.Token.IsCancellationRequested) break;
 
                 // Wait before next connection attempt
-                try { await Task.Delay(delay, _timeProvider, signal.Token).ConfigureAwait(false); }
+                try { await _timeProvider.Delay(delay, signal.Token).ConfigureAwait(false); }
                 catch { break; }
 
                 delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxReconnectDelay.Ticks));
@@ -739,7 +741,7 @@ internal sealed class AdsConnectionPool : IHostedService, IAdsConnectionPool, ID
             // attempt ever ran). Release any StartAsync first-connect await that is
             // still parked, so a connection that was never published cannot wedge
             // startup. Idempotent with the success-path signal above.
-            firstConnectSignal?.TrySetResult();
+            firstConnectSignal?.TrySetResult(true);
         }, CancellationToken.None);
 
         // The tracked task is the loop PLUS its signal retirement, so a caller

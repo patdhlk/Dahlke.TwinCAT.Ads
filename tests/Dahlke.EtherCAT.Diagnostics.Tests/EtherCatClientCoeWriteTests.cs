@@ -251,7 +251,7 @@ public class EtherCatClientCoeWriteTests
         // and no member of Beckhoff's own enum does. Measured against TwinCAT.Ads 7.0.292 — pinned
         // here so a future release that DID add such a member fails this test instead of quietly
         // making the client report an ADS error as a slave abort.
-        var colliding = Enum.GetValues<AdsErrorCode>()
+        var colliding = Enum.GetValues(typeof(AdsErrorCode)).Cast<AdsErrorCode>()
             .Where(EtherCatClient.IsSdoAbort)
             .ToArray();
 

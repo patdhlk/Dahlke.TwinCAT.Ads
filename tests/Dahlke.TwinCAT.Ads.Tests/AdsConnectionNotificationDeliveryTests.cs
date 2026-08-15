@@ -153,12 +153,12 @@ public class AdsConnectionNotificationDeliveryTests
         var connection = CreateConnection();
         using var disposal = new CancellationTokenSource();
 
-        var threw = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var threw = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         connection.DeliverDecodedContainerInBackground(
             "MAIN.Motor", SkippedReadPlaceholder, motor, "ST_Motor", PlcTimestamp,
             _ =>
             {
-                threw.TrySetResult();
+                threw.TrySetResult(true);
                 throw new InvalidOperationException("subscriber blew up");
             },
             disposal.Token);

@@ -144,5 +144,5 @@ internal sealed class ErrorHandlerAlarmDialect : IPlcAlarmDialect
 
     private static string Describe(object? value) => value is null
         ? "null"
-        : string.Create(CultureInfo.InvariantCulture, $"{value.GetType().Name} '{value}'");
+        : FormattableString.Invariant($"{value.GetType().Name} '{value}'");
 }

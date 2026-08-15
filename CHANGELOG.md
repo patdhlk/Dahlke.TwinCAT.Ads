@@ -13,7 +13,23 @@ compiler now points at every place that treated a fabricated value as a reading,
 point. No behaviour changes otherwise: every one of these fields was a constant before, so no
 consumer was acting on real information from them.
 
-### Fixed
+### Added
+
+- **All seven packages now ship a `netstandard2.0` target, so .NET Framework 4.8 applications
+  can consume them.** ([#47](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/47))
+  Beckhoff.TwinCAT.Ads itself has always shipped `netstandard2.0` — including the TcpRouter, so
+  the embedded router works there too; the exclusion was only ever this repository's TFM list.
+  The gap is bridged almost entirely at compile time: the `netstandard2.0` leg adds
+  Microsoft.Bcl.TimeProvider, Microsoft.Bcl.AsyncInterfaces, Microsoft.Bcl.HashCode,
+  System.Memory and System.Collections.Immutable where a package actually uses those APIs (plus
+  System.Text.Json ≥ 8.0.5 and Microsoft.CSharp for Alarms), and the source-only Polyfill
+  package — which adds **no** runtime dependency — supplies the newer compiler surface. The
+  modern targets compile the same code they always did, with two deliberate exceptions recorded
+  as `#if NETSTANDARD2_0` blocks: ESI subtree reads are synchronous there
+  (`XNode.ReadFromAsync` arrived in .NET Core 3.0), and the byte-array hash in the simulated
+  store mixes byte-at-a-time (`HashCode.AddBytes` arrived in .NET 6). CI now runs every test
+  suite on .NET Framework 4.8 against the `netstandard2.0` assemblies, on a Windows runner,
+  alongside the existing Linux matrix.
 
 - **The six diagnostic counters no ADS read ever fed now report as absent instead of zero.**
   ([#61](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/61))

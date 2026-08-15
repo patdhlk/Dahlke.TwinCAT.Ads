@@ -99,7 +99,7 @@ public class RouterRetryTests
             time,
             attempt: (n, sig, ct) =>
             {
-                lock (attemptAt) { attemptAt.Add(time.GetUtcNow() - DateTimeOffset.UnixEpoch); }
+                lock (attemptAt) { attemptAt.Add(time.GetUtcNow() - DateTimeOffset.FromUnixTimeSeconds(0)); }
 
                 if (n < 3)
                     throw new InvalidOperationException($"bind failure attempt {n}");

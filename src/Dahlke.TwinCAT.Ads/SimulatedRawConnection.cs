@@ -63,7 +63,9 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection
     private readonly ConcurrentDictionary<uint, IDisposable> _notifications = new();
     private readonly string _amsNetId;
     private readonly int _port;
-    private uint _nextHandle;
+    // int rather than uint: Interlocked gained unsigned overloads only in net5, and a handle
+    // counter reinterpreted through unchecked keeps the same uint sequence on every framework.
+    private int _nextHandle;
     private bool _disposed;
 
     public SimulatedRawConnection(string amsNetId, int port, SimulatedRawStore store)
@@ -140,7 +142,7 @@ internal sealed class SimulatedRawConnection : IManagedRawConnection
         ThrowIfDisposed();
         ct.ThrowIfCancellationRequested();
 
-        var handle = Interlocked.Increment(ref _nextHandle);
+        var handle = unchecked((uint)Interlocked.Increment(ref _nextHandle));
         _notifications[handle] = _subscribers.Subscribe((ig, io), (_, data) => onData(data));
         return Task.FromResult(handle);
     }

@@ -20,8 +20,9 @@
   -->
 
   <!--
-    THE ONLY PACKAGEREFERENCE IS THE API TRACKER, and that one is PrivateAssets=all, so this package
-    ships with an EMPTY dependency list on every target framework. That is not an accident of it
+    EVERY PACKAGEREFERENCE HERE IS PrivateAssets=all — the API tracker below, and on the
+    netstandard2.0 leg the source-only Polyfill that supplies the compiler-support attributes the
+    older BCL lacks — so this package ships with an EMPTY dependency list on every target framework. That is not an accident of it
     being small — it is the reason it is its own package rather than a class inside
     Dahlke.EtherCAT.Diagnostics.
 
@@ -40,6 +41,10 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="Polyfill" Version="$(PolyfillVersion)" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>

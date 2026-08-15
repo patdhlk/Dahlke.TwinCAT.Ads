@@ -113,6 +113,23 @@
       that actually RESOLVES, not the lowest that compiles.
     -->
     <SystemReactiveVersion>6.1.0</SystemReactiveVersion>
+
+    <!--
+      netstandard2.0 compatibility packages (#47). Referenced only from ItemGroups conditioned on
+      '$(TargetFramework)' == 'netstandard2.0' (and the net48 test leg), so the modern TFMs never
+      carry them. Fixed floors like everything above. System.Text.Json is 8.0.5 because
+      8.0.0-8.0.4 carry security advisories and NuGetAudit warnings are errors here. Polyfill is
+      compile-time source only (PrivateAssets=all at every reference) and must never surface in a
+      packed nuspec — the pack check in CI would catch it if it did.
+    -->
+    <PolyfillVersion>9.6.0</PolyfillVersion>
+    <MicrosoftBclTimeProviderVersion>8.0.1</MicrosoftBclTimeProviderVersion>
+    <MicrosoftBclHashCodeVersion>6.0.0</MicrosoftBclHashCodeVersion>
+    <MicrosoftBclAsyncInterfacesVersion>8.0.0</MicrosoftBclAsyncInterfacesVersion>
+    <SystemMemoryVersion>4.6.0</SystemMemoryVersion>
+    <SystemCollectionsImmutableVersion>8.0.0</SystemCollectionsImmutableVersion>
+    <SystemTextJsonVersion>8.0.5</SystemTextJsonVersion>
+    <MicrosoftCSharpVersion>4.7.0</MicrosoftCSharpVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">

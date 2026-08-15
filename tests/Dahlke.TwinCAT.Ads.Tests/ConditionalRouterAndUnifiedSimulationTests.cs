@@ -284,6 +284,15 @@ public class ConditionalRouterAndUnifiedSimulationTests
                 ["sim1"] = new PlcTargetOptions { Mode = ConnectionMode.Simulated },
             },
             Router = new AmsRouterOptions { NetId = "127.0.0.1.1.1" }, // NetId is set but no Real targets
+
+            // Stated, not defaulted: AdsRawChannelOptions.Mode defaults to Real, and NeedsRouter
+            // treats a Real raw-channel mode as needing the router even with every PLC target
+            // simulated. Left on the default, this test never reached the no-router branch it is
+            // named for — it passed because the embedded router genuinely started on loopback
+            // and signalled Ready from its status hook. The net48 CI leg exposed that: the
+            // router attempt does not reach Ready there, and the retry loop then awaits a delay
+            // on this test's FakeTimeProvider, which never advances — a deterministic hang.
+            RawChannels = new AdsRawChannelOptions { Mode = ConnectionMode.Simulated },
         };
 
         var svc = new AdsRouterService(

@@ -2,8 +2,18 @@
 
   <PropertyGroup>
     <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <!-- net48 resolves the libraries' netstandard2.0 legs and runs them on the .NET Framework
+         runtime #47 exists for. Windows-only: the framework cannot execute elsewhere, and the
+         ubuntu CI matrix must keep building without it. Compile-checking this leg from
+         macOS/Linux works via `-p:OS=Windows_NT -f net48` (a global TargetFrameworks override
+         would leak into the referenced libraries and rebuild THEM as net48) — the
+         reference-assemblies package below makes that build hermetic. -->
+    <TargetFrameworks Condition="'$(OS)' == 'Windows_NT'">net8.0;net9.0;net10.0;net48</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Explicit because the net48 leg would otherwise fall back to C# 7.3 — the modern TFMs
+         already compile at this level via the SDK default. -->
+    <LangVersion>latest</LangVersion>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -28,6 +38,20 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Dahlke.TwinCAT.Ads\Dahlke.TwinCAT.Ads.csproj" />
     <ProjectReference Include="..\..\src\Dahlke.TwinCAT.Ads.Reactive\Dahlke.TwinCAT.Ads.Reactive.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- Deliberately NO Polyfill here, though the libraries' netstandard2.0 legs use it: this
+         project is InternalsVisibleTo-friended by Dahlke.TwinCAT.Ads, so the library's internal
+         Polyfill types are already visible, and a second source copy makes every one of them
+         ambiguous (CS0121) inside Polyfill's own files. The handful of net5+ APIs the suite used
+         are rewritten portably instead. -->
+    <!-- Transitive-only on this leg (via Microsoft.Extensions.Hosting), where 8.0.0 resolves and
+         carries known advisories NuGetAudit treats as errors here. The modern legs use the
+         framework's own System.Text.Json and never restore the package. Version: root
+         Directory.Build.props. -->
+    <PackageReference Include="System.Text.Json" Version="$(SystemTextJsonVersion)" />
   </ItemGroup>
 
 </Project>

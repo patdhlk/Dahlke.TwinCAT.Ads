@@ -69,7 +69,7 @@ public static class AlarmsServiceCollectionExtensions
         {
             var options = sp.GetRequiredService<IOptions<PlcAlarmsOptions>>().Value;
 
-            if (string.IsNullOrWhiteSpace(options.TextCatalog))
+            if (options.TextCatalog is null || string.IsNullOrWhiteSpace(options.TextCatalog))
                 return NullAlarmTextCatalog.Instance;
 
             // GetService, not GetRequiredService: a plain ServiceCollection with no host

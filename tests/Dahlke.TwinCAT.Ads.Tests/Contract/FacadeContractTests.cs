@@ -47,7 +47,7 @@ public sealed class FacadeContractTests : AdsConnectionContractTests
         Func<ValueTask> dispose = () =>
         {
             inner.Dispose();
-            return ValueTask.CompletedTask;
+            return default;
         };
 
         return Task.FromResult(new ContractHarness(facade, writeRaw, dispose));

@@ -43,4 +43,20 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="$(MicrosoftExtensionsVersion)" />
   </ItemGroup>
 
+  <!--
+    What the netstandard2.0 leg adds and why (#47): Polyfill is compile-time source only
+    (attributes, ThrowIfNull guards) and ships as no dependency; the rest are the runtime pieces
+    the older BCL lacks — TimeProvider (pool timing throughout), IAsyncDisposable (the pool
+    builder and handle), Span/Memory (the raw channel), and System.Collections.Frozen for
+    NotificationPayload. Versions: root Directory.Build.props.
+  -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="Polyfill" Version="$(PolyfillVersion)" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="$(MicrosoftBclTimeProviderVersion)" />
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="$(MicrosoftBclAsyncInterfacesVersion)" />
+    <PackageReference Include="Microsoft.Bcl.HashCode" Version="$(MicrosoftBclHashCodeVersion)" />
+    <PackageReference Include="System.Memory" Version="$(SystemMemoryVersion)" />
+    <PackageReference Include="System.Collections.Immutable" Version="$(SystemCollectionsImmutableVersion)" />
+  </ItemGroup>
+
 </Project>

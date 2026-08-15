@@ -33,7 +33,13 @@ internal static class SymbolDumpFilter
     /// </remarks>
     internal static bool ShouldInclude(string instancePath, SymbolDumpOptions options)
     {
-        var depth = instancePath.AsSpan().Count('.');
+        var depth = 0;
+        foreach (var c in instancePath)
+        {
+            if (c == '.')
+                depth++;
+        }
+
         if (depth > options.MaxDepth)
             return false;
 

@@ -155,7 +155,7 @@ public class AdsConnectionEnumMetadataTests
 
         // TaskCompletionSource rather than a ManualResetEventSlim: nothing here has to be
         // disposed while the blocked thread is still inside its wait.
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         ((FakeDataTypeCollection)loader.DataTypes).OnEnumerating =
             () => release.Task.Wait(TimeSpan.FromSeconds(30));
         connection.SetSymbolLoaderForTesting(loader);
@@ -170,7 +170,7 @@ public class AdsConnectionEnumMetadataTests
         }
         finally
         {
-            release.TrySetResult();
+            release.TrySetResult(true);
         }
     }
 
@@ -190,11 +190,11 @@ public class AdsConnectionEnumMetadataTests
         var loader = new FakeDynamicSymbolLoader(
             [new FakeEnumType("MyEnum", [new FakeEnumValue("SUCCESS", (short)0)])], []);
 
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var resolving = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resolving = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         ((FakeDataTypeCollection)loader.DataTypes).OnEnumerating = () =>
         {
-            resolving.TrySetResult();
+            resolving.TrySetResult(true);
             release.Task.Wait(TimeSpan.FromSeconds(30));
         };
         connection.SetSymbolLoaderForTesting(loader);
@@ -212,7 +212,7 @@ public class AdsConnectionEnumMetadataTests
         }
         finally
         {
-            release.TrySetResult();
+            release.TrySetResult(true);
         }
     }
 

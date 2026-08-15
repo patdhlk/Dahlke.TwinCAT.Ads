@@ -1349,7 +1349,7 @@ internal sealed class AdsConnection : IManagedConnection
             var loader = GetSymbolLoader();
 
             ISymbolCollection<ISymbol> symbols;
-            if (string.IsNullOrEmpty(parentPath))
+            if (parentPath is null || parentPath.Length == 0)
             {
                 symbols = loader.Symbols;
             }
@@ -1390,7 +1390,7 @@ internal sealed class AdsConnection : IManagedConnection
     /// actually running on its thread-pool thread, that token has no further effect — cancelling
     /// it does not make <c>Task.Run</c>'s returned task complete early. So this method does not
     /// rely on that: it races the browse against a separate
-    /// <see cref="Task.Delay(int, CancellationToken)"/> via <see cref="Task.WhenAny(Task, Task)"/>
+    /// <see cref="Task.Delay(int, CancellationToken)"/> via <see cref="Task.WhenAny(Task[])"/>
     /// instead. Whichever finishes first wins:
     /// </para>
     /// <list type="bullet">

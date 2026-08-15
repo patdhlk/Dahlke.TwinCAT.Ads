@@ -243,7 +243,7 @@ internal sealed class AdsRawChannelFactory : IAdsRawChannelFactory, IHostedServi
         {
             while (!signal.Token.IsCancellationRequested)
             {
-                await Task.Delay(SweepInterval, _timeProvider, signal.Token).ConfigureAwait(false);
+                await _timeProvider.Delay(SweepInterval, signal.Token).ConfigureAwait(false);
                 SweepOnce();
             }
         }

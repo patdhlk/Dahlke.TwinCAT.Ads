@@ -188,7 +188,7 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
         return _value!;
     }
 
-    private readonly TaskCompletionSource _readCancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _readCancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
     /// Completes when this member's read observes cancellation. Only meaningful for a
@@ -211,7 +211,7 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
             }
             catch (OperationCanceledException)
             {
-                _readCancelled.TrySetResult();
+                _readCancelled.TrySetResult(true);
                 throw;
             }
         }

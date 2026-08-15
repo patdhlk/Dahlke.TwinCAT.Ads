@@ -49,7 +49,7 @@ public class Cia402ModeTests
             // Either it is a defined member, or it is null. Never an undefined enum value.
             if (decoded is not null)
             {
-                Assert.True(Enum.IsDefined(decoded.Value), $"{mode} decoded to {(int)decoded.Value}");
+                Assert.True(Enum.IsDefined(typeof(Cia402Mode), decoded.Value), $"{mode} decoded to {(int)decoded.Value}");
                 Assert.Equal(mode, (int)decoded.Value);
             }
         }

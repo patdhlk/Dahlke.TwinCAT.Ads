@@ -24,8 +24,8 @@ namespace Dahlke.TwinCAT.Ads.Tests.Fakes;
 internal sealed class FakeManagedConnection : IManagedConnection
 {
     private readonly object _gate = new();
-    private TaskCompletionSource _connectCalled = NewTcs();
-    private TaskCompletionSource _isAliveCalled = NewTcs();
+    private TaskCompletionSource<bool> _connectCalled = NewTcs();
+    private TaskCompletionSource<bool> _isAliveCalled = NewTcs();
 
     public FakeManagedConnection(string plcId = "plc1", string displayName = "PLC 1")
     {
@@ -33,7 +33,7 @@ internal sealed class FakeManagedConnection : IManagedConnection
         DisplayName = displayName;
     }
 
-    private static TaskCompletionSource NewTcs()
+    private static TaskCompletionSource<bool> NewTcs()
         => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     // ---- Scriptable behaviour -------------------------------------------
@@ -124,9 +124,9 @@ internal sealed class FakeManagedConnection : IManagedConnection
     public void Connect()
     {
         Interlocked.Increment(ref ConnectCount);
-        TaskCompletionSource toSignal;
+        TaskCompletionSource<bool> toSignal;
         lock (_gate) { toSignal = _connectCalled; }
-        toSignal.TrySetResult();
+        toSignal.TrySetResult(true);
 
         if (ConnectShouldThrow)
         {
@@ -151,9 +151,9 @@ internal sealed class FakeManagedConnection : IManagedConnection
     public Task<bool> IsAliveAsync(CancellationToken ct)
     {
         Interlocked.Increment(ref IsAliveCount);
-        TaskCompletionSource toSignal;
+        TaskCompletionSource<bool> toSignal;
         lock (_gate) { toSignal = _isAliveCalled; }
-        toSignal.TrySetResult();
+        toSignal.TrySetResult(true);
 
         ct.ThrowIfCancellationRequested();
 
@@ -275,9 +275,9 @@ internal sealed class FakeManagedConnection : IManagedConnection
     /// </summary>
     public Task? SubscribeGate { get; set; }
 
-    private TaskCompletionSource _subscribeCalled = NewTcsT();
+    private TaskCompletionSource<bool> _subscribeCalled = NewTcsT();
 
-    private static TaskCompletionSource NewTcsT()
+    private static TaskCompletionSource<bool> NewTcsT()
         => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>Completes when <see cref="SubscribeAsync"/> is entered. Re-arm with <see cref="RearmSubscribeCalled"/>.</summary>
@@ -293,9 +293,9 @@ internal sealed class FakeManagedConnection : IManagedConnection
 
     public async Task<IDisposable> SubscribeAsync(string symbolPath, int cycleTimeMs, Action<string, object?> callback, CancellationToken ct, TimeSpan? timeout = null)
     {
-        TaskCompletionSource toSignal;
+        TaskCompletionSource<bool> toSignal;
         lock (_gate) { toSignal = _subscribeCalled; }
-        toSignal.TrySetResult();
+        toSignal.TrySetResult(true);
 
         var oneShot = SubscribeThrowsOnce;
         if (oneShot is not null)

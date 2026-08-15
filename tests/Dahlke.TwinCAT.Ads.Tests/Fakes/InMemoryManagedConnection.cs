@@ -173,8 +173,9 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     {
         ct.ThrowIfCancellationRequested();
         var results = new Dictionary<string, AdsValueResult>();
-        foreach (var (path, value) in values)
+        foreach (var entry in values)
         {
+            var (path, value) = (entry.Key, entry.Value);
             if (value is null)
             {
                 results[path] = AdsValueResult.Failure(
@@ -206,9 +207,9 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// </summary>
     public Task<AdsRpcResult> InvokeRpcMethodAsync(string symbolPath, string methodName, object?[] parameters, CancellationToken ct, TimeSpan? timeout = null)
     {
-        ArgumentNullException.ThrowIfNull(symbolPath);
-        ArgumentNullException.ThrowIfNull(methodName);
-        ArgumentNullException.ThrowIfNull(parameters);
+        if (symbolPath is null) throw new ArgumentNullException(nameof(symbolPath));
+        if (methodName is null) throw new ArgumentNullException(nameof(methodName));
+        if (parameters is null) throw new ArgumentNullException(nameof(parameters));
 
         ct.ThrowIfCancellationRequested();
 
@@ -224,7 +225,7 @@ internal sealed class InMemoryManagedConnection : IManagedConnection
     /// </summary>
     public Task<IReadOnlyList<AdsEnumMember>> GetEnumMembersAsync(string typeName, CancellationToken ct, TimeSpan? timeout = null)
     {
-        ArgumentNullException.ThrowIfNull(typeName);
+        if (typeName is null) throw new ArgumentNullException(nameof(typeName));
         ct.ThrowIfCancellationRequested();
 
         throw new InvalidOperationException(

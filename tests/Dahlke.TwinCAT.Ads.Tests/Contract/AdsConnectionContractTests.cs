@@ -486,7 +486,7 @@ public abstract class AdsConnectionContractTests
         await using var h = await CreateHarnessAsync();
         // A connected harness reads Connected; the assertion only pins that the property is
         // readable and returns a defined enum value.
-        Assert.True(Enum.IsDefined(h.Connection.State));
+        Assert.True(Enum.IsDefined(typeof(ConnectionState), h.Connection.State));
     }
 
     [Fact]

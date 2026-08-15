@@ -35,7 +35,7 @@ internal static class EsiXml
     /// </summary>
     public static long ParseHex(string? raw)
     {
-        if (string.IsNullOrWhiteSpace(raw))
+        if (raw is null || string.IsNullOrWhiteSpace(raw))
         {
             return -1;
         }
@@ -61,7 +61,7 @@ internal static class EsiXml
     /// </summary>
     public static long? ParseNumber(string? raw)
     {
-        if (string.IsNullOrWhiteSpace(raw))
+        if (raw is null || string.IsNullOrWhiteSpace(raw))
         {
             return null;
         }

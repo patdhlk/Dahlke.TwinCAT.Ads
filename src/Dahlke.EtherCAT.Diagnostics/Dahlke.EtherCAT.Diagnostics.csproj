@@ -98,5 +98,21 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
   </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <!--
+      No cascade to clear on this leg: Beckhoff's netstandard2.0 dependency group floors
+      Logging.Abstractions at 3.1.0, which any 8.x clears trivially. Declared at the same
+      versions as the net8.0 group anyway so the two legs a .NET Framework consumer might mix
+      (net48 app, netstandard2.0 library graph) resolve identically.
+    -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
+    <!-- The netstandard2.0 compatibility set (#47): Polyfill is compile-time source only; the
+         Bcl/System packages carry TimeProvider and Span/Memory, both used by this package's
+         public surface. Versions: root Directory.Build.props. -->
+    <PackageReference Include="Polyfill" Version="$(PolyfillVersion)" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="$(MicrosoftBclTimeProviderVersion)" />
+    <PackageReference Include="System.Memory" Version="$(SystemMemoryVersion)" />
+  </ItemGroup>
 
 </Project>
