@@ -3,6 +3,9 @@
   <PropertyGroup>
     <!-- What differs per package; the rest is in src/Directory.Build.props -->
     <PackageId>Dahlke.TwinCAT.Ads</PackageId>
+    <!-- Temporary override while #47 lands project-by-project; consolidated back into
+         src/Directory.Build.props once every package ports. -->
+    <TargetFrameworks>net8.0;net9.0;net10.0;netstandard2.0</TargetFrameworks>
     <Description>Reusable TwinCAT ADS connection pool with health checks, reconnection, simulation mode, and ASP.NET Core integration.</Description>
     <PackageTags>TwinCAT;ADS;Beckhoff;PLC;Automation;IPC</PackageTags>
   </PropertyGroup>
@@ -41,6 +44,22 @@
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="$(MicrosoftExtensionsVersion)" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="$(MicrosoftExtensionsVersion)" />
+  </ItemGroup>
+
+  <!--
+    What the netstandard2.0 leg adds and why (#47): Polyfill is compile-time source only
+    (attributes, ThrowIfNull guards) and ships as no dependency; the rest are the runtime pieces
+    the older BCL lacks — TimeProvider (pool timing throughout), IAsyncDisposable (the pool
+    builder and handle), Span/Memory (the raw channel), and System.Collections.Frozen for
+    NotificationPayload. Versions: root Directory.Build.props.
+  -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="Polyfill" Version="$(PolyfillVersion)" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="$(MicrosoftBclTimeProviderVersion)" />
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="$(MicrosoftBclAsyncInterfacesVersion)" />
+    <PackageReference Include="Microsoft.Bcl.HashCode" Version="$(MicrosoftBclHashCodeVersion)" />
+    <PackageReference Include="System.Memory" Version="$(SystemMemoryVersion)" />
+    <PackageReference Include="System.Collections.Immutable" Version="$(SystemCollectionsImmutableVersion)" />
   </ItemGroup>
 
 </Project>

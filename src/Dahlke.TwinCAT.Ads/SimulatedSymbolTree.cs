@@ -38,7 +38,7 @@ internal static class SimulatedSymbolTree
         string? parentPath, bool includeChildren)
     {
         var prefix = string.Empty;
-        if (!string.IsNullOrEmpty(parentPath))
+        if (parentPath is not null && parentPath.Length != 0)
         {
             var canonicalParent = ResolveStoredCasing(store, parentPath)
                 ?? throw new AdsErrorException(

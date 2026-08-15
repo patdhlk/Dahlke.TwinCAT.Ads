@@ -368,7 +368,7 @@ internal class AdsRouterService : BackgroundService
 
             try
             {
-                await Task.Delay(delay, _timeProvider, stoppingToken).ConfigureAwait(false);
+                await _timeProvider.Delay(delay, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

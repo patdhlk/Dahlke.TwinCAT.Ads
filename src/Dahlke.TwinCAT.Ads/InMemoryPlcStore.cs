@@ -137,7 +137,15 @@ internal sealed class ByteSequenceEqualityComparer : IEqualityComparer<byte[]>
     public int GetHashCode(byte[] obj)
     {
         var hash = new HashCode();
+#if NETSTANDARD2_0
+        // Microsoft.Bcl.HashCode predates net6's AddBytes. Byte-at-a-time hashes the same
+        // content; the hash only ever has to be consistent within one process, so the different
+        // (unvectorised) mixing is fine.
+        foreach (var b in obj)
+            hash.Add(b);
+#else
         hash.AddBytes(obj);
+#endif
         return hash.ToHashCode();
     }
 }

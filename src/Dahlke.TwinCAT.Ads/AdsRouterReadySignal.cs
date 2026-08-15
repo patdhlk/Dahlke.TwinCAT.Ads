@@ -33,7 +33,7 @@ namespace Dahlke.TwinCAT.Ads;
 /// <para>
 /// <b>Per-waiter cancellation never poisons the shared state.</b>
 /// <see cref="WaitAsync"/> links the caller's <see cref="CancellationToken"/>
-/// through <see cref="Task.WaitAsync(CancellationToken)"/> rather than
+/// through <c>Task.WaitAsync(CancellationToken)</c> rather than
 /// registering a callback that completes the shared
 /// <see cref="TaskCompletionSource{TResult}"/>. A waiter whose token fires (or
 /// is already cancelled) observes its own <see cref="OperationCanceledException"/>

@@ -161,7 +161,7 @@ internal static class InitialValueBinder
         }
 
         var declaredType = entry[TypeKey];
-        if (string.IsNullOrWhiteSpace(declaredType))
+        if (declaredType is null || string.IsNullOrWhiteSpace(declaredType))
         {
             errors.Add(
                 $"Target '{targetId}': InitialValues entry '{entry.Path}' supplies a 'value' without a 'type'. " +
