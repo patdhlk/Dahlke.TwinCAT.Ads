@@ -129,6 +129,7 @@
     <SystemMemoryVersion>4.6.0</SystemMemoryVersion>
     <SystemCollectionsImmutableVersion>8.0.0</SystemCollectionsImmutableVersion>
     <SystemTextJsonVersion>8.0.5</SystemTextJsonVersion>
+    <MicrosoftCSharpVersion>4.7.0</MicrosoftCSharpVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
