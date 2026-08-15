@@ -306,7 +306,23 @@ public class ConditionalRouterAndUnifiedSimulationTests
         await Task.Run(() => svc.StartAsync(cts.Token));
 
         // Signal must become ready very quickly (no router bind occurs)
-        await signal.WaitAsync(cts.Token).WaitAsync(RealTimeout);
+        try
+        {
+            await signal.WaitAsync(cts.Token).WaitAsync(RealTimeout);
+        }
+        catch (Exception ex)
+        {
+            // TEMPORARY DIAGNOSTIC (#47): the net48 leg times out here deterministically while
+            // every other framework passes in milliseconds. ExecuteTask's state names which side
+            // is stuck — never started, still running, faulted, or completed with the wait side
+            // hanging — which cannot be told apart from the TimeoutException alone.
+            var et = svc.ExecuteTask;
+            throw new InvalidOperationException(
+                $"signal wait failed with {ex.GetType().Name}; ExecuteTask is " +
+                $"{(et is null ? "null" : et.Status.ToString())}" +
+                $"{(et?.Exception is { } agg ? $", exception: {agg.GetBaseException()}" : "")}",
+                ex);
+        }
 
         await svc.StopAsync(CancellationToken.None);
     }
