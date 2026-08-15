@@ -3,9 +3,6 @@
   <PropertyGroup>
     <!-- What differs per package; the rest is in src/Directory.Build.props -->
     <PackageId>Dahlke.EtherCAT.Diagnostics</PackageId>
-    <!-- Temporary override while #47 lands project-by-project; consolidated back into
-         src/Directory.Build.props once every package ports. -->
-    <TargetFrameworks>net8.0;net9.0;net10.0;netstandard2.0</TargetFrameworks>
     <Description>EtherCAT master and slave diagnostics over TwinCAT ADS — topology scanning, slave and port state, CRC and frame error counters, sync-unit faults, and a change-event stream, read through raw ADS index groups rather than the symbol API.</Description>
     <PackageTags>TwinCAT;ADS;EtherCAT;Beckhoff;PLC;Automation;Diagnostics;Fieldbus</PackageTags>
   </PropertyGroup>
