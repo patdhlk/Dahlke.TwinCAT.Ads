@@ -295,8 +295,15 @@ public class ConditionalRouterAndUnifiedSimulationTests
 
         using var cts = new CancellationTokenSource(RealTimeout);
 
-        // ExecuteAsync runs the hosted service body
-        await svc.StartAsync(cts.Token);
+        // ExecuteAsync runs the hosted service body. Started from the thread pool rather than
+        // awaited directly: ExecuteAsync's first await (the deliberate Task.Yield) captures the
+        // ambient SynchronizationContext, and under xunit on .NET Framework 4.8 that captured
+        // context never ran the yielded continuation — the SetReady this test asserts — so the
+        // net48 leg timed out here deterministically while every other framework passed. Real
+        // hosts don't hit this (Generic Host threads have no context; a UI context keeps
+        // pumping), and the pool's own loops are immune the same way this is: they run under
+        // Task.Run, where no context exists to capture.
+        await Task.Run(() => svc.StartAsync(cts.Token));
 
         // Signal must become ready very quickly (no router bind occurs)
         await signal.WaitAsync(cts.Token).WaitAsync(RealTimeout);
