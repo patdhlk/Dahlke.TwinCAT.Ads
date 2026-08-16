@@ -34,7 +34,7 @@ Long-form documentation lives in [`docs/`](https://github.com/patdhlk/Dahlke.Twi
 | [Configuration reference](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/docs/configuration.md) | Every section, every default, every validation rule |
 | [Troubleshooting](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/docs/troubleshooting.md) | **Indexed by the error text you see**, likeliest cause first |
 
-The **[API reference](https://patdhlk.github.io/Dahlke.TwinCAT.Ads/)** is generated from the XML
+The **[API reference](https://patdhlk.com/Dahlke.TwinCAT.Ads/)** is generated from the XML
 documentation of every public member.
 
 ## Installation

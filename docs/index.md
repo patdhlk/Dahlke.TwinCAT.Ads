@@ -22,7 +22,7 @@ first.
 | [Troubleshooting](troubleshooting.md) | Indexed by the error text you see, likeliest cause first |
 
 The **API reference**, generated from the XML documentation of every public member, is published
-at [patdhlk.github.io/Dahlke.TwinCAT.Ads](https://patdhlk.github.io/Dahlke.TwinCAT.Ads/).
+at [patdhlk.com/Dahlke.TwinCAT.Ads](https://patdhlk.com/Dahlke.TwinCAT.Ads/).
 
 The three EtherCAT packages document themselves on their own package pages:
 [`Dahlke.EtherCAT.Diagnostics`](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/src/Dahlke.EtherCAT.Diagnostics/README.md),

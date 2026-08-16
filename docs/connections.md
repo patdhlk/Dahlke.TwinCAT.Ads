@@ -1,8 +1,9 @@
 # Connections
 
 How connections are created, looked up, observed and bounded — with a generic host, and without
-one. For registering targets in the first place, see the [quick start](../README.md#quick-start)
-and the [configuration reference](configuration.md).
+one. For registering targets in the first place, see the
+[quick start](https://github.com/patdhlk/Dahlke.TwinCAT.Ads#quick-start) and the
+[configuration reference](configuration.md).
 
 ## Stable connection facades
 

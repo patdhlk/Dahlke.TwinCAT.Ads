@@ -63,6 +63,17 @@ consumer was acting on real information from them.
   the master's standard ADS interface — until then, null says "nobody checked", where `true` said
   "checked and passed".
 
+- **The documentation is now findable.**
+  ([#46](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/issues/46)) The 50 KB single-file README
+  is now a short front page — install, quick start, feature list — with the prose moved into one
+  page per topic under [`docs/`](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/docs/index.md).
+  Two things are genuinely new: an
+  [API reference](https://patdhlk.com/Dahlke.TwinCAT.Ads/) generated from the XML documentation
+  comments and published on every push to `main`, and
+  [`docs/troubleshooting.md`](https://github.com/patdhlk/Dahlke.TwinCAT.Ads/blob/main/docs/troubleshooting.md),
+  indexed by the error text the consumer actually sees — `TargetMachineNotFound`, a browse timing
+  out at 5 s, alarms that never arrive — each entry naming the likeliest cause first.
+
 ## [0.10.0] - 2026-08-15
 
 A minor, not the patch this section was opened as: it adds two members to the public

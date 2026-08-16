@@ -1,0 +1,22 @@
+- name: Docs
+  href: index.md
+- name: Connections
+  href: connections.md
+- name: Values
+  href: values.md
+- name: Subscriptions
+  href: subscriptions.md
+- name: Alarms
+  href: alarms.md
+- name: Raw channels
+  href: raw-channels.md
+- name: Simulation
+  href: simulation.md
+- name: Testing
+  href: testing.md
+- name: Configuration
+  href: configuration.md
+- name: Troubleshooting
+  href: troubleshooting.md
+- name: API Reference
+  href: api/
