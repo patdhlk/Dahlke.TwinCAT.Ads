@@ -1671,11 +1671,14 @@ internal sealed class AdsConnection : IManagedConnection
     /// </summary>
     internal void SetSymbolLoaderForTesting(IDynamicSymbolLoader loader) => _symbolLoader = loader;
 
-    private CancellationTokenSource CreateTimeoutCts(CancellationToken ct, TimeSpan? timeout)
+    // Returns an OperationBound rather than the bare source so `using var cts = ...` CANCELS the
+    // token at scope exit — see OperationBound's remarks for why disposal alone leaks an armed
+    // timer per call inside Beckhoff's request race.
+    private OperationBound CreateTimeoutCts(CancellationToken ct, TimeSpan? timeout)
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeoutMsFor(timeout));
-        return cts;
+        return new OperationBound(cts);
     }
 
     /// <summary>

@@ -78,9 +78,12 @@ internal sealed class AdsRawChannel : IAdsRawChannel
             discard: RemoveNotification,
             restoreBound: () =>
             {
+                // Wrapped in an OperationBound so retiring the attempt CANCELS the
+                // linked source (see OperationBound's remarks), not merely disposes it.
                 var timeout = _timeProvider.CreateCancellationTokenSource(DefaultTimeout);
-                var linked = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, timeout.Token);
-                return new SubscriptionRestoreBound(linked.Token, linked, timeout);
+                var bound = new OperationBound(
+                    CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, timeout.Token), timeout);
+                return new SubscriptionRestoreBound(bound.Token, bound);
             },
             stopRestoring: () => _shutdown.IsStopRequested,
             onRestoreFailure: (info, ex) => _logger.LogWarning(ex,
@@ -176,8 +179,9 @@ internal sealed class AdsRawChannel : IAdsRawChannel
                 // as TimeoutException. It covers the transport build too, because
                 // a subscribe that is queued behind a slow rebuild is just as
                 // stuck as one waiting on the device.
-                using var timeoutCts = _timeProvider.CreateCancellationTokenSource(DefaultTimeout);
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+                var timeoutCts = _timeProvider.CreateCancellationTokenSource(DefaultTimeout);
+                using var linkedCts = new OperationBound(
+                    CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token), timeoutCts);
 
                 try
                 {
@@ -321,9 +325,12 @@ internal sealed class AdsRawChannel : IAdsRawChannel
             // CancelAfter(TimeSpan) and CancelAfter(int). The TimeProvider-aware
             // path is CONSTRUCTION of the source (CreateCancellationTokenSource),
             // so the timeout source is built with the clock and then linked to
-            // the caller's token.
-            using var timeoutCts = _timeProvider.CreateCancellationTokenSource(timeout);
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            // the caller's token. OperationBound cancels the linked source at
+            // scope exit — required, not tidiness: see its remarks for the armed
+            // timer Beckhoff leaves racing this token after every completed call.
+            var timeoutCts = _timeProvider.CreateCancellationTokenSource(timeout);
+            using var linkedCts = new OperationBound(
+                CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token), timeoutCts);
 
             try
             {

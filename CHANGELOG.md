@@ -74,6 +74,32 @@ consumer was acting on real information from them.
   indexed by the error text the consumer actually sees — `TargetMachineNotFound`, a browse timing
   out at 5 s, alarms that never arrive — each entry naming the likeliest cause first.
 
+### Changed
+
+- **`EtherCatClient` no longer writes one Information log line per master per poll.** The
+  per-probe "Found EtherCAT master" line is Debug now — at Information it was one journal write
+  per second on the default 1 s poll, which on an embedded host is flash wear buying a journal
+  full of the same sentence. What discovery CONCLUDED is still logged at Information, but
+  change-gated: once at startup, and again only when a full sweep's discovered set differs from
+  the cached one it replaces.
+
+### Fixed
+
+- **Every completed ADS call no longer leaves an armed one-hour timer behind — the leak that
+  froze a 1 GB panel PC in about two hours.** Beckhoff's `AdsClientServer.RequestAsync` races
+  each request against `Task.Delay(AdsClient.Timeout, token)` and, when the request wins,
+  abandons the delay without cancelling it, so the delay's timer stays armed until its own due
+  time and roots the delay promise, the per-call linked `CancellationTokenSource` and both
+  registration nodes for that long. Under the raw channel's one-hour client backstop
+  (`BeckhoffManagedRawConnection.BackstopTimeoutMs`), a consumer polling EtherCAT diagnostics
+  every second accumulated ~30 such graphs per second for an hour each — ~100 MB of reachable
+  heap at steady state, measured live as ~5 MB/min of RSS growth. Every per-call bound in
+  `AdsConnection` and `AdsRawChannel` is now an `OperationBound` that CANCELS its linked source
+  at scope exit instead of merely disposing it, which completes the abandoned delay the moment
+  the call finishes. On failure paths the same cancel doubles as the reap: a call abandoned by
+  timeout or retry is completed on the Beckhoff side (error 1878) instead of staying
+  outstanding against the client backstop.
+
 ## [0.10.0] - 2026-08-15
 
 A minor, not the patch this section was opened as: it adds two members to the public

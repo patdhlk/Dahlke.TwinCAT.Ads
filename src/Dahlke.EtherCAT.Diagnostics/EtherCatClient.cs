@@ -295,6 +295,18 @@ internal sealed class EtherCatClient : IEtherCatClient
 
         if (found.Count > 0)
         {
+            // Change-gated Information log: says what a full sweep concluded, once per
+            // CONCLUSION rather than once per probe (the per-probe line is Debug — see
+            // ProbeCandidateAsync). A steady bus logs this once at startup and then only
+            // when the discovered set actually changes.
+            if (!_knownMasters.TryGetValue(amsNetId, out var previous)
+                || !previous.NetIds.SequenceEqual(found, StringComparer.Ordinal))
+            {
+                _logger.LogInformation(
+                    "EtherCAT master discovery for PLC {AmsNetId} found: {Masters}",
+                    amsNetId, string.Join(", ", found));
+            }
+
             // Only a genuinely answered candidate set is ever cached — see the assumed-master
             // fallback below for the reason this line does not run for it.
             _knownMasters[amsNetId] = new CachedMasters([.. found], _timeProvider.GetUtcNow());
@@ -343,7 +355,12 @@ internal sealed class EtherCatClient : IEtherCatClient
             // 0xFFFF IS a valid reply. An ADS error code or a timeout means "not this one".
             var state = await channel.ReadStateAsync(cts.Token).ConfigureAwait(false);
 
-            _logger.LogInformation(
+            // Debug, not Information: steady state re-verifies every cached master once per
+            // poll, so at Information this line is one journal write per master per second on
+            // a 1 s poll — flash wear and a useless journal on an embedded host. The
+            // Information-level record of what discovery concluded is GetMastersAsync's own
+            // change-gated log.
+            _logger.LogDebug(
                 "Found EtherCAT master at {AmsNetId} (ADS state: {State})",
                 candidateNetId, state.AdsState);
             return true;
