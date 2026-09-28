@@ -195,7 +195,7 @@ public class AdsValueConverterTests
 
         callback(new AdsNotification("MAIN.stLine",
             new Dictionary<string, object?> { ["eState"] = (short)6, ["rSpeed"] = 3000f },
-            "ST_LineStatus", DateTimeOffset.UnixEpoch));
+            "ST_LineStatus", DateTimeOffset.FromUnixTimeSeconds(0)));
 
         Assert.Equal(new LineStatus(PackMLState.Execute, 3000f), received);
     }
