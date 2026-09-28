@@ -356,9 +356,19 @@ public class AdsConnectionNotificationValueTests
     /// </summary>
     private sealed class CapturingLoggerFactory : ILoggerFactory
     {
-        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = new();
+        private readonly List<(LogLevel Level, string Message, Exception? Exception)> _entries = new();
 
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Entries);
+        /// <summary>
+        /// A snapshot, taken under the lock the loggers write under. The code under test logs from
+        /// other threads (an abandoned task's continuation, a background loop), so enumerating the
+        /// live list while a test polls it threw "Collection was modified" intermittently.
+        /// </summary>
+        public IReadOnlyList<(LogLevel Level, string Message, Exception? Exception)> Entries
+        {
+            get { lock (_entries) { return _entries.ToArray(); } }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(_entries);
 
         public void AddProvider(ILoggerProvider provider) { }
         public void Dispose() { }
