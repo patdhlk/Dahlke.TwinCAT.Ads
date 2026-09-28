@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.11.1] - 2026-09-28
 
 ### Fixed
 
@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C# cast: an undeclared value is kept), a string by member name, case-insensitively; a value that
   does not fit the backing type still throws.
 
-## [0.11.0]
+## [0.11.0] - 2026-08-27
 
 Ten properties on the `Dahlke.EtherCAT.Diagnostics` models became nullable, and the client now
 reports them as null. Source-breaking for anyone reading them into a non-nullable variable — the
