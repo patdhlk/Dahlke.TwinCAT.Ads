@@ -40,9 +40,17 @@ using var sub = await conn.SubscribeAsync("GVL.Temp", cycleTimeMs: 200,
 ```
 
 Carries the same durability guarantees as the untyped overload, plus the symbol's PLC type name
-and the PLC-reported timestamp of the change. Struct, function block and array notifications are
-decoded off the notification thread and so may be delivered slightly later — and, under a fast
-burst, out of order relative to scalar notifications.
+and the PLC-reported timestamp of the change. A struct, function block or array arrives as the
+neutral tree (`Dictionary<string, object?>` / `object?[]`), decoded from the notification's own
+bytes on the notification thread — one ADS message per change, however many members. Only a
+container whose value lacks a member (rare; the member is then read on its own) is decoded off the
+notification thread, and may then arrive slightly later than, or out of order with, scalar
+notifications.
+
+The untyped overload delivers a container in Beckhoff's own shape (a `DynamicValue`). A **typed**
+subscription registers through this decoding overload, so `SubscribeAsync<T>` binds a struct or
+array `T` by member name exactly as [a typed read](values.md#reading-a-plc-struct-into-a-net-type)
+does.
 
 ## Reactive (Rx) companion
 

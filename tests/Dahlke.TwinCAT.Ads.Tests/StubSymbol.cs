@@ -116,8 +116,8 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
     }
 
     private StubValueSymbol(string instanceName, DataTypeCategory category, string typeName,
-        bool failRead, bool neverCompletesRead)
-        : base(category, typeName)
+        bool failRead, bool neverCompletesRead, params ISymbol[] subSymbols)
+        : base(category, typeName, subSymbols)
     {
         InstanceName = instanceName;
         _failRead = failRead;
@@ -130,8 +130,13 @@ internal sealed class StubValueSymbol : StubSymbol, IValueSymbol
     /// <see cref="AdsErrorException"/>, the same way the old synchronous, throwing
     /// <c>ReadValue()</c> used to.
     /// </summary>
-    public static StubValueSymbol ThatFailsToRead(string instanceName, DataTypeCategory category, string typeName) =>
-        new(instanceName, category, typeName, failRead: true, neverCompletesRead: false);
+    /// <remarks>
+    /// With <paramref name="subSymbols"/> it is a container that must never be read as a whole
+    /// either — what a test uses to prove a tree was decoded from the value in hand.
+    /// </remarks>
+    public static StubValueSymbol ThatFailsToRead(string instanceName, DataTypeCategory category, string typeName,
+        params ISymbol[] subSymbols) =>
+        new(instanceName, category, typeName, failRead: true, neverCompletesRead: false, subSymbols);
 
     /// <summary>
     /// A member whose read never completes unless its <see cref="CancellationToken"/> is

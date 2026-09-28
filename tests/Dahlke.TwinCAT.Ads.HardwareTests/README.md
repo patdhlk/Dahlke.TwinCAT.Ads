@@ -33,7 +33,7 @@ If neither variable is set every test shows as **Skipped** — no failure, no co
 | `TWINCAT_TEST_PORT` | `851` | ADS port of the first PLC runtime |
 | `TWINCAT_TEST_SYMBOL_INT` | *(optional)* | Fully-qualified path of a **writable INT** symbol (e.g. `MAIN.TestInt`). Tests that require a symbol are skipped inline if this is not set. |
 | `TWINCAT_TEST_SYMBOL_STRUCT` | *(optional)* | Fully-qualified path of a **STRUCT or FUNCTION_BLOCK** symbol (e.g. `MAIN.TestStruct`). Read-only — nothing writes it — but it must be **stable for the run**: the container facts compare a notification's decoded tree against a fresh read, which is meaningless for a symbol the PLC program is continuously mutating. |
-| `TWINCAT_TEST_SYMBOL_ARRAY` | *(optional)* | Fully-qualified path of an **ARRAY** symbol (e.g. `MAIN.TestArray`). Same read-only/stable requirement as the struct. This is the highest-value probe: an array notification is the only container whose raw value comes from the payload decode rather than from per-member reads. |
+| `TWINCAT_TEST_SYMBOL_ARRAY` | *(optional)* | Fully-qualified path of an **ARRAY** symbol (e.g. `MAIN.TestArray`). Same read-only/stable requirement as the struct. Prefer an **array of structs** (an alarm list at rest works, e.g. `MAIN.ErrorHandler.aHmiAlarms`): a plain client read returns such an array as raw bytes, which is exactly the shape the container facts exist to catch. |
 | `TWINCAT_TEST_SYMBOL_ALARMS` | *(optional)* | Fully-qualified path of an alarm array symbol (`ARRAY[..] OF ST_ErrorEntry`, e.g. `MAIN.ErrorHandler.aHmiAlarms`). Unlike the struct/array symbols above it need NOT be stable — the alarm test asserts the array *binds*, not that a notification matches a re-read, so a live alarm list is a fine target. **Give the path a parent segment**: acknowledgement derives the owning function block by trimming this path's last segment, so `GVL.Errors` would derive `GVL`, which owns no function block. Nothing catches that until an acknowledgement is attempted, which the current alarm test never does — but a test that does will. The alarm test returns early (and reports as passed, not skipped) when this is unset. |
 | `TWINCAT_TEST_ALARM_ACK_KEY` | *(optional)* | The `sKey` of an alarm the acknowledge test may acknowledge for real (e.g. `Test_Err_60`). **This is the only hardware variable that causes a write to the PLC** — every other variable in this table is read-only as far as these tests are concerned. Point it at a test alarm, not a production one. Requires `TWINCAT_TEST_SYMBOL_ALARMS` too; the acknowledge test returns early (and reports as passed, not skipped) when either is unset. |
 | `TWINCAT_TEST_ROUTER_NETID` | *(optional)* | This host's AMS Net ID for the embedded router (e.g. `192.168.1.220.1.1`). When unset, `Router` is left untouched and the tests connect through the **system router** — which exists on Windows and nowhere else. |
@@ -45,6 +45,13 @@ If neither variable is set every test shows as **Skipped** — no failure, no co
 > runner), set **both** router variables so the tests configure the embedded router with a route
 > to the target instead; see `HardwareTestConfig.HasEmbeddedRouter`. Setting only one of the two
 > is equivalent to setting neither — a router with no route to the target is useless.
+
+> **When port 48898 is taken locally** — e.g. a QEMU-hosted TwinCAT runtime whose host-side
+> forward already owns `*:48898` — move the embedded router with Beckhoff's own keys:
+> `AmsRouter__NetId` (the same NetId as `TWINCAT_TEST_ROUTER_NETID`), `AmsRouter__TcpPort` and
+> `AmsRouter__LoopbackPort`. The host's configuration includes environment variables, and the
+> router reads its ports only from there. It also DIALS the route on `TcpPort`, so the target must
+> answer on that port: forward it to the runtime's 48898.
 
 ## Running locally
 

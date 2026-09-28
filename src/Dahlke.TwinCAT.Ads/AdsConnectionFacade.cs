@@ -550,19 +550,21 @@ internal sealed class AdsConnectionFacade : IAdsConnection
 
     /// <inheritdoc />
     /// <remarks>
-    /// The typed callback is wrapped FIRST with <see cref="TypedCallbackAdapter.Wrap{T}"/>
-    /// into the untyped <c>Action&lt;string, object?&gt;</c> shape, then handed to the
-    /// durable untyped <see cref="SubscribeAsync(string, int, Action{string, object?}, CancellationToken)"/>.
-    /// Durability comes for free: the durable record stores the already-wrapped untyped
-    /// callback, so each reconnect re-registers the same wrapper (conversion included)
-    /// without the facade needing to know the subscription was typed.
+    /// The typed callback is wrapped FIRST with <see cref="TypedCallbackAdapter.WrapDecoded{T}"/>
+    /// into the <c>Action&lt;AdsNotification&gt;</c> shape, then handed to the durable decoding
+    /// <see cref="SubscribeAsync(string, int, Action{AdsNotification}, CancellationToken)"/> —
+    /// the overload that delivers a struct or array as the neutral tree a <typeparamref name="T"/>
+    /// binds from, where the untyped one delivers Beckhoff's own container shape. Durability comes
+    /// for free: the durable record stores the already-wrapped callback, so each reconnect
+    /// re-registers the same wrapper (conversion included) without the facade needing to know the
+    /// subscription was typed.
     /// </remarks>
     public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct)
         => SubscribeAsync(symbolPath, cycleTimeMs, callback, ct, null);
 
     internal Task<IDisposable> SubscribeAsync<T>(
         string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct, TimeSpan? timeout)
-        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct, timeout);
+        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.WrapDecoded(callback, _logger), ct, timeout);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct)
