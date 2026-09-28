@@ -47,7 +47,8 @@ internal static class AdsValueConverter
     /// <see langword="null"/>; exact/assignable returns the value as-is;
     /// <see cref="IConvertible"/> uses
     /// <see cref="System.Convert.ChangeType(object, Type, IFormatProvider)"/> with
-    /// <see cref="CultureInfo.InvariantCulture"/>; anything else throws.
+    /// <see cref="CultureInfo.InvariantCulture"/>; anything else throws. A .NET enum target is the
+    /// one exception to ChangeType, which cannot produce an enum: see <c>ConvertToEnum</c>.
     /// </summary>
     public static object? ConvertForRead(object? value, Type targetType, string context)
     {
@@ -66,6 +67,13 @@ internal static class AdsValueConverter
         // Exact type or assignable — fast path, no conversion needed.
         if (targetType.IsInstanceOfType(value))
             return value;
+
+        // A .NET enum. A PLC enum arrives as its backing integer (the decoder's documented shape),
+        // and Convert.ChangeType cannot produce an enum from anything — so without this every PLC
+        // enum member of a bound struct, and every typed enum read, failed.
+        var enumType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        if (enumType.IsEnum)
+            return ConvertToEnum(value, enumType, context);
 
         // IConvertible covers all primitives and string; supports numeric widening and
         // string-seeded values ("42"→int, "true"→bool, "3.14"→double).
@@ -98,6 +106,41 @@ internal static class AdsValueConverter
         throw new InvalidCastException(
             $"Symbol '{context}': stored value has type '{value.GetType().Name}' " +
             $"which cannot be converted to requested type '{targetType.Name}'.");
+    }
+
+    /// <summary>
+    /// Converts a PLC enum value to the .NET enum <paramref name="enumType"/>: an integral value
+    /// by number — as a C# cast would, so a value the .NET enum does not declare still converts
+    /// (a newer PLC, or a [Flags] combination) — and a string by member name, case-insensitively.
+    /// A number outside the backing type's range or an unknown name throws
+    /// <see cref="InvalidCastException"/>; so does any other type, a non-integral number included.
+    /// </summary>
+    private static object ConvertToEnum(object value, Type enumType, string context)
+    {
+        try
+        {
+            switch (value)
+            {
+                case string name:
+                    return Enum.Parse(enumType, name, ignoreCase: true);
+                case sbyte or byte or short or ushort or int or uint or long or ulong:
+                case Enum:
+                    // Through the backing type, checked: a PLC value that does not fit is an error,
+                    // not a silently wrapped member.
+                    return Enum.ToObject(enumType,
+                        System.Convert.ChangeType(value, Enum.GetUnderlyingType(enumType), CultureInfo.InvariantCulture)!);
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or OverflowException or InvalidCastException or FormatException)
+        {
+            throw new InvalidCastException(
+                $"Symbol '{context}': cannot convert stored value '{value}' (type: {value.GetType().Name}) " +
+                $"to enum '{enumType.Name}'. {ex.Message}", ex);
+        }
+
+        throw new InvalidCastException(
+            $"Symbol '{context}': stored value has type '{value.GetType().Name}' which cannot be converted " +
+            $"to enum '{enumType.Name}': only integral values and member names are.");
     }
 
     /// <summary>

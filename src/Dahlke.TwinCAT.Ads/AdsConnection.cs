@@ -194,21 +194,18 @@ internal sealed class AdsConnection : IManagedConnection
     /// <inheritdoc />
     /// <remarks>
     /// <para>
-    /// <b>Same skip-the-read condition as <see cref="ReadValuesAsync"/>.</b> Reuses
-    /// <see cref="PlcValueDecoder.DecodesFromSubSymbolsOnly"/> — the exact predicate the batch
-    /// container branch uses — to decide whether the top-level <c>_client.ReadValueAsync(symbol,
-    /// ct)</c> is needed at all. Structs/function blocks with sub-symbols decode purely from
-    /// their own members, so the top-level read is skipped entirely; arrays (which need
-    /// <c>Array.Length</c> and element access) and opaque structs/function blocks with no
-    /// sub-symbols (which pass their raw value straight through) still need it. Reusing the
-    /// shared predicate — rather than re-deriving the condition here — keeps a single struct
-    /// read the same shape whether it goes through this method or through a one-symbol
-    /// <see cref="ReadValuesAsync"/> batch.
+    /// <b>One read, decoded locally — the same path as <see cref="ReadValuesAsync"/>'s
+    /// containers.</b> A struct with members or an array is read ONCE through its symbol's value
+    /// accessor, and <see cref="PlcValueDecoder"/> builds the tree from that value's members and
+    /// elements; a member or element is read on its own only when the value cannot supply it. An
+    /// opaque container keeps the raw client read it passes through. Sharing
+    /// <c>ReadForDecodeAsync</c> keeps a single struct read the same shape whether it goes through
+    /// this method or through a one-symbol <see cref="ReadValuesAsync"/> batch.
     /// </para>
     /// <para>
     /// <b>Timeout/cancellation.</b> One linked <see cref="CancellationTokenSource"/> bounds the
-    /// top-level read (when performed) AND every recursive struct member / array element read
-    /// <see cref="PlcValueDecoder"/> performs, exactly as in <see cref="ReadValuesAsync"/>.
+    /// top-level read AND any struct member / array element read <see cref="PlcValueDecoder"/>
+    /// falls back to, exactly as in <see cref="ReadValuesAsync"/>.
     /// Caller cancellation throws <see cref="OperationCanceledException"/>; the per-target
     /// <see cref="PlcTargetOptions.TimeoutMs"/> elapsing throws <see cref="TimeoutException"/> —
     /// both via <see cref="CancellationDisambiguator"/>.
@@ -224,31 +221,8 @@ internal sealed class AdsConnection : IManagedConnection
 
         try
         {
-            object? decoded;
-
-            if (PlcValueDecoder.DecodesFromSubSymbolsOnly(symbol))
-            {
-                // Struct/function-block with sub-symbols: the decoder reads every member itself
-                // and never consults the value passed in beyond a null check, so the top-level
-                // read is fetched-and-discarded if performed — skip it. See
-                // PlcValueDecoder.DecodesFromSubSymbolsOnly's remarks and ReadValuesAsync's
-                // container branch, which this mirrors.
-                decoded = await PlcValueDecoder.DecodeAsync(SkippedReadPlaceholder, symbol, cts.Token)
-                    .ConfigureAwait(false);
-            }
-            else
-            {
-                // Arrays need the raw value itself (Array.Length + element access); opaque
-                // structs/function blocks with no sub-symbols pass their raw value through
-                // unchanged. Both genuinely need this read.
-                var read = await _client.ReadValueAsync(symbol, cts.Token).ConfigureAwait(false);
-                if (read.Failed)
-                    throw new AdsErrorException(
-                        $"Read of symbol '{symbolPath}' on PLC '{PlcId}' failed: {read.ErrorCode}",
-                        read.ErrorCode);
-
-                decoded = await PlcValueDecoder.DecodeAsync(read.Value, symbol, cts.Token).ConfigureAwait(false);
-            }
+            var value = await ReadForDecodeAsync(symbol, symbolPath, cts.Token).ConfigureAwait(false);
+            var decoded = await PlcValueDecoder.DecodeAsync(value, symbol, cts.Token).ConfigureAwait(false);
 
             return AdsValueResult.Success(decoded, symbolPath, symbol.TypeName, symbol.Category.ToString());
         }
@@ -422,38 +396,10 @@ internal sealed class AdsConnection : IManagedConnection
         {
             try
             {
-                object? decoded;
-
-                if (PlcValueDecoder.DecodesFromSubSymbolsOnly(symbol))
-                {
-                    // Structs/function blocks with sub-symbols decode purely by reading each
-                    // member individually inside PlcValueDecoder — the top-level read this branch
-                    // would otherwise perform is fetched and immediately discarded by the
-                    // decoder, so it is skipped entirely (one fewer round-trip per such symbol).
-                    // DecodeAsync's `value` argument is consulted only for a null guard on this
-                    // path, never returned or inspected further, so any non-null placeholder
-                    // satisfies it — see PlcValueDecoder.DecodesFromSubSymbolsOnly's remarks.
-                    decoded = await PlcValueDecoder.DecodeAsync(SkippedReadPlaceholder, symbol, cts.Token)
-                        .ConfigureAwait(false);
-                }
-                else
-                {
-                    // Arrays need the raw value itself (Array.Length + element access); opaque
-                    // structs/function blocks with no sub-symbols pass their raw value through
-                    // unchanged. Both genuinely need this read.
-                    var read = await _client.ReadValueAsync(symbol, cts.Token).ConfigureAwait(false);
-                    if (read.Failed)
-                    {
-                        results[path] = AdsValueResult.Failure(
-                            new AdsErrorException(
-                                $"Read of symbol '{path}' on PLC '{PlcId}' failed: {read.ErrorCode}",
-                                read.ErrorCode),
-                            path);
-                        continue;
-                    }
-
-                    decoded = await PlcValueDecoder.DecodeAsync(read.Value, symbol, cts.Token).ConfigureAwait(false);
-                }
+                // A failed read throws AdsErrorException, which the catch below turns into this
+                // symbol's failure without failing the batch.
+                var value = await ReadForDecodeAsync(symbol, path, cts.Token).ConfigureAwait(false);
+                var decoded = await PlcValueDecoder.DecodeAsync(value, symbol, cts.Token).ConfigureAwait(false);
 
                 results[path] = AdsValueResult.Success(decoded, path, symbol.TypeName, symbol.Category.ToString());
             }
@@ -475,14 +421,56 @@ internal sealed class AdsConnection : IManagedConnection
     }
 
     /// <summary>
-    /// Passed as the <c>value</c> argument to <see cref="PlcValueDecoder.DecodeAsync"/> when the
-    /// top-level read was skipped for a symbol where
-    /// <see cref="PlcValueDecoder.DecodesFromSubSymbolsOnly"/> is <see langword="true"/>: the
-    /// decoder only ever checks this argument for null before switching to reading its own
-    /// sub-symbols on that path, so any non-null instance works. Never inspected beyond that
-    /// null check.
+    /// Stands for "no value in hand" when a struct is decoded from its members alone: it is not an
+    /// <see cref="IStructValue"/>, so <see cref="PlcValueDecoder.DecodeAsync"/> reads every member.
     /// </summary>
-    private static readonly object SkippedReadPlaceholder = new();
+    private static readonly object MembersOnly = new();
+
+    /// <summary>
+    /// Decodes a struct notification's payload without I/O — or reports that it cannot, so the
+    /// synchronous handler can choose the off-thread member reads instead of
+    /// <see cref="GetNotificationValue"/>'s synchronous whole-struct fallback.
+    /// </summary>
+    private static bool TryDecodeStructPayload(ISymbol symbol, AdsNotificationEventArgs e, out object? value)
+    {
+        try
+        {
+            return NotificationPayload.TryDecodeValue(symbol, e.Data, e.TimeStamp, out value, out _);
+        }
+        catch (Exception)
+        {
+            value = null;   // an unanticipated payload shape: decode from the members instead
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads a container ONCE, in the shape <see cref="PlcValueDecoder"/> decodes locally. Structs
+    /// with members and arrays are read through the symbol's own value accessor, which returns the
+    /// single round-trip as a <c>DynamicValue</c> (or an array of element values) whose members and
+    /// elements the decoder walks without further I/O; opaque containers keep the raw client read,
+    /// since they pass their raw value through. See <see cref="PlcValueDecoder.WantsSymbolicRead"/>.
+    /// </summary>
+    /// <exception cref="AdsErrorException">The read failed.</exception>
+    private async Task<object?> ReadForDecodeAsync(ISymbol symbol, string symbolPath, CancellationToken ct)
+    {
+        if (PlcValueDecoder.WantsSymbolicRead(symbol) && symbol is IValueSymbol valueSymbol)
+        {
+            var access = await valueSymbol.ReadValueAsync(ct).ConfigureAwait(false);
+            if (access.Failed)
+                throw new AdsErrorException(
+                    $"Read of symbol '{symbolPath}' on PLC '{PlcId}' failed: {(AdsErrorCode)access.ErrorCode}",
+                    (AdsErrorCode)access.ErrorCode);
+            return access.Value;
+        }
+
+        var read = await _client.ReadValueAsync(symbol, ct).ConfigureAwait(false);
+        if (read.Failed)
+            throw new AdsErrorException(
+                $"Read of symbol '{symbolPath}' on PLC '{PlcId}' failed: {read.ErrorCode}",
+                read.ErrorCode);
+        return read.Value;
+    }
 
     /// <summary>
     /// Classifies a resolved symbol as a container (struct, function block, union or array) whose
@@ -524,7 +512,7 @@ internal sealed class AdsConnection : IManagedConnection
     /// generically should treat a value whose reported
     /// <see cref="AdsValueResult.Category"/> is one of the four above as opaque. Union WAS in this
     /// list and is now decoded: its members are ordinary readable sub-symbols, so the walk is
-    /// well defined (see <see cref="PlcValueDecoder.DecodesFromSubSymbolsOnly"/>).
+    /// well defined (see <see cref="PlcValueDecoder.HasMembers"/>).
     /// </para>
     /// </remarks>
     internal static bool IsContainer(ISymbol symbol) =>
@@ -989,30 +977,25 @@ internal sealed class AdsConnection : IManagedConnection
     /// <para>
     /// <b>Decoding inside a synchronous handler.</b> The ADS notification handler is a
     /// synchronous <see cref="EventHandler{TEventArgs}"/> and so cannot await
-    /// <see cref="PlcValueDecoder.DecodeAsync"/>, whose struct/array path performs one ADS read
-    /// per member. Blocking on it here (<c>GetAwaiter().GetResult()</c>) would stall the ADS
+    /// <see cref="PlcValueDecoder.DecodeAsync"/>, which may fall back to reading a member or
+    /// element over ADS. Blocking on it here (<c>GetAwaiter().GetResult()</c>) would stall the ADS
     /// notification thread for the whole decode, and an <c>async void</c> handler would let
     /// exceptions escape the <c>try</c>/<c>catch</c> that keeps a faulty callback from tearing the
     /// subscription down. So the handler splits by shape:
     /// </para>
     /// <list type="bullet">
     ///   <item><description>
-    ///     Scalars, strings, enums and opaque structs — the overwhelmingly common subscription
-    ///     target — decode with NO I/O via
-    ///     <see cref="PlcValueDecoder.TryDecodeWithoutReads"/> and are delivered inline, on the
+    ///     Everything the payload's value supplies completely — scalars, strings, enums, opaque
+    ///     structs, and structs, function blocks and arrays whose payload decodes to a
+    ///     <c>DynamicValue</c> carrying every member and element — decodes with NO I/O via
+    ///     <see cref="PlcValueDecoder.TryDecodeWithoutReads"/> and is delivered inline, on the
     ///     notification thread, exactly like the untyped overload.
     ///   </description></item>
     ///   <item><description>
-    ///     Structs, function blocks and arrays are decoded by
-    ///     <see cref="PlcValueDecoder.DecodeAsync"/> on the thread pool and delivered when it
-    ///     completes — see <see cref="DeliverDecodedContainerInBackground"/>. A struct or function
-    ///     block with sub-symbols skips the top-level re-read altogether (see
-    ///     <see cref="PlcValueDecoder.DecodesFromSubSymbolsOnly"/>), so the notification thread is
-    ///     never blocked on a full-struct round-trip whose value the decoder would discard —
-    ///     the same skip <see cref="ReadValueWithMetadataAsync"/> and <see cref="ReadValuesAsync"/>
-    ///     already perform. An array still needs its raw value (length + elements), but gets it
-    ///     from the notification payload via <see cref="GetNotificationValue"/> rather than from the
-    ///     wire, so the hand-off costs no round-trip either.
+    ///     A container with a member or element the value does not carry is decoded by
+    ///     <see cref="PlcValueDecoder.DecodeAsync"/> on the thread pool, which reads just those
+    ///     over ADS, and delivered when it completes — see
+    ///     <see cref="DeliverDecodedContainerInBackground"/>.
     ///   </description></item>
     /// </list>
     /// <para>
@@ -1020,8 +1003,8 @@ internal sealed class AdsConnection : IManagedConnection
     /// itself comes from <see cref="AdsNotificationEventArgs.Data"/> — see
     /// <see cref="GetNotificationValue"/> and <see cref="NotificationPayload"/> — so no path above
     /// reads the symbol back to learn what changed. The offload above therefore remains only for
-    /// what the payload cannot give: the per-member/per-element reads
-    /// <see cref="PlcValueDecoder.DecodeAsync"/> performs to build a container's neutral tree.
+    /// what the payload's value cannot give: a member or element that has to be read from its own
+    /// sub-symbol.
     /// The exception is a symbol whose payload cannot serve at all — chiefly one with EXTERNAL DATA
     /// REFERENCES, whose value does not live entirely in its own storage. For those,
     /// <see cref="GetNotificationValue"/> falls back to a synchronous <c>ReadValue()</c> on the
@@ -1073,21 +1056,26 @@ internal sealed class AdsConnection : IManagedConnection
                     return;
                 }
 
-                if (PlcValueDecoder.DecodesFromSubSymbolsOnly(sym))
-                {
-                    // A struct/function block with sub-symbols: the decoder reads every member
-                    // itself and only null-checks the value passed in, so a top-level read here
-                    // would block the ADS notification thread on a whole-struct round-trip and
-                    // then be discarded. Skip it and hand over the placeholder — the same skip
-                    // ReadValueWithMetadataAsync and ReadValuesAsync's container branch perform.
-                    DeliverDecodedContainerInBackground(
-                        symbolPath, SkippedReadPlaceholder, sym, typeName, e.TimeStamp, callback, disposalToken);
-                    return;
-                }
-
                 // Decoded from the notification's own payload — the same shared, zero-I/O step the
-                // untyped overload takes.
-                var raw = GetNotificationValue(vs, e.Data, e.TimeStamp, ref payloadFallbackReported);
+                // untyped overload takes. For a struct or array this is a DynamicValue carrying
+                // every member and element.
+                object? raw;
+                if (PlcValueDecoder.HasMembers(sym))
+                {
+                    if (!TryDecodeStructPayload(sym, e, out raw))
+                    {
+                        // A struct whose payload cannot serve (external data references, chiefly):
+                        // GetNotificationValue's fallback would read the WHOLE struct synchronously
+                        // on the ADS notification thread. Read its members off that thread instead.
+                        DeliverDecodedContainerInBackground(
+                            symbolPath, MembersOnly, sym, typeName, e.TimeStamp, callback, disposalToken);
+                        return;
+                    }
+                }
+                else
+                {
+                    raw = GetNotificationValue(vs, e.Data, e.TimeStamp, ref payloadFallbackReported);
+                }
 
                 if (PlcValueDecoder.TryDecodeWithoutReads(raw, sym, out var value))
                 {
@@ -1095,9 +1083,8 @@ internal sealed class AdsConnection : IManagedConnection
                     return;
                 }
 
-                // An array (or an opaque container): its raw value is genuinely needed, but
-                // rebuilding it reads one element at a time, so the decode itself must not run on
-                // the ADS notification thread.
+                // Some member or element is not in the payload's value and must be read from its
+                // sub-symbol, so the decode itself must not run on the ADS notification thread.
                 DeliverDecodedContainerInBackground(
                     symbolPath, raw, sym, typeName, e.TimeStamp, callback, disposalToken);
             }
@@ -1336,7 +1323,7 @@ internal sealed class AdsConnection : IManagedConnection
     /// is dropped with a Warning rather than delivered.
     /// </summary>
     public Task<IDisposable> SubscribeAsync<T>(string symbolPath, int cycleTimeMs, Action<string, T?> callback, CancellationToken ct, TimeSpan? timeout = null)
-        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.Wrap(callback, _logger), ct, timeout);
+        => SubscribeAsync(symbolPath, cycleTimeMs, TypedCallbackAdapter.WrapDecoded(callback, _logger), ct, timeout);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<AdsSymbolInfo>> GetSymbolTreeAsync(string? parentPath, CancellationToken ct, TimeSpan? timeout = null)

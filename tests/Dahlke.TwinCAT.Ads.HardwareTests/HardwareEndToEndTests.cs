@@ -514,6 +514,57 @@ public sealed class HardwareEndToEndTests : IAsyncLifetime
         await AssertNotificationMatchesReadAsync(HardwareTestConfig.SymbolArray!, "Array");
     }
 
+    /// <summary>
+    /// A typed subscription to a container binds from the decoded tree. It used to register through
+    /// the untyped overload, which hands a struct over in Beckhoff's own shape (a
+    /// <c>DynamicValue</c>) that no conversion can use, so every notification was dropped and this
+    /// wait timed out.
+    /// </summary>
+    [HardwareFact]
+    public async Task SubscribeTyped_StructSymbol_DeliversTheDecodedTree()
+    {
+        if (!HardwareTestConfig.HasSymbolStruct)
+            return;
+
+        var symbol = HardwareTestConfig.SymbolStruct!;
+        using var cts = new CancellationTokenSource(TestTimeoutMs);
+        var tcs = new TaskCompletionSource<IReadOnlyDictionary<string, object?>>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var registration = await Connection.SubscribeAsync<IReadOnlyDictionary<string, object?>>(
+            symbol,
+            cycleTimeMs: 100,
+            callback: (_, value) => { if (value is not null) tcs.TrySetResult(value); },
+            ct: cts.Token);
+
+        var delivered = await tcs.Task.WaitAsync(cts.Token);
+        var read = await Connection.ReadValueWithMetadataAsync(symbol, cts.Token);
+
+        AssertTreeEqual(read.Value, delivered, symbol);
+    }
+
+    /// <summary>
+    /// A read decodes one element per declared element. A plain client read returns an array of
+    /// structs as its raw storage, and that used to come back one "element" per BYTE — 6600 of them
+    /// for fifty 132-byte entries.
+    /// </summary>
+    [HardwareFact]
+    public async Task ReadValueWithMetadata_ArraySymbol_HasOneDecodedElementPerDeclaredElement()
+    {
+        if (!HardwareTestConfig.HasSymbolArray)
+            return;
+
+        var symbol = HardwareTestConfig.SymbolArray!;
+        using var cts = new CancellationTokenSource(TestTimeoutMs);
+
+        var declared = await Connection.GetSymbolsAsync(symbol, includeChildren: false, cts.Token);
+        var read = await Connection.ReadValueWithMetadataAsync(symbol, cts.Token);
+
+        Assert.True(read.Succeeded, $"Read of '{symbol}' failed: {read.Error}");
+        var elements = Assert.IsType<object?[]>(read.Value);
+        Assert.NotEmpty(declared);
+        Assert.Equal(declared.Count, elements.Length);
+    }
+
     [HardwareFact]
     public async Task ReadValueWithMetadata_StructSymbol_DecodesToAKeyedTree()
     {

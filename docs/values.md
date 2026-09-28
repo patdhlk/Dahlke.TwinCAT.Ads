@@ -37,7 +37,10 @@ MotorState simulated = await conn.ReadValueAsync<MotorState>("MAIN.Motor");
 ```
 
 Positional records, mutable classes, structs, nested structs and arrays all bind; member names
-match case-insensitively, and each member gets the same widening a scalar read would.
+match case-insensitively, and each member gets the same widening a scalar read would. A PLC enum
+member binds to a .NET enum: it arrives as its backing integer and converts by number, as a C#
+cast would (a value the .NET enum does not declare is kept, not rejected); a string converts by
+member name.
 
 **Every member of the target type must be present in the tree.** A member the PLC does not supply
 fails with a message naming it, rather than being left at its default — a type that disagrees with
@@ -138,9 +141,11 @@ float setpoint = results["GVL.Setpoint"].GetValue<float>();
 
 On real connections a batch write is a single ADS sum command. A batch **read** partitions by
 category: scalars, strings and enums share one sum command, while structs, function blocks,
-unions and arrays are decoded individually so their members come back as a tree rather than an
-opaque value. So an all-scalar batch costs one round-trip, and a batch containing containers costs
-one plus the container decodes. Every result carries `TypeName` and `Category` either way.
+unions and arrays are read individually so their members come back as a tree rather than an
+opaque value. Each container costs ONE read: its members and elements are decoded from that value,
+not fetched one by one. So an all-scalar batch costs one round-trip, and a batch containing
+containers costs one more per container. Every result carries `TypeName` and `Category` either
+way; `ReadValueWithMetadataAsync` is the one-symbol form of the same read.
 
 A per-symbol failure is captured in `AdsValueResult.Error` and does not abort the batch. A
 whole-batch timeout throws `TimeoutException`; caller cancellation throws

@@ -232,13 +232,109 @@ public class PlcValueDecoderTests
     }
 
     [Fact]
-    public void TryDecodeWithoutReads_refuses_an_array()
+    public void TryDecodeWithoutReads_decodes_an_array_whose_value_carries_its_elements()
     {
-        // An array is rebuilt element by element (object?[]), never passed through, so it is
-        // refused even when its elements would not need sub-symbol reads.
+        // No element sub-symbols to consult: the elements in the value are the whole answer, the
+        // same object?[] DecodeAsync builds — so no read is needed and none happens.
         var symbol = new StubSymbol(DataTypeCategory.Array, "ARRAY [0..1] OF INT");
 
-        Assert.False(PlcValueDecoder.TryDecodeWithoutReads(new[] { 10, 20 }, symbol, out var decoded));
-        Assert.Null(decoded);
+        Assert.True(PlcValueDecoder.TryDecodeWithoutReads(new[] { 10, 20 }, symbol, out var decoded));
+        Assert.Equal(new object?[] { 10, 20 }, Assert.IsType<object?[]>(decoded));
+    }
+
+    // =========================================================================
+    // The value first: a container read ONCE (a DynamicValue, stubbed by
+    // StubStructValue) is decoded from its own members and elements. Every
+    // sub-symbol below FAILS if read, so a passing test proves no read happened.
+    // =========================================================================
+
+    private static StubValueSymbol Unreadable(string name, DataTypeCategory category, string typeName,
+        params ISymbol[] subSymbols) =>
+        StubValueSymbol.ThatFailsToRead(name, category, typeName, subSymbols);
+
+    [Fact]
+    public async Task Decode_takes_struct_members_from_the_value_without_reading_them()
+    {
+        var symbol = new StubSymbol(DataTypeCategory.Struct, "ST_Motor",
+            Unreadable("Speed", DataTypeCategory.Primitive, "INT"),
+            Unreadable("Running", DataTypeCategory.Primitive, "BOOL"));
+        var value = new StubStructValue(("Speed", (short)1500), ("Running", true));
+
+        var decoded = Assert.IsType<Dictionary<string, object?>>(
+            await PlcValueDecoder.DecodeAsync(value, symbol, CancellationToken.None));
+
+        Assert.Equal((short)1500, decoded["Speed"]);
+        Assert.Equal(true, decoded["Running"]);
+        Assert.Equal(2, value.MemberLookups);
+    }
+
+    [Fact]
+    public async Task Decode_walks_nested_structs_and_one_based_struct_arrays_from_the_value()
+    {
+        // The shape a PLC status struct arrives in: a nested struct, and an ARRAY[1..2] OF struct,
+        // which Beckhoff delivers as a 1-based CLR array of DynamicValue. Indexing it from 0 would
+        // throw; the decoder enumerates it.
+        var unit = Unreadable("[1]", DataTypeCategory.Struct, "ST_Unit",
+            Unreadable("xFault", DataTypeCategory.Primitive, "BOOL"));
+        var unit2 = Unreadable("[2]", DataTypeCategory.Struct, "ST_Unit",
+            Unreadable("xFault", DataTypeCategory.Primitive, "BOOL"));
+        var units = Unreadable("aUnit", DataTypeCategory.Array, "ARRAY [1..2] OF ST_Unit", unit, unit2);
+        var line = Unreadable("stLine", DataTypeCategory.Struct, "ST_Line",
+            Unreadable("eState", DataTypeCategory.Enum, "E_State"), units);
+        var status = new StubSymbol(DataTypeCategory.Struct, "ST_Status",
+            Unreadable("nCycle", DataTypeCategory.Primitive, "UDINT"), line);
+
+        var unitValues = Array.CreateInstance(typeof(object), [2], [1]);
+        unitValues.SetValue(new StubStructValue(("xFault", false)), 1);
+        unitValues.SetValue(new StubStructValue(("xFault", true)), 2);
+        var value = new StubStructValue(
+            ("nCycle", 42u),
+            ("stLine", new StubStructValue(("eState", (short)6), ("aUnit", unitValues))));
+
+        var decoded = Assert.IsType<Dictionary<string, object?>>(
+            await PlcValueDecoder.DecodeAsync(value, status, CancellationToken.None));
+
+        Assert.Equal(42u, decoded["nCycle"]);
+        var decodedLine = Assert.IsType<Dictionary<string, object?>>(decoded["stLine"]);
+        Assert.Equal((short)6, decodedLine["eState"]);
+        var decodedUnits = Assert.IsType<object?[]>(decodedLine["aUnit"]);
+        Assert.Equal([false, true], decodedUnits.Select(u => Assert.IsType<Dictionary<string, object?>>(u)["xFault"]));
+
+        // The same value decodes identically on the synchronous, I/O-free notification path.
+        Assert.True(PlcValueDecoder.TryDecodeWithoutReads(value, status, out var inline));
+        Assert.Equivalent(decoded, inline, strict: true);
+    }
+
+    [Fact]
+    public async Task Decode_reads_only_the_member_the_value_does_not_carry()
+    {
+        var symbol = new StubSymbol(DataTypeCategory.Struct, "ST_Motor",
+            Unreadable("Speed", DataTypeCategory.Primitive, "INT"),
+            new StubValueSymbol("Running", DataTypeCategory.Primitive, "BOOL", true));
+        var value = new StubStructValue(("Speed", (short)1500));   // no "Running"
+
+        var decoded = Assert.IsType<Dictionary<string, object?>>(
+            await PlcValueDecoder.DecodeAsync(value, symbol, CancellationToken.None));
+
+        Assert.Equal((short)1500, decoded["Speed"]);
+        Assert.Equal(true, decoded["Running"]);   // read from its sub-symbol
+        Assert.False(PlcValueDecoder.TryDecodeWithoutReads(value, symbol, out _));
+    }
+
+    [Fact]
+    public async Task Decode_reads_each_element_when_the_array_value_is_raw_bytes()
+    {
+        // A raw client read of ARRAY[0..1] OF ST_Pair returns the storage as bytes: one "element"
+        // per byte. Returning those as the array's elements handed the caller six bytes that look
+        // like data; the element sub-symbols say what the elements really are.
+        var symbol = new StubSymbol(DataTypeCategory.Array, "ARRAY [0..1] OF INT",
+            new StubValueSymbol("[0]", DataTypeCategory.Primitive, "INT", (short)10),
+            new StubValueSymbol("[1]", DataTypeCategory.Primitive, "INT", (short)20));
+
+        var decoded = Assert.IsType<object?[]>(
+            await PlcValueDecoder.DecodeAsync(new byte[] { 10, 0, 20, 0, 0, 0 }, symbol, CancellationToken.None));
+
+        Assert.Equal(new object?[] { (short)10, (short)20 }, decoded);
+        Assert.False(PlcValueDecoder.TryDecodeWithoutReads(new byte[] { 10, 0, 20, 0, 0, 0 }, symbol, out _));
     }
 }
