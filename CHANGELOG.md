@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A struct or array is now decoded from the ONE read that fetched it, instead of one ADS read per
+  member.** `ReadValueWithMetadataAsync`, the container branch of `ReadValuesAsync` and the
+  `AdsNotification` subscription built the neutral tree by reading every member and element through
+  its own sub-symbol and never consulted the value already in hand. On a status struct of ~120
+  members over a slow link that was 833 ms per read, and a subscription at 100 ms delivered 23
+  notifications in 10 s while the rest queued behind it — measured against a Roland 900 retrofit
+  PLC; the HMI's status stream stalled completely. A container is now read once through its
+  symbol's value accessor (or taken from the notification payload), and its members and elements
+  are decoded from that `DynamicValue`: 9–73 ms per read across runs, and 99 of 100 notifications. A member the
+  value does not carry is still read on its own, so nothing that decoded before stops decoding.
+  Container notifications whose payload supplies everything are delivered inline again.
+
+- **An array of structs read with `ReadValueWithMetadataAsync` or `ReadValuesAsync` no longer comes
+  back as its raw bytes.** A plain client read returns such an array as a `byte[]`, whose length
+  (6600 for fifty 132-byte `ST_ErrorEntry`) never matched the element count, and the decoder then
+  returned those bytes as the elements. The symbolic read yields the elements, and an array value
+  that still does not line up with its element sub-symbols is decoded element by element instead
+  of passed through.
+
+- **`SubscribeAsync<T>` for a struct or array `T` delivers.** Typed subscriptions registered
+  through the untyped overload, which delivers a container as Beckhoff's `DynamicValue`; no
+  conversion to `T` could use it, so every notification was dropped with a Warning. They now
+  register through the decoding overload and bind the tree by member name, like a typed read.
+  Scalar typed subscriptions are unaffected: both overloads deliver scalars identically.
+
+- **PLC enums convert to .NET enums.** A PLC enum arrives as its backing integer and
+  `Convert.ChangeType` cannot produce an enum, so a typed enum read and every enum member of a
+  bound struct failed with `InvalidCastException`. An integral value now converts by number (as a
+  C# cast: an undeclared value is kept), a string by member name, case-insensitively; a value that
+  does not fit the backing type still throws.
+
 ## [0.11.0]
 
 Ten properties on the `Dahlke.EtherCAT.Diagnostics` models became nullable, and the client now
@@ -84,37 +119,6 @@ consumer was acting on real information from them.
   the cached one it replaces.
 
 ### Fixed
-
-- **A struct or array is now decoded from the ONE read that fetched it, instead of one ADS read per
-  member.** `ReadValueWithMetadataAsync`, the container branch of `ReadValuesAsync` and the
-  `AdsNotification` subscription built the neutral tree by reading every member and element through
-  its own sub-symbol and never consulted the value already in hand. On a status struct of ~120
-  members over a slow link that was 833 ms per read, and a subscription at 100 ms delivered 23
-  notifications in 10 s while the rest queued behind it — measured against a Roland 900 retrofit
-  PLC; the HMI's status stream stalled completely. A container is now read once through its
-  symbol's value accessor (or taken from the notification payload), and its members and elements
-  are decoded from that `DynamicValue`: 9–73 ms per read across runs, and 99 of 100 notifications. A member the
-  value does not carry is still read on its own, so nothing that decoded before stops decoding.
-  Container notifications whose payload supplies everything are delivered inline again.
-
-- **An array of structs read with `ReadValueWithMetadataAsync` or `ReadValuesAsync` no longer comes
-  back as its raw bytes.** A plain client read returns such an array as a `byte[]`, whose length
-  (6600 for fifty 132-byte `ST_ErrorEntry`) never matched the element count, and the decoder then
-  returned those bytes as the elements. The symbolic read yields the elements, and an array value
-  that still does not line up with its element sub-symbols is decoded element by element instead
-  of passed through.
-
-- **`SubscribeAsync<T>` for a struct or array `T` delivers.** Typed subscriptions registered
-  through the untyped overload, which delivers a container as Beckhoff's `DynamicValue`; no
-  conversion to `T` could use it, so every notification was dropped with a Warning. They now
-  register through the decoding overload and bind the tree by member name, like a typed read.
-  Scalar typed subscriptions are unaffected: both overloads deliver scalars identically.
-
-- **PLC enums convert to .NET enums.** A PLC enum arrives as its backing integer and
-  `Convert.ChangeType` cannot produce an enum, so a typed enum read and every enum member of a
-  bound struct failed with `InvalidCastException`. An integral value now converts by number (as a
-  C# cast: an undeclared value is kept), a string by member name, case-insensitively; a value that
-  does not fit the backing type still throws.
 
 - **Every completed ADS call no longer leaves an armed one-hour timer behind — the leak that
   froze a 1 GB panel PC in about two hours.** Beckhoff's `AdsClientServer.RequestAsync` races
