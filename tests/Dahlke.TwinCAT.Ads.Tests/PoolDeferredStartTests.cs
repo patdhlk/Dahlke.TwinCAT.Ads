@@ -279,9 +279,19 @@ public class PoolDeferredStartTests
 
     private sealed class CapturingLoggerFactory : ILoggerFactory
     {
-        public List<(string Category, string Message)> Entries { get; } = new();
+        private readonly List<(string Category, string Message)> _entries = new();
 
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(categoryName, Entries);
+        /// <summary>
+        /// A snapshot, taken under the lock the loggers write under. The code under test logs from
+        /// other threads (an abandoned task's continuation, a background loop), so enumerating the
+        /// live list while a test polls it threw "Collection was modified" intermittently.
+        /// </summary>
+        public IReadOnlyList<(string Category, string Message)> Entries
+        {
+            get { lock (_entries) { return _entries.ToArray(); } }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(categoryName, _entries);
 
         public void AddProvider(ILoggerProvider provider) { }
         public void Dispose() { }
