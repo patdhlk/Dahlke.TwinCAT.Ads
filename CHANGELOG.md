@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.3] - 2026-10-16
+
+### Fixed
+
+- **A target that is not a PLC runtime connects again.** 0.11.2 required every target to be in
+  `Run` or `Stop` with a readable symbol version, which only a PLC runtime has: a target on the
+  system service (port 10000), the NC (500) or the I/O (300) never reported `Connected`. Seen on a
+  Roland 900 retrofit's device-metrics service, which reads the TwinCAT state from port 10000. The
+  symbol-version rule now applies to the PLC runtime ports 800–899 only; other targets are connected
+  while `ReadState` answers, as before 0.11.2.
+
+### Added
+
+- **`PlcTargetOptions.Readiness`** (`Auto`, `PlcProgram`, `DeviceState`) chooses that rule per
+  target, for a PLC runtime outside 800–899 or a device without symbols inside it. `Auto` is the
+  default.
+
 ## [0.11.2] - 2026-10-16
 
 ### Fixed

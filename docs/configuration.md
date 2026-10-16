@@ -65,6 +65,7 @@ Each key is a PLC identifier used with `GetConnection(plcId)`.
 |-----|------|---------|-------------|
 | `AmsNetId` | `string` | — | AMS Net ID of the PLC (required for `Real` targets): six dot-separated octets each in 0–255. Enforced **strictly** — `999.1.1.1.1.1` fails the host rather than being laundered to `0.1.1.1.1.1` |
 | `Port` | `int` | `851` | ADS port number |
+| `Readiness` | `TargetReadiness` | `Auto` | What the health check requires before the target counts as connected: `PlcProgram` (Run or Stop and a readable symbol version), `DeviceState` (`ReadState` answers; for the system service, NC, I/O, ...), or `Auto`: `PlcProgram` on ports 800–899, `DeviceState` elsewhere. See [Connection health](connections.md) |
 | `DisplayName` | `string` | `""` | Human-readable name for logging |
 | `TimeoutMs` | `int` | `5000` | Per-operation timeout in milliseconds. Must be greater than zero. Override it for individual calls with [`WithTimeout`](connections.md#per-call-timeouts--withtimeout) rather than raising it for the whole target |
 | `SymbolBrowseTimeoutMs` | `int` | `30000` | Timeout for `GetSymbolsAsync` / `GetSymbolTreeAsync` / `SearchSymbolsAsync`, which upload the PLC's symbol table and take far longer than a single read. Must be greater than zero. Also overridden by `WithTimeout` |

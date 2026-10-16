@@ -1,1 +1,7 @@
 #nullable enable
+Dahlke.TwinCAT.Ads.PlcTargetOptions.Readiness.get -> Dahlke.TwinCAT.Ads.TargetReadiness
+Dahlke.TwinCAT.Ads.PlcTargetOptions.Readiness.set -> void
+Dahlke.TwinCAT.Ads.TargetReadiness
+Dahlke.TwinCAT.Ads.TargetReadiness.Auto = 0 -> Dahlke.TwinCAT.Ads.TargetReadiness
+Dahlke.TwinCAT.Ads.TargetReadiness.DeviceState = 2 -> Dahlke.TwinCAT.Ads.TargetReadiness
+Dahlke.TwinCAT.Ads.TargetReadiness.PlcProgram = 1 -> Dahlke.TwinCAT.Ads.TargetReadiness

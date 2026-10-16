@@ -200,6 +200,13 @@ loaded) and its symbol version (index group `0xF008`) must be readable. During a
 runtime passes `Config`, `Init` and `Start`, and its port can answer before the program is loaded;
 the pool waits that out instead of publishing a connection on which every symbol is "not found".
 
+That rule is for PLC runtimes. A device without a symbol table — the system service (port 10000),
+the NC (500), the I/O (300) — would never pass it: the system service rejects the symbol-version
+read with 0x701, the NC and the I/O with 0x710, the same code a PLC gives before its program is
+loaded. The target's `Readiness` option says which rule applies. The default, `Auto`, uses the PLC
+rule on the PLC runtime ports 800–899 and otherwise counts any `ReadState` answer as connected; set
+`PlcProgram` or `DeviceState` explicitly for a target that does not fit that range.
+
 A **changed symbol version** — an activation, a download or an online change — ends the connection
 even when the link never dropped: its handles, notification sizes and cached symbols describe the
 old program. The pool reports `Disconnected`, reconnects, and re-registers every subscription

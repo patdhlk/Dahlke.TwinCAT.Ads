@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using TwinCAT.Ads;
 
 namespace Dahlke.TwinCAT.Ads.Tests;
@@ -38,6 +39,46 @@ public class PlcReadinessTests
 
         Assert.Equal(PlcReadiness.Verdict.SymbolTableChanged, readiness.Judge(AdsState.Run, 4));
         Assert.Equal(PlcReadiness.Verdict.SymbolTableChanged, readiness.Judge(AdsState.Run, 4));
+    }
+
+    [Theory]
+    [InlineData(851)]
+    [InlineData(852)]
+    [InlineData(801)]
+    [InlineData(800)]
+    [InlineData(899)]
+    public void Auto_applies_the_plc_rule_on_a_plc_runtime_port(int port)
+        => Assert.Equal(TargetReadiness.PlcProgram, PlcReadiness.Resolve(TargetReadiness.Auto, port));
+
+    [Theory]
+    [InlineData(10000)] // system service: 0xF008 answers 0x701
+    [InlineData(500)]   // NC: 0x710, like a PLC whose program is not loaded yet
+    [InlineData(300)]   // I/O
+    [InlineData(100)]   // logger
+    [InlineData(799)]
+    [InlineData(900)]
+    public void Auto_applies_the_device_rule_on_any_other_port(int port)
+        => Assert.Equal(TargetReadiness.DeviceState, PlcReadiness.Resolve(TargetReadiness.Auto, port));
+
+    [Theory]
+    [InlineData(TargetReadiness.PlcProgram, 10000)]
+    [InlineData(TargetReadiness.DeviceState, 851)]
+    public void A_configured_rule_wins_over_the_port(TargetReadiness configured, int port)
+        => Assert.Equal(configured, PlcReadiness.Resolve(configured, port));
+
+    [Fact]
+    public void A_target_defaults_to_auto()
+        => Assert.Equal(TargetReadiness.Auto, new PlcTargetOptions().Readiness);
+
+    [Fact]
+    public void The_rule_binds_from_configuration_by_name()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Readiness"] = "DeviceState" })
+            .Build();
+        var options = new PlcTargetOptions();
+        configuration.Bind(options);
+        Assert.Equal(TargetReadiness.DeviceState, options.Readiness);
     }
 
     [Fact]
