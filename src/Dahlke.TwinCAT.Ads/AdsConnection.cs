@@ -41,6 +41,9 @@ internal sealed class AdsConnection : IManagedConnection
     private readonly object _symbolLoaderLock = new();
     private volatile IDynamicSymbolLoader? _symbolLoader;
 
+    // Liveness: one per connection, it pins the symbol version this connection's handles belong to.
+    private readonly PlcReadiness _readiness = new();
+
     // Type metadata is fixed for a running PLC program, so one read serves the process.
     // Cleared with the symbol loader on disconnect so a download is picked up on reconnect
     // rather than serving a stale map forever.
@@ -875,8 +878,8 @@ internal sealed class AdsConnection : IManagedConnection
     }
 
     /// <summary>
-    /// Checks whether the connection is actually functional (not just IsConnected).
-    /// Returns <see langword="false"/> if ReadState fails.
+    /// Checks whether the connection is actually functional (not just IsConnected): ReadState answers, the PLC is in
+    /// Run or Stop, its symbol version is readable and still the one this connection first saw (<see cref="PlcReadiness"/>).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -913,7 +916,30 @@ internal sealed class AdsConnection : IManagedConnection
                 return false;
             }
 
-            return true;
+            var read = await _client.ReadAsync((uint)AdsReservedIndexGroup.SymbolVersion, 0, 1, cts.Token)
+                .ConfigureAwait(false);
+            byte? symbolVersion = read.Failed || read.Data.Length < 1 ? null : read.Data.Span[0];
+            var pinned = _readiness.PinnedSymbolVersion;
+            switch (_readiness.Judge(result.State.AdsState, symbolVersion))
+            {
+                case PlcReadiness.Verdict.Ready:
+                    return true;
+                case PlcReadiness.Verdict.SymbolTableChanged:
+                    _logger.LogInformation(
+                        "PLC {PlcId}: the symbol table changed (version {Old} -> {New}: activation, download or online change); reconnecting.",
+                        PlcId, pinned, symbolVersion);
+                    return false;
+                case PlcReadiness.Verdict.NotRunning:
+                    _logger.LogDebug(
+                        "PLC {PlcId} is in {AdsState}, not Run or Stop; treating the connection as not alive.",
+                        PlcId, result.State.AdsState);
+                    return false;
+                default:
+                    _logger.LogDebug(
+                        "PLC {PlcId}: the symbol version cannot be read ({ErrorCode}); no program loaded yet, treating the connection as not alive.",
+                        PlcId, read.ErrorCode);
+                    return false;
+            }
         }
         catch
         {

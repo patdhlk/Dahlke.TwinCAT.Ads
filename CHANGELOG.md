@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2026-10-16
+
+### Fixed
+
+- **A PLC that is activated, restarted or changed online is reconnected once it can serve symbols
+  again.** The liveness probe counted any `ReadState` answer as alive. During an activation the
+  runtime's port answers before the program is loaded, so the pool published `Connected` while
+  every symbol was "not found" (0x710): re-registered subscriptions failed and were only retried on
+  the next reconnect, which never came. Seen on a Roland 900 retrofit: after an activation the
+  HMI's pages stayed empty until it was restarted. The probe now also requires `Run` or `Stop` and a
+  readable symbol version (index group `0xF008`).
+- **A changed symbol version ends the connection.** An activation or online change that keeps the
+  link up went unnoticed, leaving handles and cached symbols of the old program in use. The health
+  check now compares the symbol version with the one the connection started with and reconnects
+  when it differs, so subscriptions are re-registered against the new symbol table.
+
 ## [0.11.1] - 2026-09-28
 
 ### Fixed

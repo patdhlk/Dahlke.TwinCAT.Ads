@@ -195,6 +195,17 @@ keeps it honest with a periodic health check. A locally "connected" socket whose
 unreachable (dead route, misconfigured `AmsNetId`, cable pulled) reports `Disconnected`, not a
 false green.
 
+The probe also asks whether the PLC can serve symbols: it must be in `Run` or `Stop` (a program is
+loaded) and its symbol version (index group `0xF008`) must be readable. During an activation the
+runtime passes `Config`, `Init` and `Start`, and its port can answer before the program is loaded;
+the pool waits that out instead of publishing a connection on which every symbol is "not found".
+
+A **changed symbol version** — an activation, a download or an online change — ends the connection
+even when the link never dropped: its handles, notification sizes and cached symbols describe the
+old program. The pool reports `Disconnected`, reconnects, and re-registers every subscription
+against the new symbol table. A consumer that resolves symbols itself re-resolves on the
+`Connected` that follows.
+
 For dashboards and status endpoints, the pool exposes a per-target snapshot:
 
 ```csharp
