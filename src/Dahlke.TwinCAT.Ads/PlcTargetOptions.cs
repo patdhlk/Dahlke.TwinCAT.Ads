@@ -27,6 +27,17 @@ public sealed class PlcTargetOptions
     public int Port { get; set; } = 851;
 
     /// <summary>
+    /// What the health check requires before the target counts as connected. Defaults to
+    /// <see cref="TargetReadiness.Auto"/>: the PLC rule on ports 800-899, a plain state answer elsewhere.
+    /// </summary>
+    /// <remarks>
+    /// Set <see cref="TargetReadiness.PlcProgram"/> for a PLC runtime on a port outside 800-899, or
+    /// <see cref="TargetReadiness.DeviceState"/> for a device without a symbol table inside that range.
+    /// Binds from configuration as the enum member name, e.g. <c>PlcTargets:system:Readiness = "DeviceState"</c>.
+    /// </remarks>
+    public TargetReadiness Readiness { get; set; } = TargetReadiness.Auto;
+
+    /// <summary>
     /// Human-readable name for logs and dashboards.
     /// </summary>
     public string DisplayName { get; set; } = string.Empty;

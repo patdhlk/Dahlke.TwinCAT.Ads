@@ -20,9 +20,17 @@ namespace Dahlke.TwinCAT.Ads;
 /// against the new table. The version is pinned by the first ready answer and never re-pinned; one instance
 /// belongs to one connection.
 /// </para>
+/// <para>
+/// All of this holds for a PLC runtime only. A target with <see cref="TargetReadiness.DeviceState"/> (the system
+/// service, the NC, the I/O, ...) has no symbol table and is ready whenever <c>ReadState</c> answers; see
+/// <see cref="Resolve"/>.
+/// </para>
 /// </remarks>
 internal sealed class PlcReadiness
 {
+    /// <summary>The ADS ports of the PLC runtimes, TwinCAT 2 (801, 811, ...) and TwinCAT 3 (851, 852, ...).</summary>
+    private const int FirstPlcPort = 800, LastPlcPort = 899;
+
     public enum Verdict
     {
         Ready,
@@ -34,6 +42,15 @@ internal sealed class PlcReadiness
     private byte? _pinned;
 
     public byte? PinnedSymbolVersion => _pinned;
+
+    /// <summary>The rule a target's health check applies: <see cref="TargetReadiness.Auto"/> decided by its port.</summary>
+    public static TargetReadiness Resolve(TargetReadiness configured, int port) => configured switch
+    {
+        TargetReadiness.Auto => port is >= FirstPlcPort and <= LastPlcPort
+            ? TargetReadiness.PlcProgram
+            : TargetReadiness.DeviceState,
+        _ => configured,
+    };
 
     /// <param name="state">The device's ADS state.</param>
     /// <param name="symbolVersion">The symbol version, or null when it could not be read.</param>

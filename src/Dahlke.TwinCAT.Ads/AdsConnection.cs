@@ -878,8 +878,9 @@ internal sealed class AdsConnection : IManagedConnection
     }
 
     /// <summary>
-    /// Checks whether the connection is actually functional (not just IsConnected): ReadState answers, the PLC is in
-    /// Run or Stop, its symbol version is readable and still the one this connection first saw (<see cref="PlcReadiness"/>).
+    /// Checks whether the connection is actually functional (not just IsConnected): ReadState answers, and for a PLC
+    /// runtime (<see cref="PlcTargetOptions.Readiness"/>) the PLC is in Run or Stop and its symbol version is readable
+    /// and still the one this connection first saw (<see cref="PlcReadiness"/>).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -915,6 +916,10 @@ internal sealed class AdsConnection : IManagedConnection
                     PlcId, result.ErrorCode);
                 return false;
             }
+
+            // A device without a symbol table (system service, NC, I/O): the state answer is the whole verdict.
+            if (PlcReadiness.Resolve(_options.Readiness, _options.Port) == TargetReadiness.DeviceState)
+                return true;
 
             var read = await _client.ReadAsync((uint)AdsReservedIndexGroup.SymbolVersion, 0, 1, cts.Token)
                 .ConfigureAwait(false);
